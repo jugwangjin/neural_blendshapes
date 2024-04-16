@@ -145,8 +145,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
     # Initialize the loss weights and losses
     loss_weights = {
         "mask": args.weight_mask,
-        "normal": args.weight_normal,
-        "laplacian": args.weight_laplacian,
+        "normal_regularization": args.weight_normal_regularization,
+        "laplacian_regularization": args.weight_laplacian_regularization,
         "shading": args.weight_shading,
         "perceptual_loss": args.weight_perceptual_loss,
         "albedo_regularization": args.weight_albedo_regularization,
@@ -253,8 +253,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
             # loss function 
             # ==============================================================================================
             ## ============== geometry regularization ==============================
-            losses['normal'] = normal_consistency_loss(mesh)
-            losses['laplacian'] = laplacian_loss(mesh)
+            losses['normal_regularization'] = normal_consistency_loss(mesh)
+            losses['laplacian_regularization'] = laplacian_loss(mesh)
 
             ## ============== color + regularization for color ==============================
             pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)

@@ -142,7 +142,7 @@ def compute_laplacian_uniform(mesh):
     # i.e. A[i, j] = 1 if (i,j) is an edge, or
     # A[e0, e1] = 1 &  A[e1, e0] = 1
     ones = torch.ones(idx.shape[1], dtype=torch.float32, device=mesh.device)
-    A = torch.sparse.FloatTensor(idx, ones, (V, V))
+    A = torch.sparse_coo_tensor(idx, ones, (V, V), dtype=ones.dtype, device=mesh.device)
 
     # the sum of i-th row of A gives the degree of the i-th vertex
     deg = torch.sparse.sum(A, dim=1).to_dense()
@@ -154,13 +154,13 @@ def compute_laplacian_uniform(mesh):
     deg1 = deg[e1]
     deg1 = torch.where(deg1 > 0.0, 1.0 / deg1, deg1)
     val = torch.cat([deg0, deg1])
-    L = torch.sparse.FloatTensor(idx, val, (V, V))
+    L = torch.sparse_coo_tensor(idx, val, (V, V), dtype=ones.dtype, device=mesh.device)
 
     # Then we add the diagonal values L[i, i] = -1.
     idx = torch.arange(V, device=mesh.device)
     idx = torch.stack([idx, idx], dim=0)
     ones = torch.ones(idx.shape[1], dtype=torch.float32, device=mesh.device)
-    L -= torch.sparse.FloatTensor(idx, ones, (V, V))
+    L -= torch.sparse_coo_tensor(idx, ones, (V, V), dtype=ones.dtype, device=mesh.device)
 
     return L
 

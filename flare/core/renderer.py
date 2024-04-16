@@ -14,7 +14,7 @@ class Renderer:
     """
 
     def __init__(self, device, near=1, far=1000, mesh=None):
-        self.glctx = dr.RasterizeGLContext()
+        self.glctx = dr.RasterizeCudaContext()
         self.device = device
         self.near = near
         self.far = far

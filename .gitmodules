@@ -1,0 +1,3 @@
+[submodule "face_normals"]
+	path = face_normals
+	url = https://github.com/boukhayma/face_normals

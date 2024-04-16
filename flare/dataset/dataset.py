@@ -38,7 +38,10 @@ class Dataset(torch.utils.data.Dataset):
             'skin_mask' : torch.cat(list([item['skin_mask'] for item in batch]), dim=0).to(device),
             'flame_pose' : torch.cat(list([item['flame_pose'] for item in batch]), dim=0).to(device),
             'flame_expression' : torch.cat(list([item['flame_expression'] for item in batch]), dim=0).to(device),
+            'facs' : torch.cat(list([item['facs'] for item in batch]), dim=0).to(device),
             'camera': list([item['camera'] for item in batch]),
             'frame_name': list([item['frame_name'] for item in batch]),
             'idx': torch.LongTensor(list([item['idx'] for item in batch])).to(device),
+            'landmark' : torch.cat(list([item['landmark'] for item in batch]), dim=0).to(device),
+            'normal' : torch.cat(list([item['normal'] for item in batch]), dim=0).to(device),
         }

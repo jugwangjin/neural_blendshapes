@@ -42,3 +42,4 @@ def normal_cosine_loss(views, gbuffers):
         gt_normals = view.normals * view.skin_mask
         loss += 1 - torch.cosine_similarity(deformed_normals.view(-1, 3), gt_normals.view(-1, 3), dim=1)
     return (loss**2).mean()
+
