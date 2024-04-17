@@ -38,14 +38,14 @@ def config_parser():
     parser.add_argument('--decay_flame', type=int, nargs='+', default=[100], help="Iterations at which to perform mesh upsampling")
     parser.add_argument('--flame_mask', action='store_true', default=False, help="Flame mask")
     # lr
-    parser.add_argument('--lr_vertices', type=float, default=1e-3, help="Step size/learning rate for the vertex positions")
     parser.add_argument('--lr_shader', type=float, default=1e-3, help="Step size/learning rate for the shader parameters")
-    parser.add_argument('--lr_deformer', type=float, default=1e-3, help="Step size/learning rate for the deformation parameters")
+    parser.add_argument('--lr_encoder', type=float, default=1e-4, help="Step size/learning rate for the vertex positions")
+    parser.add_argument('--lr_deformer', type=float, default=1e-4, help="Step size/learning rate for the deformation parameters")
 
     # loss weights
     parser.add_argument('--weight_mask', type=float, default=2.0, help="Weight of the mask term")
-    parser.add_argument('--weight_normal', type=float, default=0.1, help="Weight of the normal term")
-    parser.add_argument('--weight_laplacian', type=float, default=60.0, help="Weight of the laplacian term")
+    parser.add_argument('--weight_normal_regularization', type=float, default=0.1, help="Weight of the normal term")
+    parser.add_argument('--weight_laplacian_regularization', type=float, default=60.0, help="Weight of the laplacian term")
     parser.add_argument('--weight_shading', type=float, default=1.0, help="Weight of the shading term")
     parser.add_argument('--weight_perceptual_loss', type=float, default=0.1, help="Weight of the perceptual loss")
     parser.add_argument('--weight_albedo_regularization', type=float, default=0.01, help="Weight of the albedo regularization")
@@ -53,24 +53,37 @@ def config_parser():
     parser.add_argument('--weight_white_lgt_regularization', type=float, default=1.0, help="Weight of the white light")
     parser.add_argument('--weight_roughness_regularization', type=float, default=0.1, help="Weight of the roughness regularization")
     parser.add_argument('--weight_fresnel_coeff', type=float, default=0.01, help="Weight of the specular intensity regularization")
+    parser.add_argument('--weight_normal', type=float, default=1, help="Weight of the normal term")
+    parser.add_argument('--weight_normal_laplacian', type=float, default=1, help="Weight of the laplacian term")
+    parser.add_argument('--weight_landmark', type=float, default=1, help="Weight of the landmark term")
+    parser.add_argument('--weight_closure', type=float, default=1, help="Weight of the closure term")
+    parser.add_argument('--weight_ict', type=float, default=1, help="Weight of the ict term")
+    parser.add_argument('--weight_ict_identity', type=float, default=1e-3, help="Weight of the flame term")
+    parser.add_argument('--weight_feature_regularization', type=float, default=1e-3, help="Weight of the flame term")
     parser.add_argument('--r_mean', type=float, default=0.500, help="mean roughness")
 
 
     # neural shader
-    parser.add_argument('--fourier_features', type=str, default='positional', choices=(['positional', 'hashgrid']), help="Input encoding used in the neural shader")
+    parser.add_argument('--fourier_features', type=str, default='hashgrid', choices=(['positional', 'hashgrid']), help="Input encoding used in the neural shader")
     parser.add_argument('--activation', type=str, default='relu', choices=(['relu', 'sine']), help="Activation function used in the neural shader")
     parser.add_argument('--bsdf', type=str, default='pbr_shading', choices=(['pbr', 'pbr_shading']), help="bsdf")
     parser.add_argument('--deform_d_out', type=int, default=128, help="output layer size")
     parser.add_argument('--light_mlp_ch', type=int, default=3, help="channels for light MLP")
     parser.add_argument('--light_mlp_dims', type=int, nargs='+', default=[64, 64], help="Views to use for visualization. By default, a random view is selected each time")
-    parser.add_argument('--material_mlp_dims', type=int, nargs='+', default=[128, 128, 128, 128], help="Views to use for visualization. By default, a random view is selected each time")
+    parser.add_argument('--material_mlp_dims', type=int, nargs='+', default=[64, 64], help="Views to use for visualization. By default, a random view is selected each time")
     parser.add_argument('--material_mlp_ch', type=int, default=4, help="channels for material MLP")   
 
-    parser.add_argument('--ghostbone', action='store_true', help="mlp for vertex displacements")
-    parser.add_argument('--no-ghostbone', dest='ghostbone', action='store_false')
-    parser.set_defaults(ghostbone=True)
     parser.add_argument('--train_deformer', action='store_true', help="mlp for vertex displacements")
     parser.add_argument('--no-train_deformer', dest='train_deformer', action='store_false')
     parser.set_defaults(train_deformer=True)
-    parser.add_argument('--deform_dims', type=int, nargs='+', default=[128, 128, 128, 128], help="deformer dimensions")
+
+    # deformer
+    parser.add_argument('--feature_dim', type=int, default=64, help="feature dim")
+    parser.add_argument('--head_deformer_layers', type=int, default=6, help="head deformer layers")
+    parser.add_argument('--head_deformer_hidden_dim', type=int, default=128, help="head deformer hidden dim")
+    parser.add_argument('--head_deformer_multires', type=int, default=6, help="head deformer multires")
+    parser.add_argument('--eye_deformer_layers', type=int, default=2, help="eye deformer layers")
+    parser.add_argument('--eye_deformer_hidden_dim', type=int, default=64, help="eye deformer hidden dim")
+    parser.add_argument('--eye_deformer_multires', type=int, default=2, help="eye deformer multires")
+
     return parser

@@ -28,49 +28,54 @@ from flare.core import (
 )
 from flare.losses import *
 from flare.modules import (
-    NeuralShader, get_deformer_network, Displacement
+    NeuralShader, get_mlp_deformer, ResnetEncoder
 )
 from flare.utils import (
     AABB, read_mesh, write_mesh,
     visualize_training,
-    make_dirs, set_defaults_finetune
+    make_dirs, set_defaults_finetune, copy_sources
 )
 import nvdiffrec.render.light as light
 from test import run, quantitative_eval
 
 import time
 
-def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer):
+from flare.utils.ict_model import ICTFaceKitTorch
+import open3d as o3d
+
+def load_ict_facekit(args, device):
+    ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
+    ict_facekit = ict_facekit.to(device)
+    ict_facekit.train()
+
+    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, device=device)
+    print(ict_canonical_mesh.vmapping.shape if ict_canonical_mesh.vmapping is not None else None)
+    ict_canonical_mesh.compute_connectivity()
+    print(ict_canonical_mesh.vmapping.shape)
+    ict_facekit.update_vmapping(ict_canonical_mesh.vmapping.cpu().data.numpy())
+
+    return ict_facekit, ict_canonical_mesh
+
+def main(args, device, dataset_train, dataloader_train, debug_views):
     ## ============== Dir ==============================
     run_name = args.run_name if args.run_name is not None else args.input_dir.parent.name
     images_save_path, images_eval_save_path, meshes_save_path, shaders_save_path, experiment_dir = make_dirs(args, run_name, args.finetune_color)
+    copy_sources(args, run_name)
 
-    ## ============== load mesh/train mesh ==============================
-    if args.finetune_color:
-        mesh_path = experiment_dir / "stage_1" / "meshes" / f"mesh_latest.obj"
-        print("loading mesh from:", mesh_path)
-        flame_canonical_mesh = read_mesh(mesh_path, device=device)
-        flame_canonical_mesh.compute_connectivity()
-        flame_canonical_mesh.to(device)
-    else:
-        if args.downsample:
-            v_down, f_down = remesh_botsch(FLAMEServer.canonical_verts.squeeze(0).cpu().detach().numpy().astype(np.float64), 
-                                                                    FLAMEServer.faces_tensor.cpu().numpy().astype(np.int32), h=float(args.downsample_ratio))
-            verts = np.ascontiguousarray(v_down)
-            faces = np.ascontiguousarray(f_down)
-            print("Downsampled:", verts.shape, faces.shape)
-        else:
-            verts = FLAMEServer.canonical_verts.squeeze(0)
-            faces = FLAMEServer.faces_tensor
+    ## ============== load ict facekit ==============================
+    ict_facekit, ict_canonical_mesh = load_ict_facekit(args, device)    
+    write_mesh(Path(meshes_save_path / "init_ict_canonical.obj"), ict_canonical_mesh.to('cpu'))
 
-        flame_canonical_mesh: Mesh = None
-        flame_canonical_mesh = Mesh(verts, faces, device=device)
-        flame_canonical_mesh.compute_connectivity()
-        write_mesh(Path(meshes_save_path / "init_mesh.obj"), flame_canonical_mesh.to('cpu'))
+    # ict_identity_path = Path(experiment_dir / "stage_1" / "network_weights" / f"ict_identity_latest.pt")
+    # assert os.path.exists(ict_identity_path)
+    # ict_identity = torch.load(str(ict_identity_path))
+    # ict_facekit.identity.data = ict_identity
+
+
 
     ## ============== renderer ==============================
-    aabb = AABB(flame_canonical_mesh.vertices.cpu().numpy())
-    flame_mesh_aabb = [torch.min(flame_canonical_mesh.vertices, dim=0).values, torch.max(flame_canonical_mesh.vertices, dim=0).values]
+    aabb = AABB(ict_canonical_mesh.vertices.cpu().numpy())
+    ict_mesh_aabb = [torch.min(ict_canonical_mesh.vertices, dim=0).values, torch.max(ict_canonical_mesh.vertices, dim=0).values]
 
     renderer = Renderer(device=device)
     renderer.set_near_far(dataset_train, torch.from_numpy(aabb.corners).to(device), epsilon=0.5)
@@ -80,35 +85,48 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
     renderer_visualization = Renderer(device=device)
     renderer_visualization.set_near_far(dataset_train, torch.from_numpy(aabb.corners).to(device), epsilon=0.5)
 
-    # ==============================================================================================
-    # vertices
-    # ==============================================================================================
+    feature_dim = args.feature_dim
+    head_deformer_layers = args.head_deformer_layers
+    head_deformer_hidden_dim = args.head_deformer_hidden_dim
+    head_deformer_multires = args.head_deformer_multires
+    eye_deformer_layers = args.eye_deformer_layers
+    eye_deformer_hidden_dim = args.eye_deformer_hidden_dim
+    eye_deformer_multires = args.eye_deformer_multires
 
-    lr_vertices = args.lr_vertices
-    displacements = Displacement(vertices_shape=flame_canonical_mesh.vertices.shape)
-    
-    displacements.to(device=device)
-    optimizer_vertices = torch.optim.Adam(list(displacements.parameters()), lr=lr_vertices)
+    # ==============================================================================================
+    # encoder
+    # ==============================================================================================
+    encoder = ResnetEncoder(outsize=feature_dim)
+    encoder.to(device)
+
+    # model_path = Path(experiment_dir / "stage_1" / "network_weights" / f"encoder_latest.pt")
+    # assert os.path.exists(model_path)
+    # encoder.load_state_dict(torch.load(str(model_path)))
 
     # ==============================================================================================
     # deformation 
     # ==============================================================================================
-    if args.train_deformer:
-        model_path = None
-        print("=="*50)
-        print("Training Deformer")
-    else:
-        print("=="*50)
-        print("Loading deformer network trained in the previous stage")
-        args.weight_flame_regularization = 0.0
 
-        model_path = Path(experiment_dir / "stage_1" / "network_weights" / f"deformer_latest.pt")
-        assert os.path.exists(model_path)
+    model_path = None
+    print("=="*50)
+    print("Training Deformer")
 
-    deformer_net = get_deformer_network(FLAMEServer, model_path=model_path, train=args.train_deformer, d_in=3, dims=args.deform_dims, 
-                                           weight_norm=True, multires=0, num_exp=50, aabb=flame_mesh_aabb, ghostbone=args.ghostbone, device=device)
-    if args.train_deformer:
-        optimizer_deformer = torch.optim.Adam(list(deformer_net.parameters()), lr=args.lr_deformer)
+    deformer_net = get_mlp_deformer(input_feature_dim=feature_dim, head_deformer_layers=head_deformer_layers, 
+                                        head_deformer_hidden_dim=head_deformer_hidden_dim, head_deformer_multires=head_deformer_multires,
+                                                eye_deformer_layers=eye_deformer_layers, eye_deformer_hidden_dim=eye_deformer_hidden_dim,
+                                                  eye_deformer_multires=eye_deformer_multires, 
+                                                  model_path=model_path, train=args.train_deformer, device=device) 
+
+    # set deformer_net template to make efficient
+    head_template = ict_canonical_mesh.vertices[ict_facekit.head_indices].to(device)
+    eye_template = ict_canonical_mesh.vertices[ict_facekit.eyeball_indices].to(device)
+    print(ict_canonical_mesh.vertices.shape, head_template.shape, eye_template.shape, ict_facekit.canonical.shape)
+
+    deformer_net.set_template((head_template, eye_template))
+
+    optimizer_deformer = torch.optim.Adam(list(deformer_net.parameters()), lr=args.lr_deformer)
+    optimizer_encoder = torch.optim.Adam(list(encoder.parameters()), lr=args.lr_encoder)
+    optimizer_ict_identity = torch.optim.Adam([ict_facekit.identity], lr=args.lr_deformer * 1e-1)
 
     # ==============================================================================================
     # shading
@@ -128,7 +146,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
                           last_activation=torch.nn.Sigmoid(), 
                           disentangle_network_params=disentangle_network_params,
                           bsdf=args.bsdf,
-                          aabb=flame_mesh_aabb,
+                          aabb=ict_mesh_aabb,
                           device=device)
     params = list(shader.parameters()) 
 
@@ -152,13 +170,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
         "albedo_regularization": args.weight_albedo_regularization,
         "roughness_regularization": args.weight_roughness_regularization,
         "white_light_regularization": args.weight_white_lgt_regularization,
-        "fresnel_coeff": args.weight_fresnel_coeff
+        "fresnel_coeff": args.weight_fresnel_coeff,
+        "normal": args.weight_normal,
+        "normal_laplacian": args.weight_normal_laplacian,
+        "landmark": args.weight_landmark,
+        "closure": args.weight_closure,
+        "ict": args.weight_ict,
+        "ict_identity": args.weight_ict_identity,
+        "feature_regularization": args.weight_feature_regularization,
     }
-
-    if args.train_deformer:
-        loss_weights["flame_regularization"] = 1.0 # we use the weight directly in loss function
-    else:
-        loss_weights["flame_regularization"] = 0.0
 
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
     print(loss_weights)
@@ -167,9 +187,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
 
     print("=="*50)
     shader.train()
-    if args.train_deformer:
-        deformer_net.train()
-    displacements.train()
+    
+    deformer_net.train()
+    encoder.train()
+    ict_facekit.train()
     print("Batch Size:", args.batch_size)
     print("=="*50)
 
@@ -185,61 +206,37 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
         for iter_, views_subset in enumerate(dataloader_train):
             iteration += 1
             progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}')
-            
-            # ==============================================================================================
-            # upsample + remesh + reduce lr + freeze if required
-            # ==============================================================================================
-            if iteration in args.upsample_iterations and not args.finetune_color:
-                print("=="*50)
-                print("Upsampling at iteration:", iteration)
-                # Upsample the mesh by remeshing the surface with half the average edge length
-                e0, e1 = mesh.edges.unbind(1)
-
-                average_edge_length = torch.linalg.norm(canonical_offset_vertices[e0] - canonical_offset_vertices[e1], dim=-1).mean()
-                v_upsampled, f_upsampled = remesh_botsch(canonical_offset_vertices.cpu().detach().numpy().astype(np.float64), 
-                                                        mesh.indices.cpu().numpy().astype(np.int32), h=float(average_edge_length/1.5))
-                v_upsampled = np.ascontiguousarray(v_upsampled)
-                f_upsampled = np.ascontiguousarray(f_upsampled)
-                flame_canonical_mesh = Mesh(v_upsampled, f_upsampled, device=device)
-                flame_canonical_mesh.compute_connectivity()
-
-                print("Vertices:", v_upsampled.shape)
-                print("Faces:", f_upsampled.shape)
-                del v_upsampled, f_upsampled
-                if iteration == args.upsample_iterations[0]:
-                    lr_vertices *= 0.75
-                    # Adjust weights and step size
-                    loss_weights['laplacian'] *= 4
-                    loss_weights['normal'] *= 4
-                print("laplacian weight", loss_weights['laplacian'])
-                print("normal consistency weight", loss_weights['normal'])
-                print("lr vertices", lr_vertices)
-
-                displacements.register_parameter('vertex_offsets', torch.nn.Parameter(torch.zeros(flame_canonical_mesh.vertices.shape), requires_grad=True))
-                displacements.canonical_vertices = flame_canonical_mesh.vertices
-                displacements.vertices_shape = flame_canonical_mesh.vertices.shape
-                displacements.to(device=device)
-                optimizer_vertices = torch.optim.Adam(list(displacements.parameters()), lr=lr_vertices)
-                print("=="*50)
 
             # ==============================================================================================
             # update/displace vertices
             # ==============================================================================================
-            v_off = displacements()
-            canonical_offset_vertices = flame_canonical_mesh.vertices + v_off
-            mesh = flame_canonical_mesh.with_vertices(canonical_offset_vertices)
+            mesh = ict_canonical_mesh.with_vertices(ict_canonical_mesh.vertices)
+
+            # ==============================================================================================
+            # encode input images
+            # ==============================================================================================
+            # first, permute the input images to be in the correct format
+            encoder_input = views_subset["img"].permute(0, 3, 1, 2).to(device)
+            features = encoder(encoder_input.to(device))
+            
+
+            # ict = ict_facekit(expression_weights = features[:, :53], to_canonical = True)
+            # print(ict.shape, mesh.vertices.shape, ...)
+            # aligned_ict = align_to_canonical(ict, mesh.vertices[None].repeat(ict.shape[0], 1, 1), ict_facekit.landmark_indices)
+            
+            # save aligned_ict
+            # write_mesh("debug/ALIGN_TEST.obj", ict_canonical_mesh.with_vertices(aligned_ict[0]).detach().to('cpu'))
+            # exit()
 
             # ==============================================================================================
             # deformation of canonical mesh
-            # ==============================================================================================      
-            shapedirs, posedirs, lbs_weights = deformer_net.query_weights(mesh.vertices)
+            # ==============================================================================================
+            deformed = deformer_net(features, vertices=None)
             
-            batched_verts = mesh.vertices.unsqueeze(0).repeat(args.batch_size, 1, 1)
-            _, pose_features, transformations = FLAMEServer(expression_params=views_subset["flame_expression"], full_pose=views_subset["flame_pose"])
-            if args.ghostbone:
-                transformations = torch.cat([torch.eye(4).unsqueeze(0).unsqueeze(0).expand(args.batch_size, -1, -1, -1).float().to(device), transformations], 1)
-            deformed_vertices = FLAMEServer.forward_pts_batch(pnts_c=batched_verts, betas=views_subset["flame_expression"], transformations=transformations, pose_feature=pose_features, 
-                                                shapedirs=shapedirs, posedirs=posedirs, lbs_weights=lbs_weights, dtype=torch.float32, map2_flame_original=True)
+            deformed_vertices = mesh.vertices[None].repeat(args.batch_size, 1, 1)
+            deformed_vertices[:, ict_facekit.head_indices] = deformed["deformed_head"]
+            deformed_vertices[:, ict_facekit.eyeball_indices] = deformed["deformed_eyes"]
+
             d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
 
             # ==============================================================================================
@@ -252,9 +249,16 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
             # ==============================================================================================
             # loss function 
             # ==============================================================================================
-            ## ============== geometry regularization ==============================
-            losses['normal_regularization'] = normal_consistency_loss(mesh)
-            losses['laplacian_regularization'] = laplacian_loss(mesh)
+            ## ======= regularization autoencoder========
+            losses['normal_regularization'] = 0
+            losses['laplacian_regularization'] = 0
+            num_meshes = deformed_vertices.shape[0]
+            for nth_mesh in range(num_meshes):
+                mesh_ = ict_canonical_mesh.with_vertices(deformed_vertices[nth_mesh])
+                losses['normal_regularization'] += normal_consistency_loss(mesh_)
+                losses['laplacian_regularization'] += laplacian_loss(mesh_)
+            losses['normal_regularization'] /= num_meshes
+            losses['laplacian_regularization'] /= num_meshes
 
             ## ============== color + regularization for color ==============================
             pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
@@ -265,22 +269,34 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
 
             ## ======= regularization color ========
-            losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, displacements, iteration)
+            losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration)
             losses['white_light_regularization'] = white_light(cbuffers)
             losses['roughness_regularization'] = roughness_regularization(cbuffers["roughness"], views_subset["skin_mask"], views_subset["mask"], r_mean=args.r_mean)
             losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
             
-            ## ============== flame regularization ==============================
-            if loss_weights['flame_regularization'] > 0:
-                losses['flame_regularization'], gt_nn = flame_regularization(FLAMEServer, lbs_weights, shapedirs, posedirs, mesh.vertices, args.ghostbone, 
-                                                                      iteration, args.flame_mask, views_subset=views_subset, gbuffer=gbuffers, 
-                                                                      weight_lbs=args.weight_flame_regularization)
-            
-                if iteration in args.decay_flame:
-                    print("Decaying flame regularization")
-                    loss_weights['flame_regularization'] *= 0.5
+            # landmark losses
+            losses['landmark'] = landmark_loss(ict_facekit, gbuffers, views_subset, device)
+            losses['closure'] = closure_loss(ict_facekit, gbuffers, views_subset, device)
+
+            # normal loss
+            losses['normal'], losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, device)
+
+            # ict loss
+            losses['ict'] = ict_loss(ict_facekit, deformed_vertices, features, deformer_net)
+            losses['ict_identity'] = ict_identity_regularization(ict_facekit)
+
+            # feature regularization
+            losses['feature_regularization'] = feature_regularization_loss(features)
+
 
             loss = torch.tensor(0., device=device) 
+            if iteration % 100 == 0:
+                losses_to_print = ['ict', 'ict_identity', 'feature_regularization', 'normal', 'normal_laplacian']
+                print("=="*50)
+                for k, v in losses.items():
+                    if k in losses_to_print:
+                        print(f"{k}: {v.item()}")
+                print("=="*50)
             for k, v in losses.items():
                 loss += v * loss_weights[k]
 
@@ -288,9 +304,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
             # Optimizer step
             # ==============================================================================================
             optimizer_shader.zero_grad()
-            optimizer_vertices.zero_grad()
-            if args.train_deformer:
-                optimizer_deformer.zero_grad()
+        
+            optimizer_deformer.zero_grad()
+            optimizer_encoder.zero_grad()
+            optimizer_ict_identity.zero_grad()
 
             loss.backward()
             torch.cuda.synchronize()
@@ -300,9 +317,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
                 shader.fourier_feature_transform.params.grad /= 8.0
 
             optimizer_shader.step()
-            optimizer_vertices.step()
-            if args.train_deformer:
-                optimizer_deformer.step()
+        
+            optimizer_deformer.step()
+            optimizer_encoder.step()
+            optimizer_ict_identity.step()
 
             progress_bar.set_postfix({'loss': loss.detach().cpu().item()})
 
@@ -331,7 +349,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
             if (args.visualization_frequency > 0) and (iteration == 1 or iteration % args.visualization_frequency == 0):
             
                 with torch.no_grad():
-                    debug_rgb_pred, debug_gbuffer, debug_cbuffers = run(args, mesh, debug_views, FLAMEServer, deformer_net, shader, renderer, device, channels_gbuffer, lgt)
+                    debug_rgb_pred, debug_gbuffer, debug_cbuffers = run(args, mesh, debug_views, ict_facekit, deformer_net, encoder, shader, renderer, device, channels_gbuffer, lgt)
                     ## ============== visualize ==============================
                     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
                     del debug_gbuffer, debug_cbuffers
@@ -341,8 +359,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
                 with torch.no_grad():
                     write_mesh(meshes_save_path / f"mesh_{iteration:06d}.obj", mesh.detach().to('cpu'))                                
                     shader.save(shaders_save_path / f'shader_{iteration:06d}.pt')
-                    displacements.save(shaders_save_path / f'displacement_{iteration:06d}.pt')
                     deformer_net.save(shaders_save_path / f'deformer_{iteration:06d}.pt')
+                    encoder.save(shaders_save_path / f'encoder_{iteration:06d}.pt')
+                    torch.save(ict_facekit.identity, shaders_save_path / f'ict_identity_{iteration:06d}.pt')
 
     end = time.time()
     total_time = ((end - start) % 3600)
@@ -354,24 +373,25 @@ def main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer
         print(f"{args}", file=text_file)
     write_mesh(meshes_save_path / f"mesh_latest.obj", mesh.detach().to('cpu'))
     shader.save(shaders_save_path / f'shader_latest.pt')
-    displacements.save(shaders_save_path / f'displacement_latest.pt')
     deformer_net.save(shaders_save_path / f'deformer_latest.pt')
+    encoder.save(shaders_save_path / f'encoder_latest.pt')
+    torch.save(ict_facekit.identity, shaders_save_path / f'ict_identity_latest.pt')
 
     # ==============================================================================================
     # FINAL: qualitative and quantitative results
     # ==============================================================================================
-    if args.finetune_color:        
-        ## ============== free memory before evaluation ==============================
-        del dataset_train, dataloader_train, debug_views, views_subset
 
-        print("=="*50)
-        print("E V A L U A T I O N")
-        print("=="*50)
-        dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=1, pre_load=True)
-        dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=4, collate_fn=dataset_val.collate)
+    ## ============== free memory before evaluation ==============================
+    del dataset_train, dataloader_train, debug_views, views_subset
 
-        quantitative_eval(args, mesh, dataloader_validate, FLAMEServer, deformer_net, shader, renderer, device, channels_gbuffer, experiment_dir
-                        , images_eval_save_path / "qualitative_results", lgt=lgt, save_each=True)
+    print("=="*50)
+    print("E V A L U A T I O N")
+    print("=="*50)
+    dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=1, pre_load=False)
+    dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=4, collate_fn=dataset_val.collate)
+
+    quantitative_eval(args, mesh, dataloader_validate, ict_facekit, deformer_net, encoder, shader, renderer, device, channels_gbuffer, experiment_dir
+                    , images_eval_save_path / "qualitative_results", lgt=lgt, save_each=True)
 
 if __name__ == '__main__':
     parser = config_parser()
@@ -387,8 +407,8 @@ if __name__ == '__main__':
     # load data
     # ==============================================================================================
     print("loading train views...")
-    dataset_train    = DatasetLoader(args, train_dir=args.train_dir, sample_ratio=args.sample_idx_ratio, pre_load=True)
-    dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=24, pre_load=True)
+    dataset_train    = DatasetLoader(args, train_dir=args.train_dir, sample_ratio=args.sample_idx_ratio, pre_load=False)
+    dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=24, pre_load=False)
     dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, collate_fn=dataset_train.collate, shuffle=True, drop_last=True)
     view_indices = np.array(args.visualization_views).astype(int)
     d_l = [dataset_val.__getitem__(idx) for idx in view_indices[2:]]
@@ -397,43 +417,34 @@ if __name__ == '__main__':
     debug_views = dataset_val.collate(d_l)
 
     del dataset_val
-    # ==============================================================================================
-    # Create trainables: FLAME + Renderer  + Downsample
-    # ==============================================================================================
-    ### ============== load FLAME mesh ==============================
-    flame_path = args.working_dir / 'flame/FLAME2020/generic_model.pkl'
-    flame_shape = dataset_train.shape_params
-    FLAMEServer = FLAME(flame_path, n_shape=100, n_exp=50, shape_params=flame_shape).to(device)
-
-    ## ============== canonical with mouth open (jaw pose 0.4) ==============================
-    FLAMEServer.canonical_exp = (dataset_train.get_mean_expression()).to(device)
-    FLAMEServer.canonical_pose = FLAMEServer.canonical_pose.to(device)
-    FLAMEServer.canonical_verts, FLAMEServer.canonical_pose_feature, FLAMEServer.canonical_transformations = \
-        FLAMEServer(expression_params=FLAMEServer.canonical_exp, full_pose=FLAMEServer.canonical_pose)
-    if args.ghostbone:
-        FLAMEServer.canonical_transformations = torch.cat([torch.eye(4).unsqueeze(0).unsqueeze(0).float().to(device), FLAMEServer.canonical_transformations], 1)
-    FLAMEServer.canonical_verts = FLAMEServer.canonical_verts.to(device)
     
     # ==============================================================================================
     # main run
     # ==============================================================================================
+    import time
     while True:
         try:
-            main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer)
+            main(args, device, dataset_train, dataloader_train, debug_views)
             break  # Exit the loop if main() runs successfully
-        except:
+        except Exception as e:
+            print(e)
+            #time.sleep(10)
             print("--"*50)
             print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
             print("--"*50)
+            raise e
 
     ### ============== defaults: fine tune color ==============================
-    set_defaults_finetune(args)
+    # set_defaults_finetune(args)
 
-    while True:
-        try:
-            main(args, device, dataset_train, dataloader_train, debug_views, FLAMEServer)
-            break  # Exit the loop if main() runs successfully
-        except:
-            print("--"*50)
-            print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
-            print("--"*50)
+    # while True:
+    #     try:
+    #         main(args, device, dataset_train, dataloader_train, debug_views)
+    #         break  # Exit the loop if main() runs successfully
+    #     except Exception as e:
+    #         print(e)
+    #         #time.sleep(10)
+    #         print("--"*50)
+    #         print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
+    #         print("--"*50)
+    #         raise e

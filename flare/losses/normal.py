@@ -15,7 +15,8 @@ def normal_loss(gbuffers, views_subset, device):
         R = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], device=device, dtype=torch.float32)
 
     estimated_normal = gbuffers["normal"] # shape of B, H, W, 3
-    estimated_normal = 0.5 * (torch.einsum('bhwc, cj->bhwj', R.T, torch.einsum('bhwc, bcj->bhwj', estimated_normal, camera)) + 1)
+    
+    estimated_normal = 0.5 * torch.einsum('bhwc, cj->bhwj', torch.einsum('bhwc, bcj->bhwj', estimated_normal, camera) + 1, R.T)
     estimated_normal = estimated_normal.permute(0, 3, 1, 2) # shape of B, 3, H, W
     estimated_normal_laplacian = torch.nn.functional.conv2d(estimated_normal, laplacian_kernel, padding=1)
 

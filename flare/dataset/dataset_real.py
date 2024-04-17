@@ -38,6 +38,8 @@ class DatasetLoader(Dataset):
         self.pre_load = pre_load
         self.subject = self.base_dir.stem
 
+        self.fixed_cam = torch.load('./assets/fixed_cam.pt')
+        
         self.json_dict = {"frames": []}
         for dir in self.train_dir: 
             json_file = self.base_dir / dir / "merged_params.json"
@@ -179,14 +181,8 @@ class DatasetLoader(Dataset):
         flame_pose = torch.tensor(json_dict["pose"], dtype=torch.float32)
         flame_expression = torch.tensor(json_dict["expression"], dtype=torch.float32)
         facs = torch.tensor(json_dict["facs"], dtype=torch.float32)
-        
-        # camera to world matrix
-        world_mat = torch.tensor(_load_K_Rt_from_P(None, np.array(json_dict['world_mat']).astype(np.float32))[1], dtype=torch.float32)
-        # camera matrix to openGL format 
-        R = world_mat[:3, :3]
-        R *= -1 
-        t = world_mat[:3, 3]
-        camera = Camera(self.K, R, t, device=device)
+
+        camera = Camera(self.K, self.fixed_cam['R'], self.fixed_cam['t'], device=device)
 
         frame_name = img_path.stem
 
@@ -298,24 +294,12 @@ class DatasetLoader(Dataset):
         flame_expression = torch.tensor(json_dict["expression"], dtype=torch.float32)
         facs = torch.tensor(json_dict["facs"], dtype=torch.float32)
         
-        # camera to world matrix
-        world_mat = torch.tensor(_load_K_Rt_from_P(None, np.array(json_dict['world_mat']).astype(np.float32))[1], dtype=torch.float32)
-        # camera matrix to openGL format 
-        R = world_mat[:3, :3]
-        R *= -1 
-        t = world_mat[:3, 3]
-        camera = Camera(self.K, R, t, device=device)
+        camera = Camera(self.K, self.fixed_cam['R'], self.fixed_cam['t'], device=device)
 
         frame_name = img_path.stem
 
-
         landmarks, scores, _ = self.face_alignment.get_landmarks_from_image(str(img_path), return_bboxes=True, return_landmark_score=True)
-        # print(len(landmarks))
-        # print(landmarks[0].shape)
-        # print(landmarks[0])
-        # print(landmarks[0] / img.size(1))
-        # exit()
-        
+
         if len(landmarks) == 0:
             landmark = torch.zeros(68, 2)
         else:

@@ -1,14 +1,10 @@
 import torch
 import numpy as np
 
-import pickle
-
 
 class ICTFaceKitTorch(torch.nn.Module):
-    @torch.no_grad()
-    def __init__(self, npy_dir = './assets/ict_facekit_torch.npy', canonical = None, mediapipe_name_to_ict = './assets/mediapipe_name_to_indices.pkl'):
+    def __init__(self, npy_dir = './assets/ict_facekit_torch.npy', canonical = None,):
         super().__init__()
-        self.load_mediapipe_idx(mediapipe_name_to_ict)
 
         model_dict = np.load(npy_dir, allow_pickle=True).item()
         self.num_expression = model_dict['num_expression']
@@ -62,6 +58,8 @@ class ICTFaceKitTorch(torch.nn.Module):
             self.register_buffer('R', torch.eye(3)[None].cpu()) # shape of (B, 3, 3)
             self.register_buffer('T', torch.zeros(1, 3).cpu()) # shape of (B, 3)
 
+        self.identity = torch.nn.Parameter(self.identity.detach())
+
         # with torch.no_grad():
         canonical = self.forward(expression_weights=self.expression, identity_weights=self.identity, to_canonical=True)
         self.register_buffer('canonical', canonical)
@@ -74,6 +72,7 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.facial_mask = torch.zeros(self.canonical.size(1))
         self.facial_mask[self.face_indices] = 1
         self.facial_mask[self.eyeball_indices] = 1
+
 
 
     def to_canonical_space(self, mesh):
@@ -160,27 +159,6 @@ class ICTFaceKitTorch(torch.nn.Module):
         return positive_triangles
 
 
-    def load_mediapipe_idx(self, mediapipe_name_to_ict):
-
-        with open(mediapipe_name_to_ict, 'rb') as f:
-            mediapipe_indices = pickle.load(f)
-            # hardcorded mapping from mediapipe to ict
-            self.mediapipe_to_ict = np.array([mediapipe_indices['browDownLeft'], mediapipe_indices['browDownRight'], mediapipe_indices['browInnerUp'], mediapipe_indices['browInnerUp'], 
-                                    mediapipe_indices['browOuterUpLeft'], mediapipe_indices['browOuterUpRight'], mediapipe_indices['cheekPuff'], mediapipe_indices['cheekPuff'], 
-                                    mediapipe_indices['cheekSquintLeft'], mediapipe_indices['cheekSquintRight'], mediapipe_indices['eyeBlinkLeft'], mediapipe_indices['eyeBlinkRight'], 
-                                    mediapipe_indices['eyeLookDownLeft'], mediapipe_indices['eyeLookDownRight'], mediapipe_indices['eyeLookInLeft'], mediapipe_indices['eyeLookInRight'], 
-                                    mediapipe_indices['eyeLookOutLeft'], mediapipe_indices['eyeLookOutRight'], mediapipe_indices['eyeLookUpLeft'], mediapipe_indices['eyeLookUpRight'], 
-                                    mediapipe_indices['eyeSquintLeft'], mediapipe_indices['eyeSquintRight'], mediapipe_indices['eyeWideLeft'], mediapipe_indices['eyeWideRight'], 
-                                    mediapipe_indices['jawForward'], mediapipe_indices['jawLeft'], mediapipe_indices['jawOpen'], mediapipe_indices['jawRight'], 
-                                    mediapipe_indices['mouthClose'], mediapipe_indices['mouthDimpleLeft'], mediapipe_indices['mouthDimpleRight'], mediapipe_indices['mouthFrownLeft'], 
-                                    mediapipe_indices['mouthFrownRight'], mediapipe_indices['mouthFunnel'], mediapipe_indices['mouthLeft'], mediapipe_indices['mouthLowerDownLeft'], 
-                                    mediapipe_indices['mouthLowerDownRight'], mediapipe_indices['mouthPressLeft'], mediapipe_indices['mouthPressRight'], mediapipe_indices['mouthPucker'], 
-                                    mediapipe_indices['mouthRight'], mediapipe_indices['mouthRollLower'], mediapipe_indices['mouthRollUpper'], mediapipe_indices['mouthShrugLower'], 
-                                    mediapipe_indices['mouthShrugUpper'], mediapipe_indices['mouthSmileLeft'], mediapipe_indices['mouthSmileRight'], mediapipe_indices['mouthStretchLeft'], 
-                                    mediapipe_indices['mouthStretchRight'], mediapipe_indices['mouthUpperUpLeft'], mediapipe_indices['mouthUpperUpRight'], mediapipe_indices['noseSneerLeft'], 
-                                    mediapipe_indices['noseSneerRight'],]).astype(np.int32)
-            
-
     def update_vmapping(self, vmapping):
         """
         Update the vertex mapping and adjust the relevant attributes accordingly.
@@ -200,6 +178,11 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.identity_shape_modes = self.identity_shape_modes[:, :, self.v_mapping]
         self.canonical = self.canonical[:, self.v_mapping]
 
+        print('neutral_mesh: ', self.neutral_mesh.size())
+        print('expression_shape_modes: ', self.expression_shape_modes.size())
+        print('identity_shape_modes: ', self.identity_shape_modes.size())
+        print('canonical: ', self.canonical.size())
+
         # Update the landmark indices based on the new vertex mapping
         vmapping_dict = {v: i for i, v in enumerate(vmapping)}
         new_landmark_indices = []
@@ -207,27 +190,65 @@ class ICTFaceKitTorch(torch.nn.Module):
             new_landmark_indices.append(vmapping_dict[landmark_index])
         self.landmark_indices = new_landmark_indices
 
-        # Update the face indices based on the new vertex mapping
+        # build original indices to face / not face / eyeball dict
+        region_dict = [0] * (len(self.face_indices) + len(self.not_face_indices) + len(self.eyeball_indices))
+
+        for i in range(len(region_dict)):
+            region_dict[i] = 0 if i in self.face_indices else 1 if i in self.not_face_indices else 2
+
         face_indices = []
-        for i in self.face_indices:
-            face_indices.append(vmapping_dict[i])
-        self.face_indices = face_indices
-
-        # Update the not face indices based on the new vertex mapping
         not_face_indices = []
-        for i in self.not_face_indices:
-            not_face_indices.append(vmapping_dict[i])
-        self.not_face_indices = not_face_indices
-
-        # Update the eyeball indices based on the new vertex mapping
         eyeball_indices = []
-        for i in self.eyeball_indices:
-            eyeball_indices.append(vmapping_dict[i])
+        for i, v in enumerate(vmapping):
+            if region_dict[v] == 0:
+                face_indices.append(i)
+            elif region_dict[v] == 1:
+                not_face_indices.append(i)
+            else:
+                eyeball_indices.append(i)
+
+        self.face_indices = face_indices
+        self.not_face_indices = not_face_indices
         self.eyeball_indices = eyeball_indices
+
+        # for i, v in enumerate(vmapping):
+        #     if v in self.face_indices:
+        #         self.face_indices[i] = vmapping_dict[v]
+            
+
+
+        # # Update the face indices based on the new vertex mapping
+        # print('face', len(self.face_indices))
+        # face_indices = []
+        # for i in self.face_indices:
+        #     face_indices.append(vmapping_dict[i])
+        # self.face_indices = face_indices
+        # print(len(self.face_indices))
+
+        # # Update the not face indices based on the new vertex mapping
+        # print('not face', len(self.not_face_indices))
+        # not_face_indices = []
+        # for i in self.not_face_indices:
+        #     not_face_indices.append(vmapping_dict[i])
+        # self.not_face_indices = not_face_indices
+        # print(len(self.not_face_indices))
+
+        # # Update the eyeball indices based on the new vertex mapping
+        # print('eyeball', len(self.eyeball_indices))
+        # eyeball_indices = []
+        # for i in self.eyeball_indices:
+        #     eyeball_indices.append(vmapping_dict[i])
+        # self.eyeball_indices = eyeball_indices
+        # print(len(self.eyeball_indices))
         
         # Update the head indices based on the new vertex mapping
-        head_indices = []
-        for i in self.head_indices:
-            head_indices.append(vmapping_dict[i])
+        print('head', len(self.head_indices))
+        head_indices = self.face_indices + self.not_face_indices
         self.head_indices = head_indices
-
+        print(len(self.head_indices))
+    
+        # Update the facial mask based on the new vertex mapping
+        facial_mask = torch.zeros(self.canonical.size(1))
+        facial_mask[self.face_indices] = 1
+        facial_mask[self.eyeball_indices] = 1
+        self.facial_mask = facial_mask

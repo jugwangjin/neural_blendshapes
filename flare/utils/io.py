@@ -66,3 +66,23 @@ def write_mesh(path, mesh):
     indices = mesh.indices.numpy() if mesh.indices is not None else None
     mesh_ = trimesh.Trimesh(vertices=vertices, faces=indices, process=False)
     mesh_.export(path)
+
+
+    
+def copy_sources(args, run_name):
+    experiment_dir = args.working_dir / args.output_dir / run_name
+
+    sources_path = experiment_dir / "sources"
+    sources_path.mkdir(parents=True, exist_ok=True)
+    
+    import shutil
+
+    if sources_path.exists():
+        shutil.rmtree(sources_path)
+        sources_path.mkdir(parents=True, exist_ok=True)
+
+    shutil.copytree(args.working_dir / "flare", sources_path / "flare")
+    shutil.copy(args.working_dir / "arguments.py", sources_path / "arguments.py")
+    shutil.copy(args.working_dir / "train.py", sources_path / "train.py")
+    shutil.copy(args.working_dir / "test.py", sources_path / "test.py")
+    shutil.copy(args.working_dir / args.config, sources_path / "config.txt")

@@ -1,4 +1,4 @@
-run_name = mar_v1
+run_name = mar_debug
 
 input_dir = ../flare_data/marcel
 train_dir = ["MVI_1797", "MVI_1801"]
@@ -6,15 +6,12 @@ eval_dir = ["MVI_1802"]
 working_dir = 
 output_dir = out/
 
-batch_size = 4
-sample_idx_ratio = 1
+sample_idx_ratio = 50
 
-iterations = 10000
-upsample_iterations = [500]
+iterations = 5
 
-lr_encoder = 1e-3
-lr_shader = 1e-4
-lr_deformer = 1e-3
+lr_encoder = 1e-4
+lr_shader = 1e-3
 
 weight_shading = 1.0
 weight_perceptual_loss = 0.1
@@ -30,10 +27,11 @@ weight_normal = 1
 weight_normal_laplacian = 1
 weight_landmark = 1
 weight_closure = 1
-weight_ict = 5
+weight_ict = 1
 
 light_mlp_ch = 3
 light_mlp_dims = [64, 64]
 material_mlp_dims = [128, 128, 128, 128]
 material_mlp_ch = 5
 
+batch_size = 2

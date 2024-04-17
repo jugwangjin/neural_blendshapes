@@ -99,7 +99,7 @@ class Mesh:
         a = vertices[self.indices][:, 0, :]
         b = vertices[self.indices][:, 1, :]
         c = vertices[self.indices][:, 2, :]
-        face_normals = torch.nn.functional.normalize(torch.cross(b - a, c - a), p=2, dim=-1) 
+        face_normals = torch.nn.functional.normalize(torch.linalg.cross(b - a, c - a), p=2, dim=-1) 
 
         # Compute the vertex normals
         vertex_normals = torch.zeros_like(vertices)
@@ -193,6 +193,10 @@ class Mesh:
         self._uv_coords = uvs
         self._uv_idx = faces
         self.vmapping = vmapping
+
+        self.vertices = self.vertices[vmapping]
+        self.indices = faces
+
 
     def compute_connectivity(self):
         self.xatlas_uvmap()

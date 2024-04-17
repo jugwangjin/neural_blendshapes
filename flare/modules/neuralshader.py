@@ -63,9 +63,10 @@ class NeuralShader(torch.nn.Module):
                 "per_level_scale" : per_level_scale
             }
 
-            gradient_scaling = 128.0
+            self.gradient_scaling = 128.0
             self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to(device)
-            self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / gradient_scaling, ))
+            # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / gradient_scaling, ))
+            self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
             self.inp_size = self.fourier_feature_transform.n_output_dims
 
         # ==============================================================================================
@@ -81,7 +82,8 @@ class NeuralShader(torch.nn.Module):
         print(disentangle_network_params)
 
         if fourier_features == "hashgrid":
-            self.material_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * gradient_scaling, ))
+            self.gradient_scaling = 128.0
+            self.material_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
 
         # Store the config
         self._config = {
