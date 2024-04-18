@@ -203,6 +203,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     
     progress_bar = tqdm(range(epochs))
     start = time.time()
+
+    acc_losses = []
+    acc_total_loss = 0
     import wandb
     wandb.init(project="neural_blendshape", name=run_name, config=args)
     for epoch in progress_bar:
@@ -222,15 +225,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             encoder_input = views_subset["img"].permute(0, 3, 1, 2).to(device)
             features = encoder(encoder_input.to(device))
             
-
-            # ict = ict_facekit(expression_weights = features[:, :53], to_canonical = True)
-            # print(ict.shape, mesh.vertices.shape, ...)
-            # aligned_ict = align_to_canonical(ict, mesh.vertices[None].repeat(ict.shape[0], 1, 1), ict_facekit.landmark_indices)
-            
-            # save aligned_ict
-            # write_mesh("debug/ALIGN_TEST.obj", ict_canonical_mesh.with_vertices(aligned_ict[0]).detach().to('cpu'))
-            # exit()
-
             # ==============================================================================================
             # deformation of canonical mesh
             # ==============================================================================================
@@ -241,7 +235,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             deformed_vertices[:, ict_facekit.eyeball_indices] = deformed["deformed_eyes"]
 
             d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
-
 
             # ==============================================================================================
             # R A S T E R I Z A T I O N
@@ -292,24 +285,31 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # feature regularization
             losses['feature_regularization'] = feature_regularization_loss(features)
 
-            # for i in range(views_subset["img"].shape[0]):
-            #     write_mesh(f"debug/mesh_{i}.obj", ict_canonical_mesh.with_vertices(deformed_vertices[i]).detach().to('cpu'))                                
-            # exit()
-
-
             loss = torch.tensor(0., device=device) 
+            
+            for k, v in losses.items():
+                loss += v * loss_weights[k]
+            
+            acc_losses.append(losses)
+            acc_total_loss += loss
+
+            if len(acc_losses) > 9:
+                losses_to_log = {}
+                for k in acc_losses[0].keys():
+                    losses_to_log[k] = torch.stack([l[k] for l in acc_losses]).mean()
+                losses_to_log["total_loss"] = acc_total_loss / len(acc_losses)
+                wandb.log({k: v.item() for k, v in losses_to_log.items()}, step=iteration)
+
+                acc_losses = []
+                acc_total_loss = 0
+
             if iteration % 100 == 0:
-                losses_to_print = ['ict', 'ict_identity', 'feature_regularization', 'normal', 'normal_laplacian', 'landmark', 'closure']
                 print("=="*50)
                 for k, v in losses.items():
                     # if k in losses_to_print:
                     if v > 0:
                         print(f"{k}: {v.item()}")
                 print("=="*50)
-            for k, v in losses.items():
-                loss += v * loss_weights[k]
-
-            wandb.log({k: v.item() for k, v in losses.items()})
 
             # ==============================================================================================
             # Optimizer step
@@ -326,6 +326,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             ### increase the gradients of positional encoding following tinycudnn
             if args.grad_scale and args.fourier_features == "hashgrid":
                 shader.fourier_feature_transform.params.grad /= 8.0
+
+            # clip gradients
+            torch.nn.utils.clip_grad_norm_(shader.parameters(), 5.0)
+            torch.nn.utils.clip_grad_norm_(deformer_net.parameters(), 5.0)
+            torch.nn.utils.clip_grad_norm_(encoder.parameters(), 5.0)
+            torch.nn.utils.clip_grad_norm_([ict_facekit.identity], 5.0)
+
 
             optimizer_shader.step()
         
@@ -364,11 +371,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     ## ============== visualize ==============================
                     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
                     del debug_gbuffer, debug_cbuffers
+            if iteration % (args.visualization_frequency * 10) == 0:
+                wandb.log({"Grid": [wandb.Image(images_save_path / "grid" / f'grid_{iteration}.png')]}, step=iteration)
 
             ## ============== save intermediate ==============================
             if (args.save_frequency > 0) and (iteration == 1 or iteration % args.save_frequency == 0):
                 with torch.no_grad():
-                    write_mesh(meshes_save_path / f"mesh_{iteration:06d}.obj", mesh.detach().to('cpu'))                                
+                    # write_mesh(meshes_save_path / f"mesh_{iteration:06d}.obj", mesh.detach().to('cpu'))                                
                     shader.save(shaders_save_path / f'shader_{iteration:06d}.pt')
                     deformer_net.save(shaders_save_path / f'deformer_{iteration:06d}.pt')
                     encoder.save(shaders_save_path / f'encoder_{iteration:06d}.pt')
@@ -385,7 +394,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # ==============================================================================================
     with open(experiment_dir / "args.txt", "w") as text_file:
         print(f"{args}", file=text_file)
-    write_mesh(meshes_save_path / f"mesh_latest.obj", mesh.detach().to('cpu'))
+    # write_mesh(meshes_save_path / f"mesh_latest.obj", mesh.detach().to('cpu'))
     shader.save(shaders_save_path / f'shader_latest.pt')
     deformer_net.save(shaders_save_path / f'deformer_latest.pt')
     encoder.save(shaders_save_path / f'encoder_latest.pt')

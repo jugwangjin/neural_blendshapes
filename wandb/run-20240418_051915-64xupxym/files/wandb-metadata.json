@@ -1,0 +1,279 @@
+{
+    "os": "Linux-5.4.0-146-generic-x86_64-with-glibc2.35",
+    "python": "3.10.13",
+    "heartbeatAt": "2024-04-18T05:19:16.616449",
+    "startedAt": "2024-04-18T05:19:15.471013",
+    "docker": null,
+    "cuda": null,
+    "args": [
+        "--config",
+        "configs/mar.txt"
+    ],
+    "state": "running",
+    "program": "/Jarvis/workspace/gwangjin/2024/blendshape/neural_blendshapes/train.py",
+    "codePathLocal": "train.py",
+    "codePath": "train.py",
+    "git": {
+        "remote": "git@github.com:jugwangjin/neural_blendshapes.git",
+        "commit": "d18cc6f39058d1555357cdc1a1b83bb1d5f0ba0d"
+    },
+    "email": null,
+    "root": "/Jarvis/workspace/gwangjin/2024/blendshape/neural_blendshapes",
+    "host": "7f7c08ea63ce",
+    "username": "root",
+    "executable": "/opt/conda/bin/python",
+    "cpu_count": 20,
+    "cpu_count_logical": 40,
+    "cpu_freq": {
+        "current": 1.5649499999999996,
+        "min": 800.0,
+        "max": 3000.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 1.215,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.322,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.158,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.628,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.363,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.154,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.158,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.883,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.156,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 2.792,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.081,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.953,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.801,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.202,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.253,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.181,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.629,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.375,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.168,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.164,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.822,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.162,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 2.889,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 1.386,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.799,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.799,
+            "min": 800.0,
+            "max": 3000.0
+        },
+        {
+            "current": 0.8,
+            "min": 800.0,
+            "max": 3000.0
+        }
+    ],
+    "disk": {
+        "/": {
+            "total": 427.9060745239258,
+            "used": 412.56983947753906
+        }
+    },
+    "gpu": "NVIDIA TITAN Xp",
+    "gpu_count": 8,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA TITAN Xp",
+            "memory_total": 12884901888
+        },
+        {
+            "name": "NVIDIA TITAN Xp",
+            "memory_total": 12884901888
+        },
+        {
+            "name": "NVIDIA TITAN Xp",
+            "memory_total": 12884901888
+        },
+        {
+            "name": "NVIDIA TITAN Xp",
+            "memory_total": 12884901888
+        },
+        {
+            "name": "NVIDIA TITAN Xp",
+            "memory_total": 12884901888
+        },
+        {
+            "name": "NVIDIA TITAN Xp",
+            "memory_total": 12884901888
+        },
+        {
+            "name": "NVIDIA TITAN Xp",
+            "memory_total": 12884901888
+        },
+        {
+            "name": "NVIDIA TITAN Xp",
+            "memory_total": 12884901888
+        }
+    ],
+    "memory": {
+        "total": 409.0539207458496
+    }
+}

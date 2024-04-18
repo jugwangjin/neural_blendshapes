@@ -59,8 +59,8 @@ def config_parser():
     parser.add_argument('--weight_closure', type=float, default=1, help="Weight of the closure term")
     parser.add_argument('--weight_ict', type=float, default=1, help="Weight of the ict term")
     parser.add_argument('--weight_random_ict', type=float, default=1, help="Weight of the ict term")
-    parser.add_argument('--weight_ict_identity', type=float, default=1e-3, help="Weight of the flame term")
-    parser.add_argument('--weight_feature_regularization', type=float, default=1e-3, help="Weight of the flame term")
+    parser.add_argument('--weight_ict_identity', type=float, default=1e-4, help="Weight of the flame term")
+    parser.add_argument('--weight_feature_regularization', type=float, default=1e-4, help="Weight of the flame term")
     parser.add_argument('--r_mean', type=float, default=0.500, help="mean roughness")
 
 
