@@ -163,8 +163,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # Initialize the loss weights and losses
     loss_weights = {
         "mask": args.weight_mask,
-        "normal_regularization": args.weight_normal_regularization,
-        "laplacian_regularization": args.weight_laplacian_regularization,
+        # "normal_regularization": args.weight_normal_regularization,
+        # "laplacian_regularization": args.weight_laplacian_regularization,
         "shading": args.weight_shading,
         "perceptual_loss": args.weight_perceptual_loss,
         "albedo_regularization": args.weight_albedo_regularization,
@@ -176,6 +176,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "landmark": args.weight_landmark,
         "closure": args.weight_closure,
         "ict": args.weight_ict,
+        "random_ict": args.weight_random_ict,
         "ict_identity": args.weight_ict_identity,
         "feature_regularization": args.weight_feature_regularization,
     }
@@ -199,9 +200,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # ==============================================================================================
     epochs = (args.iterations // len(dataloader_train)) + 1
     iteration = 0
-
+    
     progress_bar = tqdm(range(epochs))
     start = time.time()
+    import wandb
+    wandb.init(project="neural_blendshape", name=run_name, config=args)
     for epoch in progress_bar:
         for iter_, views_subset in enumerate(dataloader_train):
             iteration += 1
@@ -239,6 +242,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
 
+
             # ==============================================================================================
             # R A S T E R I Z A T I O N
             # ==============================================================================================
@@ -250,15 +254,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # loss function 
             # ==============================================================================================
             ## ======= regularization autoencoder========
-            losses['normal_regularization'] = 0
-            losses['laplacian_regularization'] = 0
-            num_meshes = deformed_vertices.shape[0]
-            for nth_mesh in range(num_meshes):
-                mesh_ = ict_canonical_mesh.with_vertices(deformed_vertices[nth_mesh])
-                losses['normal_regularization'] += normal_consistency_loss(mesh_)
-                losses['laplacian_regularization'] += laplacian_loss(mesh_)
-            losses['normal_regularization'] /= num_meshes
-            losses['laplacian_regularization'] /= num_meshes
+            # losses['normal_regularization'] = 0
+            # losses['laplacian_regularization'] = 0
+            # num_meshes = deformed_vertices.shape[0]
+            # for nth_mesh in range(num_meshes):
+            #     mesh_ = ict_canonical_mesh.with_vertices(deformed_vertices[nth_mesh])
+            #     losses['normal_regularization'] += normal_consistency_loss(mesh_)
+            #     losses['laplacian_regularization'] += laplacian_loss(mesh_)
+            # losses['normal_regularization'] /= num_meshes
+            # losses['laplacian_regularization'] /= num_meshes
 
             ## ============== color + regularization for color ==============================
             pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
@@ -275,30 +279,37 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
             
             # landmark losses
-            losses['landmark'] = landmark_loss(ict_facekit, gbuffers, views_subset, device)
-            losses['closure'] = closure_loss(ict_facekit, gbuffers, views_subset, device)
+            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, device)
+            # losses['closure'] = closure_loss(ict_facekit, gbuffers, views_subset, device)
 
             # normal loss
-            losses['normal'], losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, device)
+            losses['normal'], losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
 
             # ict loss
-            losses['ict'] = ict_loss(ict_facekit, deformed_vertices, features, deformer_net)
+            losses['ict'], losses['random_ict'] = ict_loss(ict_facekit, deformed_vertices, features, deformer_net)
             losses['ict_identity'] = ict_identity_regularization(ict_facekit)
 
             # feature regularization
             losses['feature_regularization'] = feature_regularization_loss(features)
 
+            # for i in range(views_subset["img"].shape[0]):
+            #     write_mesh(f"debug/mesh_{i}.obj", ict_canonical_mesh.with_vertices(deformed_vertices[i]).detach().to('cpu'))                                
+            # exit()
+
 
             loss = torch.tensor(0., device=device) 
             if iteration % 100 == 0:
-                losses_to_print = ['ict', 'ict_identity', 'feature_regularization', 'normal', 'normal_laplacian']
+                losses_to_print = ['ict', 'ict_identity', 'feature_regularization', 'normal', 'normal_laplacian', 'landmark', 'closure']
                 print("=="*50)
                 for k, v in losses.items():
-                    if k in losses_to_print:
+                    # if k in losses_to_print:
+                    if v > 0:
                         print(f"{k}: {v.item()}")
                 print("=="*50)
             for k, v in losses.items():
                 loss += v * loss_weights[k]
+
+            wandb.log({k: v.item() for k, v in losses.items()})
 
             # ==============================================================================================
             # Optimizer step
@@ -366,6 +377,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     end = time.time()
     total_time = ((end - start) % 3600)
     print("TIME TAKEN (mins):", int(total_time // 60))
+
+    wandb.finish()
+
     # ==============================================================================================
     # s a v e
     # ==============================================================================================
@@ -426,12 +440,15 @@ if __name__ == '__main__':
         try:
             main(args, device, dataset_train, dataloader_train, debug_views)
             break  # Exit the loop if main() runs successfully
-        except Exception as e:
-            print(e)
-            #time.sleep(10)
+        except ValueError as e:
             print("--"*50)
             print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
             print("--"*50)
+            time.sleep(5)
+
+        except Exception as e:
+            print(e)
+            print('Error: Unexpected error occurred. Aborting the training.')
             raise e
 
     ### ============== defaults: fine tune color ==============================

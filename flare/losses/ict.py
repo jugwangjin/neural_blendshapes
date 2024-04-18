@@ -20,7 +20,7 @@ def ict_loss(ict_facekit, deformed_vertices, features, deformer_net):
 
     deformed_vertices = deformed_vertices[:, (ict_facekit.face_indices + ict_facekit.eyeball_indices)]
 
-    ict_loss = torch.mean(torch.pow(aligned_ict * 10 - deformed_vertices * 10, 2))
+    ict_loss = torch.mean(torch.abs(aligned_ict * 10 - deformed_vertices * 10))
 
     # sample random feature and apply same loss
     with torch.no_grad():
@@ -40,9 +40,9 @@ def ict_loss(ict_facekit, deformed_vertices, features, deformer_net):
 
     random_deformed_vertices = random_deformed_vertices[:, (ict_facekit.face_indices + ict_facekit.eyeball_indices)]
 
-    random_ict_loss = torch.mean(torch.pow(aligned_random_ict * 10 - random_deformed_vertices * 10, 2))
+    random_ict_loss = torch.mean(torch.abs(aligned_random_ict * 10 - random_deformed_vertices * 10))
 
-    return ict_loss + random_ict_loss
+    return ict_loss, random_ict_loss
 
 def ict_identity_regularization(ict_facekit):
     identity_loss = torch.mean(ict_facekit.identity ** 2)

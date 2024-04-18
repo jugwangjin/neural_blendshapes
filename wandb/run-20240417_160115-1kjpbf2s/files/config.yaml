@@ -1,0 +1,226 @@
+wandb_version: 1
+
+config:
+  desc: null
+  value: configs/mar.txt
+run_name:
+  desc: null
+  value: mar_v1
+batch_size:
+  desc: null
+  value: 4
+input_dir:
+  desc: null
+  value: /data1/gwangjin/flare/marcel
+train_dir:
+  desc: null
+  value:
+  - MVI_1797
+  - MVI_1801
+eval_dir:
+  desc: null
+  value:
+  - MVI_1802
+working_dir:
+  desc: null
+  value: .
+output_dir:
+  desc: null
+  value: /Bean/log/gwangjin/2024/neural_blendshapes
+sample_idx_ratio:
+  desc: null
+  value: 1
+device:
+  desc: null
+  value: 0
+finetune_color:
+  desc: null
+  value: false
+iterations:
+  desc: null
+  value: 10000
+final_iter:
+  desc: null
+  value: 1500
+upsample_iterations:
+  desc: null
+  value:
+  - 500
+save_frequency:
+  desc: null
+  value: 900
+visualization_frequency:
+  desc: null
+  value: 100
+visualization_views:
+  desc: null
+  value:
+  - 15
+  - 25
+  - 27
+  - 21
+  - 26
+downsample:
+  desc: null
+  value: false
+downsample_ratio:
+  desc: null
+  value: 0.03
+grad_scale:
+  desc: null
+  value: false
+decay_flame:
+  desc: null
+  value:
+  - 100
+flame_mask:
+  desc: null
+  value: false
+lr_shader:
+  desc: null
+  value: 0.001
+lr_encoder:
+  desc: null
+  value: 0.0001
+lr_deformer:
+  desc: null
+  value: 0.0001
+weight_mask:
+  desc: null
+  value: 2.0
+weight_normal_regularization:
+  desc: null
+  value: 0.01
+weight_laplacian_regularization:
+  desc: null
+  value: 6.0
+weight_shading:
+  desc: null
+  value: 1.0
+weight_perceptual_loss:
+  desc: null
+  value: 0.1
+weight_albedo_regularization:
+  desc: null
+  value: 0.01
+weight_flame_regularization:
+  desc: null
+  value: 10.0
+weight_white_lgt_regularization:
+  desc: null
+  value: 0.01
+weight_roughness_regularization:
+  desc: null
+  value: 0.01
+weight_fresnel_coeff:
+  desc: null
+  value: 0.01
+weight_normal:
+  desc: null
+  value: 0.5
+weight_normal_laplacian:
+  desc: null
+  value: 10.0
+weight_landmark:
+  desc: null
+  value: 2.0
+weight_closure:
+  desc: null
+  value: 20.0
+weight_ict:
+  desc: null
+  value: 2.0
+weight_ict_identity:
+  desc: null
+  value: 0.001
+weight_feature_regularization:
+  desc: null
+  value: 0.001
+r_mean:
+  desc: null
+  value: 0.5
+fourier_features:
+  desc: null
+  value: hashgrid
+activation:
+  desc: null
+  value: relu
+bsdf:
+  desc: null
+  value: pbr_shading
+deform_d_out:
+  desc: null
+  value: 128
+light_mlp_ch:
+  desc: null
+  value: 3
+light_mlp_dims:
+  desc: null
+  value:
+  - 64
+  - 64
+material_mlp_dims:
+  desc: null
+  value:
+  - 128
+  - 128
+  - 128
+  - 128
+material_mlp_ch:
+  desc: null
+  value: 5
+train_deformer:
+  desc: null
+  value: true
+feature_dim:
+  desc: null
+  value: 64
+head_deformer_layers:
+  desc: null
+  value: 6
+head_deformer_hidden_dim:
+  desc: null
+  value: 128
+head_deformer_multires:
+  desc: null
+  value: 6
+eye_deformer_layers:
+  desc: null
+  value: 2
+eye_deformer_hidden_dim:
+  desc: null
+  value: 64
+eye_deformer_multires:
+  desc: null
+  value: 2
+_wandb:
+  desc: null
+  value:
+    python_version: 3.10.13
+    cli_version: 0.16.6
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    start_time: 1713369675.0
+    t:
+      1:
+      - 1
+      - 5
+      - 41
+      - 53
+      - 55
+      2:
+      - 1
+      - 5
+      - 41
+      - 53
+      - 55
+      3:
+      - 13
+      - 16
+      - 23
+      4: 3.10.13
+      5: 0.16.6
+      8:
+      - 5
+      13: linux-x86_64

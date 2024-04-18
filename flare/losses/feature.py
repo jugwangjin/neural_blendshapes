@@ -8,5 +8,5 @@ def feature_regularization_loss(feature):
 
     latent_regularization = torch.mean(latent ** 2)
 
-    loss = facs_regularization * 0.1 + latent_regularization
+    loss = facs_regularization * 1e-2 + latent_regularization
     return loss
