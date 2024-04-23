@@ -68,8 +68,9 @@ class DatasetLoader(Dataset):
         self.K[0, 2] = focal_cxcy[2] * self.resolution[0]
         self.K[1, 2] = focal_cxcy[3] * self.resolution[1]
 
-        self.face_alignment = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, flip_input=False, 
+        self.face_alignment = face_alignment.FaceAlignment(face_alignment.LandmarksType.THREE_D, flip_input=False, 
                                                             device='cuda' if torch.cuda.is_available() else 'cpu')
+
 
         self.shape_params = torch.tensor(json_data['shape_params']).float().unsqueeze(0)
         # Pre-load from disc to avoid slow png parsing
@@ -186,16 +187,17 @@ class DatasetLoader(Dataset):
 
         frame_name = img_path.stem
 
-        landmarks, scores, _ = self.face_alignment.get_landmarks_from_image(str(img_path), return_bboxes=True, return_landmark_score=True)
+        with torch.no_grad():
+            landmarks, scores, _ = self.face_alignment.get_landmarks_from_image(str(img_path), return_bboxes=True, return_landmark_score=True)
 
-        if len(landmarks) == 0:
-            landmark = torch.zeros(68, 3)
-        else:
-            landmark = torch.tensor(landmarks[0], dtype=torch.float32)
-            landmark = landmark / img.size(1)
-            score = torch.tensor(scores[0], dtype=torch.float32)
-            # print(landmark.shape, score.shape)
-            landmark = torch.cat([landmark, score[:, None]], dim=1)
+            if len(landmarks) == 0:
+                landmark = torch.zeros(68, 4)
+            else:
+                landmark = torch.tensor(landmarks[0], dtype=torch.float32)
+                landmark = landmark / img.size(1)
+                score = torch.tensor(scores[0], dtype=torch.float32)
+                # print(landmark.shape, score.shape)
+                landmark = torch.cat([landmark, score[:, None]], dim=1).data
 
         return img[None, ...], mask[None, ...], semantic[None, ...], flame_expression[None, ...], facs[None, ...], flame_pose[None, ...], camera, frame_name, landmark[None, ...] # Add batch dimension
     
@@ -298,15 +300,17 @@ class DatasetLoader(Dataset):
 
         frame_name = img_path.stem
 
-        landmarks, scores, _ = self.face_alignment.get_landmarks_from_image(str(img_path), return_bboxes=True, return_landmark_score=True)
+        with torch.no_grad():
+            landmarks, scores, _ = self.face_alignment.get_landmarks_from_image(str(img_path), return_bboxes=True, return_landmark_score=True)
 
-        if len(landmarks) == 0:
-            landmark = torch.zeros(68, 2)
-        else:
-            landmark = torch.tensor(landmarks[0], dtype=torch.float32)
-            landmark = landmark / img.size(1)
-            score = torch.tensor(scores[0], dtype=torch.float32)
-            # print(landmark.shape, score.shape)
-            landmark = torch.cat([landmark, score[:, None]], dim=1)
+            if len(landmarks) == 0:
+                landmark = torch.zeros(68, 4)
+            else:
+                landmark = torch.tensor(landmarks[0], dtype=torch.float32)
+                # print(torch.amin(landmark, dim=0), torch.amax(landmark, dim=0))
+                landmark = landmark / img.size(1)
+                score = torch.tensor(scores[0], dtype=torch.float32)
+                # print(landmark.shape, score.shape)
+                landmark = torch.cat([landmark, score[:, None]], dim=1).data
 
         return img[None, ...], mask[None, ...], semantic[None, ...], flame_expression[None, ...], facs[None, ...], flame_pose[None, ...], camera, frame_name, landmark[None, ...], normal[None, ...] # Add batch dimension

@@ -71,8 +71,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # ict_identity = torch.load(str(ict_identity_path))
     # ict_facekit.identity.data = ict_identity
 
-
-
     ## ============== renderer ==============================
     aabb = AABB(ict_canonical_mesh.vertices.cpu().numpy())
     ict_mesh_aabb = [torch.min(ict_canonical_mesh.vertices, dim=0).values, torch.max(ict_canonical_mesh.vertices, dim=0).values]
@@ -179,6 +177,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "random_ict": args.weight_random_ict,
         "ict_identity": args.weight_ict_identity,
         "feature_regularization": args.weight_feature_regularization,
+        "head_direction": args.weight_head_direction,
+        "direction_estimation": args.weight_direction_estimation,
     }
 
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
@@ -207,9 +207,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     acc_losses = []
     acc_total_loss = 0
     import wandb
-    wandb.init(project="neural_blendshape", name=run_name, config=args)
+    if 'debug' not in run_name:
+        wandb.init(project="neural_blendshape", name=run_name, config=args)
     for epoch in progress_bar:
         for iter_, views_subset in enumerate(dataloader_train):
+            # views_subset = debug_views
             iteration += 1
             progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}')
 
@@ -230,7 +232,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # ==============================================================================================
             deformed = deformer_net(features, vertices=None)
             
-            deformed_vertices = mesh.vertices[None].repeat(args.batch_size, 1, 1)
+            deformed_vertices = mesh.vertices[None].repeat(views_subset['img'].size(0), 1, 1)
             deformed_vertices[:, ict_facekit.head_indices] = deformed["deformed_head"]
             deformed_vertices[:, ict_facekit.eyeball_indices] = deformed["deformed_eyes"]
 
@@ -260,7 +262,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             ## ============== color + regularization for color ==============================
             pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
 
-            losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, args.batch_size)
+            losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
             losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
             
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
@@ -272,10 +274,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
             
             # landmark losses
-            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, device)
+            losses['landmark'], losses['closure'], losses['head_direction'], losses['direction_estimation'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, device)
+             
             # losses['closure'] = closure_loss(ict_facekit, gbuffers, views_subset, device)
 
             # normal loss
+            # losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
             losses['normal'], losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
 
             # ict loss
@@ -298,12 +302,32 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 for k in acc_losses[0].keys():
                     losses_to_log[k] = torch.stack([l[k] for l in acc_losses]).mean()
                 losses_to_log["total_loss"] = acc_total_loss / len(acc_losses)
-                wandb.log({k: v.item() for k, v in losses_to_log.items()}, step=iteration)
+                if 'debug' not in run_name:
+                    wandb.log({k: v.item() for k, v in losses_to_log.items()}, step=iteration)
 
                 acc_losses = []
                 acc_total_loss = 0
 
             if iteration % 100 == 0:
+                DIRECTION_PAIRS = torch.tensor([[36, 64],[45, 48]]).int()
+                landmark_indices = ict_facekit.landmark_indices
+                landmarks_on_clip_space = gbuffers['deformed_verts_clip_space'][:, landmark_indices].clone()
+                landmarks_on_clip_space = landmarks_on_clip_space[..., :3] / torch.clamp(landmarks_on_clip_space[..., 3:], min=1e-8) # shape of B, N, 3
+    
+                detected_landmarks = views_subset['landmark'].detach().data  # shape of B N 3        
+                detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
+                detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
+
+                detected_normal = detected_landmarks[:, DIRECTION_PAIRS[:, 0], :3] - detected_landmarks[:, DIRECTION_PAIRS[:, 1], :3]
+                detected_normal = torch.cross(detected_normal[:, 0], detected_normal[:, 1], dim=1)
+                detected_normal = detected_normal / (torch.norm(detected_normal, dim=1, keepdim=True) + 1e-8)
+
+                deformed_normal = landmarks_on_clip_space[:, DIRECTION_PAIRS[:, 0], :3] - landmarks_on_clip_space[:, DIRECTION_PAIRS[:, 1], :3]
+                deformed_normal = torch.cross(deformed_normal[:, 0], deformed_normal[:, 1], dim=1)
+                deformed_normal = deformed_normal / (torch.norm(deformed_normal, dim=1, keepdim=True) + 1e-8)
+
+                print(torch.cat([detected_normal, deformed_normal, detected_normal - deformed_normal], dim=1))
+
                 print("=="*50)
                 for k, v in losses.items():
                     # if k in losses_to_print:
@@ -328,10 +352,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 shader.fourier_feature_transform.params.grad /= 8.0
 
             # clip gradients
-            torch.nn.utils.clip_grad_norm_(shader.parameters(), 5.0)
-            torch.nn.utils.clip_grad_norm_(deformer_net.parameters(), 5.0)
-            torch.nn.utils.clip_grad_norm_(encoder.parameters(), 5.0)
-            torch.nn.utils.clip_grad_norm_([ict_facekit.identity], 5.0)
+            torch.nn.utils.clip_grad_norm_(shader.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(deformer_net.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(encoder.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_([ict_facekit.identity], 1.0)
 
 
             optimizer_shader.step()
@@ -371,8 +395,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     ## ============== visualize ==============================
                     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
                     del debug_gbuffer, debug_cbuffers
-            if iteration % (args.visualization_frequency * 10) == 0:
-                wandb.log({"Grid": [wandb.Image(images_save_path / "grid" / f'grid_{iteration}.png')]}, step=iteration)
+            if iteration == 1 or iteration % (args.visualization_frequency * 10) == 0:
+                print(images_save_path / "grid" / f'grid_{iteration}.png')
+                if 'debug' not in run_name:
+                    wandb.log({"Grid": [wandb.Image(str(images_save_path / "grid" / f'grid_{iteration}.png'))]}, step=iteration)
 
             ## ============== save intermediate ==============================
             if (args.save_frequency > 0) and (iteration == 1 or iteration % args.save_frequency == 0):
@@ -387,7 +413,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     total_time = ((end - start) % 3600)
     print("TIME TAKEN (mins):", int(total_time // 60))
 
-    wandb.finish()
+    if 'debug' not in run_name:
+        wandb.finish()
 
     # ==============================================================================================
     # s a v e
@@ -438,6 +465,7 @@ if __name__ == '__main__':
     d_l.append(dataset_train.__getitem__(view_indices[0]))
     d_l.append(dataset_train.__getitem__(view_indices[1]))
     debug_views = dataset_val.collate(d_l)
+
 
     del dataset_val
     

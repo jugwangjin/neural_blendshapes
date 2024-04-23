@@ -6,22 +6,39 @@ import torch
 
 from flare.modules.embedder import get_embedder
 
+class SuperGaussianActivation(nn.Module):
+    def __init__(self, a=1., b=1., trainable=True):
+        super().__init__()
+        self.register_parameter('a', nn.Parameter(a*torch.ones(1), trainable))
+        self.register_parameter('b', nn.Parameter(b*torch.ones(1), trainable))
 
+    def forward(self, x):
+        return torch.exp(-x**2/(2*self.a**2))**self.b
 
+class GaussianActivation(nn.Module):
+    def __init__(self, a=1., trainable=True):
+        super().__init__()
+        self.register_parameter('a', nn.Parameter(a*torch.ones(1), trainable))
+
+    def forward(self, x):
+        return torch.exp(-x**2/(2*self.a**2))
 
 class MultiLayerMLP(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, num_layers, activation = 'LeakyReLU'):
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers, activation = nn.Softplus):
         super(MultiLayerMLP, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
 
-        self.act = getattr(nn, activation)()
+        # self.act = getattr(nn, activation)()
+        
 
         self.layers = nn.ModuleList()
         self.layers.append(nn.Linear(input_dim, hidden_dim))
         for i in range(num_layers - 2):
+            self.layers.append(activation())
             self.layers.append(nn.Linear(hidden_dim, hidden_dim))
+        self.layers.append(activation())
         self.layers.append(nn.Linear(hidden_dim, output_dim))
 
     def forward(self, vertices, feature):
@@ -40,11 +57,11 @@ class MultiLayerMLP(nn.Module):
         vertices = vertices.unsqueeze(0).repeat(batch_size, 1, 1)
 
         x = torch.cat([vertices, feature], dim=-1)
-        for i in range(self.num_layers-1):
-            x = self.act(self.layers[i](x))
-        deformation = self.layers[-1](x)
-
-        return deformation
+        for l in self.layers:
+            x = l(x)
+        # deformation = self.layers[-1](x)
+        return x
+        # return deformation
 
 class MLPDeformer(nn.Module):
     def __init__(self, input_feature_dim = 64, head_deformer_layers = 5, head_deformer_hidden_dim = 256, head_deformer_multires = 6,

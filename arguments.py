@@ -25,7 +25,7 @@ def config_parser():
     parser.add_argument('--iterations', type=int, default=2000, help="Total number of iterations")
     parser.add_argument('--final_iter', type=int, default=1500, help="Total number of iterations")
     parser.add_argument('--upsample_iterations', type=int, nargs='+', default=[500], help="Iterations at which to perform mesh upsampling")
-    parser.add_argument('--save_frequency', type=int, default=900, help="Frequency of mesh and shader saving (in iterations)")
+    parser.add_argument('--save_frequency', type=int, default=3000, help="Frequency of mesh and shader saving (in iterations)")
     parser.add_argument('--visualization_frequency', type=int, default=100, help="Frequency of shader visualization (in iterations)")
     parser.add_argument('--visualization_views', type=int, nargs='+', default=[15, 25, 27, 21, 26], help="Views to use for visualization.")
     parser.add_argument('--downsample', action='store_true', help="Downsample the initial flame mesh")
@@ -60,7 +60,9 @@ def config_parser():
     parser.add_argument('--weight_ict', type=float, default=1, help="Weight of the ict term")
     parser.add_argument('--weight_random_ict', type=float, default=1, help="Weight of the ict term")
     parser.add_argument('--weight_ict_identity', type=float, default=1e-4, help="Weight of the flame term")
-    parser.add_argument('--weight_feature_regularization', type=float, default=1e-4, help="Weight of the flame term")
+    parser.add_argument('--weight_feature_regularization', type=float, default=1e-3, help="Weight of the flame term")
+    parser.add_argument('--weight_head_direction', type=float, default=1, help="Weight of the flame term")
+    parser.add_argument('--weight_direction_estimation', type=float, default=1, help="Weight of the flame term")
     parser.add_argument('--r_mean', type=float, default=0.500, help="mean roughness")
 
 
@@ -80,9 +82,9 @@ def config_parser():
 
     # deformer
     parser.add_argument('--feature_dim', type=int, default=64, help="feature dim")
-    parser.add_argument('--head_deformer_layers', type=int, default=6, help="head deformer layers")
-    parser.add_argument('--head_deformer_hidden_dim', type=int, default=128, help="head deformer hidden dim")
-    parser.add_argument('--head_deformer_multires', type=int, default=6, help="head deformer multires")
+    parser.add_argument('--head_deformer_layers', type=int, default=5, help="head deformer layers")
+    parser.add_argument('--head_deformer_hidden_dim', type=int, default=256, help="head deformer hidden dim")
+    parser.add_argument('--head_deformer_multires', type=int, default=4, help="head deformer multires")
     parser.add_argument('--eye_deformer_layers', type=int, default=2, help="eye deformer layers")
     parser.add_argument('--eye_deformer_hidden_dim', type=int, default=64, help="eye deformer hidden dim")
     parser.add_argument('--eye_deformer_multires', type=int, default=2, help="eye deformer multires")
