@@ -59,7 +59,7 @@ def run(args, mesh, views, ict_facekit, deformer_net, encoder, shader, renderer,
 
     encoder_input = views["img"].permute(0, 3, 1, 2).to(device)
     features = encoder(encoder_input.to(device))
-    print(features[0, :53].cpu().data.numpy())
+    # print(features[0, :53].cpu().data.numpy())
 
     deformed = deformer_net(features, vertices=None)
 

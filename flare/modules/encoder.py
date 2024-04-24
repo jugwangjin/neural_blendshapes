@@ -29,8 +29,8 @@ class ResnetEncoder(nn.Module):
 
     def forward(self, inputs):
         # print(inputs.shape)
-        with torch.no_grad():
-            inputs = self.resize(inputs)
+        # with torch.no_grad():
+        inputs = self.resize(inputs)
         # normalize inputs,  mean=[0.485, 0.456, 0.406] and std=[0.229, 0.224, 0.225].
         inputs = (inputs - self.mean) / self.std
          

@@ -1,10 +1,10 @@
 run_name = mar_debug
 
-input_dir = ../flare_data/marcel
+input_dir = /data1/gwangjin/flare/marcel
 train_dir = ["MVI_1797", "MVI_1801"]
 eval_dir = ["MVI_1802"]
-working_dir = 
-output_dir = out/
+working_dir = .
+output_dir = /Bean/log/gwangjin/2024/neural_blendshapes
 
 sample_idx_ratio = 50
 
