@@ -21,7 +21,7 @@ from flare.core import (
     Mesh, Renderer
 )
 from flare.modules import (
-    NeuralShader, get_mlp_deformer, ResnetEncoder
+    NeuralShader, get_neural_blendshapes, ResnetEncoder
 )
 from flare.utils import (
     AABB, read_mesh,
@@ -55,17 +55,10 @@ def load_ict_facekit(args, device):
 # ==============================================================================================
 # evaluation
 # ==============================================================================================    
-def run(args, mesh, views, ict_facekit, deformer_net, encoder, shader, renderer, device, channels_gbuffer, lgt):
+def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt):
+    return_dict = neural_blendshapes(views["img"].to(device))
 
-    encoder_input = views["img"].permute(0, 3, 1, 2).to(device)
-    features = encoder(encoder_input.to(device))
-    # print(features[0, :53].cpu().data.numpy())
-
-    deformed = deformer_net(features, vertices=None)
-
-    deformed_vertices = mesh.vertices[None].repeat(views["img"].shape[0], 1, 1)
-    deformed_vertices[:, ict_facekit.head_indices] = deformed["deformed_head"]
-    deformed_vertices[:, ict_facekit.eyeball_indices] = deformed["deformed_eyes"]
+    deformed_vertices = return_dict['deformed_mesh']
     
     d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
     ## ============== Rasterize ==============================
@@ -81,16 +74,11 @@ def run(args, mesh, views, ict_facekit, deformer_net, encoder, shader, renderer,
 # ==============================================================================================
 # relight: run
 # ==============================================================================================  
-def run_relight(args, mesh, views, ict_facekit, deformer_net, encoder, shader, renderer, device, channels_gbuffer, lgt_list, images_save_path):
+def run_relight(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt_list, images_save_path):
+    return_dict = neural_blendshapes(views["img"].to(device))
 
-    encoder_input = views["img"].permute(0, 3, 1, 2).to(device)
-    features = encoder(encoder_input.to(device))
+    deformed_vertices = return_dict['deformed_mesh']
 
-    deformed = deformer_net(features, vertices=None)
-
-    deformed_vertices = mesh.vertices[None].repeat(views["img"].shape[0], 1, 1)
-    deformed_vertices[:, ict_facekit.head_indices] = deformed["deformed_head"]
-    deformed_vertices[:, ict_facekit.eyeball_indices] = deformed["deformed_eyes"]
     d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
     ## ============== Rasterize ==============================
     gbuffers = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
@@ -104,12 +92,12 @@ def run_relight(args, mesh, views, ict_facekit, deformer_net, encoder, shader, r
 # ==============================================================================================
 # evaluation: numbers
 # ==============================================================================================  
-def quantitative_eval(args, mesh, dataloader_validate, ict_facekit, deformer_net, encoder, shader, renderer, device, channels_gbuffer,
+def quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer,
                         experiment_dir, images_eval_save_path, lgt=None, save_each=False):
 
     for it, views in enumerate(dataloader_validate):
         with torch.no_grad():
-            rgb_pred, gbuffer, cbuffer = run(args, mesh, views, ict_facekit, deformer_net, encoder, shader, renderer, device, 
+            rgb_pred, gbuffer, cbuffer = run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, 
                     channels_gbuffer, lgt=lgt)
 
         rgb_pred = rgb_pred * gbuffer["mask"]
@@ -166,29 +154,13 @@ if __name__ == '__main__':
     print("Rasterizing:", channels_gbuffer)
 
 
-    feature_dim = args.feature_dim
-    head_deformer_layers = args.head_deformer_layers
-    head_deformer_hidden_dim = args.head_deformer_hidden_dim
-    head_deformer_multires = args.head_deformer_multires
-    eye_deformer_layers = args.eye_deformer_layers
-    eye_deformer_hidden_dim = args.eye_deformer_hidden_dim
-    eye_deformer_multires = args.eye_deformer_multires
-
-    model_path = Path(experiment_dir / "stage_2" / "network_weights" / f"encoder_latest.pt")
-    encoder = ResnetEncoder(outsize=feature_dim)
-    encoder.load_state_dict(torch.load(str(model_path)))
-
-    model_path = Path(experiment_dir / "stage_2" / "network_weights" / f"deformer_latest.pt")
-    deformer_net = get_mlp_deformer(input_feature_dim=feature_dim, head_deformer_layers=head_deformer_layers, 
-                                        head_deformer_hidden_dim=head_deformer_hidden_dim, head_deformer_multires=head_deformer_multires,
-                                                eye_deformer_layers=eye_deformer_layers, eye_deformer_hidden_dim=eye_deformer_hidden_dim,
-                                                  eye_deformer_multires=eye_deformer_multires, 
-                                                  model_path=model_path, train=args.train_deformer, device=device) 
+    model_path = Path(experiment_dir / "stage_2" / "network_weights" / f"neural_blendshapes_latest.pt")
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, device=device) 
 
     head_template = ict_canonical_mesh.vertices[ict_facekit.head_indices].to(device)
     eye_template = ict_canonical_mesh.vertices[ict_facekit.eyeball_indices].to(device)
 
-    deformer_net.set_template((head_template, eye_template))
+    neural_blendshapes.set_template((head_template, eye_template))
 
     load_shader = Path(experiment_dir / "stage_2" / "network_weights" / f"shader_latest.pt")
     assert os.path.exists(load_shader)
@@ -199,9 +171,9 @@ if __name__ == '__main__':
 
     print("=="*50)
     shader.eval()
-    deformer_net.eval()
+    neural_blendshapes.eval()
 
-    batch_size = views["img"].shape[0]
+    batch_size = args.batch_size
     print("Batch Size:", batch_size)
     
     mesh = ict_canonical_mesh.with_vertices(ict_canonical_mesh.vertices)
@@ -214,10 +186,10 @@ if __name__ == '__main__':
 
     for it, views in enumerate(dataloader_validate):
         with torch.no_grad():
-            run_relight(args, mesh, views, ict_facekit, deformer_net, encoder, shader, renderer, device, channels_gbuffer, lgt_list, images_eval_save_path / "qualitative_results")
+            run_relight(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt_list, images_eval_save_path / "qualitative_results")
             
     # # ==============================================================================================
     # # evaluation: qualitative and quantitative - animation
     # # ==============================================================================================  
-    quantitative_eval(args, mesh, dataloader_validate, ict_facekit, deformer_net, encoder, shader, renderer, device, channels_gbuffer, experiment_dir
+    quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, experiment_dir
                     , images_eval_save_path  / "qualitative_results", lgt=lgt, save_each=True)

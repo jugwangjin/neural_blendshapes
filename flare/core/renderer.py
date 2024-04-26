@@ -122,6 +122,10 @@ class Renderer:
             
         return torch.cat(p_l, dim=0), torch.cat(rt_gl, dim=0)
     
+    def get_vertices_clip_space(self, gbuffers, vertices):
+        P_batch = gbuffers["P_batch"]
+        return Renderer.transform_pos_batch(P_batch, vertices)
+
     def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx):
         """ Render G-buffers from a set of views.
 
@@ -142,6 +146,8 @@ class Renderer:
         view_dir = torch.cat([v.center.unsqueeze(0) for v in views], dim=0)
         view_dir = view_dir[:, None, None, :]
         gbuffer = {}
+
+        gbuffer["P_batch"] = P_batch
 
         # deformed points in G-buffer
         if "position" in channels or "depth" in channels:

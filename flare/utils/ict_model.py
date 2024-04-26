@@ -73,7 +73,8 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.facial_mask[self.face_indices] = 1
         self.facial_mask[self.eyeball_indices] = 1
 
-
+        self.coords_min = torch.amin(self.canonical, dim=1)[0] # shape of (3)
+        self.coords_max = torch.amax(self.canonical, dim=1)[0] # shape of (3)
 
     def to_canonical_space(self, mesh):
         """
