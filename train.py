@@ -28,7 +28,7 @@ from flare.core import (
 )
 from flare.losses import *
 from flare.modules import (
-    NeuralShader, get_neural_blendshapes, ResnetEncoder
+    NeuralShader, get_neural_blendshapes
 )
 from flare.utils import (
     AABB, read_mesh, write_mesh,
@@ -96,11 +96,18 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     print("Training Deformer")
 
     neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, device=device) 
-
+    print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
     neural_blendshapes.set_template(ict_canonical_mesh.vertices, ict_facekit.coords_min, ict_facekit.coords_max)
 
-    optimizer_neural_blendshapes = torch.optim.Adam(list(neural_blendshapes.parameters()), lr=args.lr_deformer)
+    neural_blendshapes = neural_blendshapes.to(device)
 
+    
+
+    optimizer_neural_blendshapes = torch.optim.Adam(list(neural_blendshapes.parameters()), lr=args.lr_deformer)
+    # for name, param in neural_blendshapes.named_parameters():
+    #     print(name)
+    # print(neural_blendshapes.coords_min, neural_blendshapes.coords_max)
+    # exit()
     # ==============================================================================================
     # shading
     # ==============================================================================================
@@ -150,7 +157,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "closure": args.weight_closure,
         "ict": args.weight_ict,
         "ict_landmark": args.weight_ict_landmark,
-        # "random_ict": args.weight_random_ict,
+        "random_ict": args.weight_random_ict,
         # "ict_identity": args.weight_ict_identity,
         "feature_regularization": args.weight_feature_regularization,
         # "head_direction": args.weight_head_direction,
@@ -259,7 +266,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['normal'], losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
 
             # ict loss
-            losses['ict'], losses['ict_landmark'] = ict_loss(ict_facekit, return_dict, views_subset, renderer, gbuffers)
+            losses['ict'], losses['random_ict'], losses['ict_landmark'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
             
             # feature regularization
             losses['feature_regularization'] = feature_regularization_loss(features)
@@ -275,7 +282,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             if len(acc_losses) > 9:
                 losses_to_log = {}
                 for k in acc_losses[0].keys():
-                    losses_to_log[k] = torch.stack([l[k] for l in acc_losses]).mean()
+                    losses_to_log[k] = torch.stack([l[k] for l in acc_losses]).mean() * loss_weights[k]
                 losses_to_log["total_loss"] = acc_total_loss / len(acc_losses)
                 if 'debug' not in run_name:
                     wandb.log({k: v.item() for k, v in losses_to_log.items()}, step=iteration)
@@ -372,7 +379,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             ## ============== save intermediate ==============================
             if (args.save_frequency > 0) and (iteration == 1 or iteration % args.save_frequency == 0):
                 with torch.no_grad():
-                    # write_mesh(meshes_save_path / f"mesh_{iteration:06d}.obj", mesh.detach().to('cpu'))                                
+                    write_mesh(meshes_save_path / f"mesh_{iteration:06d}.obj", mesh.detach().to('cpu'))                                
                     shader.save(shaders_save_path / f'shader_{iteration:06d}.pt')
                     neural_blendshapes.save(shaders_save_path / f'neural_blendshapes_{iteration:06d}.pt')
 
@@ -388,7 +395,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # ==============================================================================================
     with open(experiment_dir / "args.txt", "w") as text_file:
         print(f"{args}", file=text_file)
-    # write_mesh(meshes_save_path / f"mesh_latest.obj", mesh.detach().to('cpu'))
+    write_mesh(meshes_save_path / f"mesh_latest.obj", mesh.detach().to('cpu'))
     shader.save(shaders_save_path / f'shader_latest.pt')
     neural_blendshapes.save(shaders_save_path / f'neural_blendshapes_latest.pt')
 

@@ -21,7 +21,7 @@ from flare.core import (
     Mesh, Renderer
 )
 from flare.modules import (
-    NeuralShader, get_neural_blendshapes, ResnetEncoder
+    NeuralShader, get_neural_blendshapes
 )
 from flare.utils import (
     AABB, read_mesh,

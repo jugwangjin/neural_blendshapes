@@ -2,6 +2,8 @@ import torch
 from torch import nn
 import torchvision
 
+import numpy as np
+
 class ResnetEncoder(nn.Module):
     def __init__(self, outsize):
         super(ResnetEncoder, self).__init__()
@@ -39,7 +41,11 @@ class ResnetEncoder(nn.Module):
         features = self.layers(features)
 
         # we will use first 52 elements as FACS features
-        features[:, :53] = torch.nn.functional.sigmoid(features[:, :53])
+        features[:, :56] = torch.nn.functional.sigmoid(features[:, :56])
+
+        features[:, 53:56] = features[:, 53:56] * torch.pi / 2.
+
+        features[:, -1] = torch.exp(features[:, -1] * 0.1)
 
         return features
 

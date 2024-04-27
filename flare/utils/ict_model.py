@@ -58,8 +58,6 @@ class ICTFaceKitTorch(torch.nn.Module):
             self.register_buffer('R', torch.eye(3)[None].cpu()) # shape of (B, 3, 3)
             self.register_buffer('T', torch.zeros(1, 3).cpu()) # shape of (B, 3)
 
-        self.identity = torch.nn.Parameter(self.identity.detach())
-
         # with torch.no_grad():
         canonical = self.forward(expression_weights=self.expression, identity_weights=self.identity, to_canonical=True)
         self.register_buffer('canonical', canonical)
@@ -73,8 +71,8 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.facial_mask[self.face_indices] = 1
         self.facial_mask[self.eyeball_indices] = 1
 
-        self.coords_min = torch.amin(self.canonical, dim=1)[0] # shape of (3)
-        self.coords_max = torch.amax(self.canonical, dim=1)[0] # shape of (3)
+        self.register_buffer('coords_min', torch.amin(self.canonical, dim=1)[0]) # shape of (3)
+        self.register_buffer('coords_max', torch.amax(self.canonical, dim=1)[0]) # shape of (3)
 
     def to_canonical_space(self, mesh):
         """

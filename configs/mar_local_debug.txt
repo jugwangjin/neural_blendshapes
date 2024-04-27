@@ -1,13 +1,13 @@
-run_name = mar_v1
+run_name = mar_debug_
 
-input_dir = /data1/gwangjin/flare/marcel
+input_dir = ../flare_data/marcel
 train_dir = ["MVI_1797", "MVI_1801"]
 eval_dir = ["MVI_1802"]
-working_dir = .
-output_dir = /Bean/log/gwangjin/2024/neural_blendshapes
+working_dir = 
+output_dir = out/
 
 batch_size = 1
-sample_idx_ratio = 1
+sample_idx_ratio = 55
 
 iterations = 20000
 upsample_iterations = [500]
@@ -28,17 +28,13 @@ weight_laplacian_regularization = 12.0
 
 weight_ict_landmark = 1
 weight_normal = 1
-weight_normal_laplacian = 1
+weight_normal_laplacian = 10
 weight_landmark = 1
 weight_closure = 10
-weight_ict = 0.5
-weight_random_ict = 0.5
+weight_ict = 1
 
 
 light_mlp_ch = 3
 light_mlp_dims = [64, 64]
 material_mlp_dims = [128, 128, 128, 128]
 material_mlp_ch = 5
-
-save_frequency = 1000
-    
