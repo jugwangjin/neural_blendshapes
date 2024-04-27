@@ -4,6 +4,9 @@ import torchvision
 
 import numpy as np
 
+PI = torch.pi
+HALF_PI = torch.pi / 2
+
 class ResnetEncoder(nn.Module):
     def __init__(self, outsize):
         super(ResnetEncoder, self).__init__()
@@ -43,7 +46,7 @@ class ResnetEncoder(nn.Module):
         # we will use first 52 elements as FACS features
         features[:, :56] = torch.nn.functional.sigmoid(features[:, :56])
 
-        features[:, 53:56] = features[:, 53:56] * torch.pi / 2.
+        features[:, 53:56] = features[:, 53:56] * PI - HALF_PI
 
         features[:, -1] = torch.exp(features[:, -1] * 0.1)
 

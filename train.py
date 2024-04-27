@@ -256,7 +256,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
             
             # landmark losses
-            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, device)
+            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, device)
             # losses['landmark'], losses['closure'], losses['head_direction'], losses['direction_estimation'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, device)
              
             # losses['closure'] = closure_loss(ict_facekit, gbuffers, views_subset, device)
@@ -266,6 +266,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['normal'], losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
 
             # ict loss
+            # losses['ict'], losses['random_ict'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
             losses['ict'], losses['random_ict'], losses['ict_landmark'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
             
             # feature regularization
@@ -450,9 +451,11 @@ if __name__ == '__main__':
             main(args, device, dataset_train, dataloader_train, debug_views)
             break  # Exit the loop if main() runs successfully
         except ValueError as e:
+            print(e)
             print("--"*50)
             print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
             print("--"*50)
+            # raise e
             time.sleep(5)
 
         except Exception as e:

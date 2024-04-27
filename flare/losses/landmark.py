@@ -5,7 +5,9 @@ LIP_PAIRS = torch.tensor([[61, 67], [62, 66], [63, 65]]).int()
 
 DIRECTION_PAIRS = torch.tensor([[36, 64],[45, 48]]).int()
 
-def landmark_loss(ict_facekit, gbuffers, views_subset, features, device):
+import pytorch3d.transforms as pt3d
+
+def landmark_loss(ict_facekit, gbuffers, views_subset, features, nueral_blendshapes, device):
     """
     Calculates the landmark loss by comparing the detected landmarks with the deformed landmarks.
 
@@ -27,7 +29,6 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, features, device):
     # Convert the deformed landmarks to normalized coordinates
     landmarks_on_clip_space = landmarks_on_clip_space[..., :3] / torch.clamp(landmarks_on_clip_space[..., 3:], min=1e-8)
     
-
     with torch.no_grad():
         # Normalize the detected landmarks to the range [-1, 1]
         detected_landmarks = views_subset['landmark'].clone().detach()
