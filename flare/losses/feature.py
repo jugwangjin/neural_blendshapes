@@ -7,11 +7,11 @@ def feature_regularization_loss(feature):
     
 
     # facs regularization is to be pseudo L0 Norm
-    facs_regularization = torch.mean(torch.pow(facs+1e-6, 0.5))
+    facs_regularization = torch.mean(torch.pow(facs+1e-6, 0.75))
 
     # latent regularization: rotation, translation to be zero, scale to be 1
-    latent_regularization = torch.mean(torch.pow(rotation, 2)) + torch.mean(torch.pow(translation, 2)) + torch.mean(torch.pow(scale - 1, 2))
+    latent_regularization = torch.mean(torch.pow(rotation, 2)) * 1e-2 + torch.mean(torch.pow(translation, 2)) + torch.mean(torch.pow(scale - 1, 2))
 
 
-    loss = facs_regularization + latent_regularization
+    loss = facs_regularization * 1e-3 + latent_regularization
     return loss

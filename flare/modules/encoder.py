@@ -22,9 +22,9 @@ class ResnetEncoder(nn.Module):
         
         self.layers = nn.Sequential(
             nn.Linear(feature_size, min(feature_size, 512)),
-            nn.LeakyReLU(),
+            nn.SiLU(),
             nn.Linear(min(feature_size, 512), min(feature_size, 512)),
-            nn.LeakyReLU(),
+            nn.SiLU(),
             nn.Linear(min(feature_size, 512), outsize),
         )
 
@@ -48,7 +48,7 @@ class ResnetEncoder(nn.Module):
 
         features[..., 53:56] = features[..., 53:56] * PI - HALF_PI
 
-        features[..., -1] = torch.exp(features[..., -1] * 0.1)
+        features[..., -1] = torch.exp(features[..., -1] * 0.25)
 
         return features
 

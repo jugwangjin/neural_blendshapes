@@ -2,8 +2,9 @@ import numpy as np
 import torch
 from torch import nn
 from .encoder import ResnetEncoder
+from flare.modules.embedder import *
 
-import tinycudann as tcnn
+# import tinycudann as tcnn
 import pytorch3d.transforms as pt3d
 
 def initialize_weights(m, gain=0.1):
@@ -19,48 +20,78 @@ class NeuralBlendshapes(nn.Module):
         super().__init__()
         self.image_encoder = ResnetEncoder(60)
 
-        L = 8; F = 4; log2_T = 19; N_min = 16
-        b = np.exp(np.log(2048/N_min)/(L-1))
+        # L = 8; F = 4; log2_T = 19; N_min = 16
+        # b = np.exp(np.log(2048/N_min)/(L-1))
 
-        self.coord_encoder = tcnn.Encoding(
-                        n_input_dims=3, 
-                        encoding_config={
-                            "otype": "Grid",
-                            "type": "Hash",
-                            "n_levels": L,
-                            "n_features_per_level": F,
-                            "log2_hashmap_size": log2_T,
-                            "base_resolution": N_min,
-                            "per_level_scale": b,
-                            "interpolation": "Linear"
-                            },      
-                        ).to('cuda')
+        # self.coord_encoder = tcnn.Encoding(
+        #                 n_input_dims=3, 
+        #                 encoding_config={
+        #                     "otype": "Grid",
+        #                     "type": "Hash",
+        #                     "n_levels": L,
+        #                     "n_features_per_level": F,
+        #                     "log2_hashmap_size": log2_T,
+        #                     "base_resolution": N_min,
+        #                     "per_level_scale": b,
+        #                     "interpolation": "Linear"
+        #                     },      
+        #                 ).to('cuda')
+
+        self.coords_encoder, dim = get_embedder(6)
 
 
         self.expression_deformer = nn.Sequential(
-                                    nn.Linear(32+53, 128),
-                                    nn.Softplus(),
+                                    nn.Linear(dim+53, 128),
+                                    nn.SiLU(),
                                     nn.Linear(128, 128),
-                                    nn.Softplus(),
+                                    nn.SiLU(),
                                     nn.Linear(128, 128),
-                                    nn.Softplus(),
+                                    nn.SiLU(),
+                                    nn.Linear(128, 128),
+                                    nn.SiLU(),
+                                    nn.Linear(128, 128),
+                                    nn.SiLU(),
                                     nn.Linear(128, 3)
                                     )
         
+        # L = 8; F = 2; log2_T = 19; N_min = 16
+        # b = np.exp(np.log(2048/N_min)/(L-1))
+
+        # self.coarse_coord_encoder = tcnn.Encoding(
+        #                 n_input_dims=3, 
+        #                 encoding_config={
+        #                     "otype": "Grid",
+        #                     "type": "Hash",
+        #                     "n_levels": L,
+        #                     "n_features_per_level": F,
+        #                     "log2_hashmap_size": log2_T,
+        #                     "base_resolution": N_min,
+        #                     "per_level_scale": b,
+        #                     "interpolation": "Linear"
+        #                     },      
+        #                 ).to('cuda')
+
+
+        self.coarse_coords_encoder, dim = get_embedder(2)
+
         self.template_deformer = nn.Sequential(
-                    nn.Linear(3, 32),
-                    nn.Softplus(),
+                    nn.Linear(dim, 32),
+                    nn.SiLU(),
                     nn.Linear(32,32),
-                    nn.Softplus(),
+                    nn.SiLU(),
+                    nn.Linear(32,32),
+                    nn.SiLU(),
                     nn.Linear(32,3)
         )
         
         self.pose_weight = nn.Sequential(
-                    nn.Linear(3+7, 64),
-                    nn.Softplus(),
-                    nn.Linear(64,64),
-                    nn.Softplus(),
-                    nn.Linear(64,1),
+                    nn.Linear(dim+7, 64),
+                    nn.SiLU(),
+                    nn.Linear(64,32),
+                    nn.SiLU(),
+                    nn.Linear(32,32),
+                    nn.SiLU(),
+                    nn.Linear(32,1),
                     nn.Tanh(),
         )
 
@@ -74,6 +105,9 @@ class NeuralBlendshapes(nn.Module):
     def set_template(self, template, coords_min, coords_max):
         assert len(template.shape) == 2, "template should be a tensor shape of (num_vertices, 3) but got shape of {}".format(template.shape)
         self.register_buffer('template', template)
+
+        self.register_buffer('encoded_vertices', self.coords_encoder(template))
+        self.register_buffer('coarse_encoded_vertices', self.coarse_coords_encoder(template))
 
         self.register_buffer('coords_min', coords_min)
         self.register_buffer('coords_max', coords_max)
@@ -99,9 +133,17 @@ class NeuralBlendshapes(nn.Module):
         #     coords_max = coords_max if coords_max is not None else self.coords_max
         #     range = coords_max - coords_min
 
-        encoded_vertices = self.coord_encoder((vertices + 1) / 2).type_as(vertices)
+            coarse_encoded_vertices = self.coarse_coords_encoder(vertices)
+            encoded_vertices = self.coords_encoder(vertices)
+        else:
+            coarse_encoded_vertices = self.coarse_encoded_vertices
+            encoded_vertices = self.encoded_vertices
 
-        template_deformation = self.template_deformer(vertices) * 0.5
+        template_deformation = self.template_deformer(coarse_encoded_vertices)
+        # template_deformation = self.template_deformer(self.coarse_coord_encoder((vertices + 1) / 2).type_as(vertices))
+
+        # encoded_vertices = self.coord_encoder((vertices + 1) / 2).type_as(vertices)
+
 
         # concat feature and encoded vertices. vertices has shape of N_VERTICES, 16 and features has shape of N_BATCH, 64
         deformer_input = torch.cat([encoded_vertices[None].repeat(features.shape[0], 1, 1), \
@@ -114,7 +156,7 @@ class NeuralBlendshapes(nn.Module):
         
         expression_vertices = vertices[None] + expression_deformation + template_deformation[None]
 
-        pose_weight = self.pose_weight(torch.cat([vertices[None].repeat(features.shape[0], 1, 1), \
+        pose_weight = self.pose_weight(torch.cat([coarse_encoded_vertices[None].repeat(features.shape[0], 1, 1), \
                                                 features[:, None, 53:].repeat(1, V, 1)], dim=2)) # shape of B V 1
         
         euler_angle = features[..., 53:56]

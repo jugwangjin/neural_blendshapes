@@ -341,6 +341,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             neural_blendshapes.zero_grad()
 
             loss.backward()
+            # print grad of parameters of neural_blendshapes.template_deformer
+            # for name, param in neural_blendshapes.template_deformer.named_parameters():
+            #     if param.grad is not None:
+            #         print(name, param)
+            #     if param.grad is None:
+            #         print(name, "None")
+            
             torch.cuda.synchronize()
 
             ### increase the gradients of positional encoding following tinycudnn
