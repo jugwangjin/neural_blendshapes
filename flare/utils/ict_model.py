@@ -62,9 +62,9 @@ class ICTFaceKitTorch(torch.nn.Module):
         canonical = self.forward(expression_weights=self.expression, identity_weights=self.identity, to_canonical=True)
         self.register_buffer('canonical', canonical)
 
-        self.face_indices = list(range(0, 9409)) + list(range(11248, 21451)) + list(range(24591, 25351))
+        self.face_indices = list(range(0, 9409)) + list(range(11248, 21451))
         self.not_face_indices = list(range(9409, 11248))
-        self.eyeball_indices = list(range(21451, 24591))
+        self.eyeball_indices = list(range(21451, 25351))
         self.head_indices = self.face_indices + self.not_face_indices
 
         self.facial_mask = torch.zeros(self.canonical.size(1))

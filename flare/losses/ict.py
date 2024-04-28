@@ -23,9 +23,10 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     frontal_indices = ict_facekit.face_indices + ict_facekit.eyeball_indices
 
-    deformed_vertices = return_dict['expression_deformation'] + ict_facekit.canonical
 
-    deformed_vertices_w_template = deformed_vertices + return_dict['template_deformation']
+    deformed_vertices = return_dict['full_expression_deformation'] + ict_facekit.canonical
+
+    deformed_vertices_w_template = deformed_vertices + return_dict['full_template_deformation']
 
     # aligned_ict, to_canonical = align_to_canonical(ict, deformed_vertices, ict_facekit.landmark_indices)
 
@@ -96,10 +97,10 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     random_ict = ict_facekit(expression_weights = random_features[..., :53], to_canonical = True)
     
-    random_return_dict = neural_blendshapes(image_input=False, features=random_features)
-    random_deformed_vertices = random_return_dict['expression_deformation'] + ict_facekit.canonical
+    random_return_dict = neural_blendshapes(image_input=False, lmks=None, features=random_features)
+    random_deformed_vertices = random_return_dict['full_expression_deformation'] + ict_facekit.canonical
 
-    random_deformed_vertices_w_template = random_deformed_vertices + random_return_dict['template_deformation']
+    random_deformed_vertices_w_template = random_deformed_vertices + random_return_dict['full_template_deformation']
 
     # random_aligned_ict = torch.einsum('bni, bji -> bnj', random_ict, to_canonical.R)
     # random_aligned_ict = (to_canonical.s[:, None, None] * random_aligned_ict + to_canonical.T[:, None])

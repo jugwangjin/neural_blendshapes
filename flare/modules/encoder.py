@@ -21,7 +21,7 @@ class ResnetEncoder(nn.Module):
         self.encoder = self.encoder[:-1]
         
         self.layers = nn.Sequential(
-            nn.Linear(feature_size, min(feature_size, 512)),
+            nn.Linear(feature_size + 68*3, min(feature_size, 512)),
             nn.SiLU(),
             nn.Linear(min(feature_size, 512), min(feature_size, 512)),
             nn.SiLU(),
@@ -32,15 +32,15 @@ class ResnetEncoder(nn.Module):
         self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer('std', torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
-    def forward(self, inputs):
+    def forward(self, image, lmks):
         # print(inputs.shape)
         # with torch.no_grad():
-        inputs = self.resize(inputs)
+        inputs = self.resize(image)
         # normalize inputs,  mean=[0.485, 0.456, 0.406] and std=[0.229, 0.224, 0.225].
         inputs = (inputs - self.mean) / self.std
          
         features = self.encoder(inputs)
-        features = features.reshape(features.size(0), -1)
+        features = torch.cat([features.reshape(features.size(0), -1), lmks.reshape(lmks.size(0), -1)], dim=-1)
         features = self.layers(features)
 
         # we will use first 52 elements as FACS features

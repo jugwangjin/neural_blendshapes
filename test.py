@@ -56,9 +56,9 @@ def load_ict_facekit(args, device):
 # evaluation
 # ==============================================================================================    
 def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt):
-    return_dict = neural_blendshapes(views["img"].to(device))
+    return_dict = neural_blendshapes(views["img"].to(device), views["landmark"].to(device))
 
-    deformed_vertices = return_dict['deformed_mesh']
+    deformed_vertices = return_dict['full_deformed_mesh']
     
     d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
     ## ============== Rasterize ==============================
@@ -75,9 +75,9 @@ def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, de
 # relight: run
 # ==============================================================================================  
 def run_relight(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt_list, images_save_path):
-    return_dict = neural_blendshapes(views["img"].to(device))
+    return_dict = neural_blendshapes(views["img"].to(device), views['landmark'])
 
-    deformed_vertices = return_dict['deformed_mesh']
+    deformed_vertices = return_dict['full_deformed_mesh']
 
     d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
     ## ============== Rasterize ==============================

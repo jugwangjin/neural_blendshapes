@@ -97,7 +97,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
-    neural_blendshapes.set_template(ict_canonical_mesh.vertices, ict_facekit.coords_min, ict_facekit.coords_max)
+    neural_blendshapes.set_template((ict_canonical_mesh.vertices[ict_facekit.head_indices], ict_canonical_mesh.vertices[ict_facekit.eyeball_indices]),
+                                    ict_canonical_mesh.vertices.shape, ict_facekit.head_indices, ict_facekit.eyeball_indices)
 
     neural_blendshapes = neural_blendshapes.to(device)
 
@@ -210,17 +211,17 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # first, permute the input images to be in the correct format
             input_image = views_subset["img"].permute(0, 3, 1, 2).to(device)
 
-            return_dict = neural_blendshapes(input_image)
+            return_dict = neural_blendshapes(input_image, views_subset["landmark"])
 
             features = return_dict['features']
 
-
-            mesh = ict_canonical_mesh.with_vertices(return_dict["template_deformation"] + ict_canonical_mesh.vertices)
+            mesh = ict_canonical_mesh.with_vertices(return_dict["full_template_deformation"] + ict_canonical_mesh.vertices)
             
             # ==============================================================================================
             # deformation of canonical mesh
             # ==============================================================================================
-            deformed_vertices = return_dict['deformed_mesh']
+            
+            deformed_vertices = return_dict["full_deformed_mesh"]
 
             d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
 
