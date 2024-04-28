@@ -29,21 +29,21 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, features, nueral_blendsha
     # Convert the deformed landmarks to normalized coordinates
     landmarks_on_clip_space = landmarks_on_clip_space[..., :3] / torch.clamp(landmarks_on_clip_space[..., 3:], min=1e-8)
     
-    with torch.no_grad():
+    # with torch.no_grad():
         # Normalize the detected landmarks to the range [-1, 1]
-        detected_landmarks = views_subset['landmark'].clone().detach()
-        detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
-        detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
-        
-        # z axis difference
-        min_detected_landmarks_z = detected_landmarks[:, :, 2].min(dim=1, keepdim=True)[0]
+    detected_landmarks = views_subset['landmark'].clone().detach()
+    detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
+    detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
+    
+    # z axis difference
+    # min_detected_landmarks_z = detected_landmarks[:, :, 2].min(dim=1, keepdim=True)[0]
 
-        min_landmarks_on_clip_space_z = landmarks_on_clip_space[:, :, 2].min(dim=1, keepdim=True)[0]
-        # align detected_landmarks to landmarks_on_clip_space for z axis
-        detected_landmarks[:, :, 2] = (detected_landmarks[:, :, 2] - min_detected_landmarks_z) + min_landmarks_on_clip_space_z
+    # min_landmarks_on_clip_space_z = landmarks_on_clip_space[:, :, 2].min(dim=1, keepdim=True)[0]
+    # align detected_landmarks to landmarks_on_clip_space for z axis
+    # detected_landmarks[:, :, 2] = (detected_landmarks[:, :, 2] - min_detected_landmarks_z) + min_landmarks_on_clip_space_z
 
     # Calculate the loss by comparing the detected landmarks with the deformed landmarks
-    landmark_loss = torch.mean(torch.pow(detected_landmarks[..., :3] - landmarks_on_clip_space[..., :3], 2) * detected_landmarks[..., -1:])
+    landmark_loss = torch.mean(torch.pow(detected_landmarks[..., :2] - landmarks_on_clip_space[..., :2], 2) * detected_landmarks[..., -1:])
     
     detected_eye_closure = detected_landmarks[:, EYELID_PAIRS[:, 0], :2] - detected_landmarks[:, EYELID_PAIRS[:, 1], :2]
     deformer_eye_closure = landmarks_on_clip_space[:, EYELID_PAIRS[:, 0], :2] - landmarks_on_clip_space[:, EYELID_PAIRS[:, 1], :2]

@@ -101,7 +101,7 @@ class NeuralBlendshapes(nn.Module):
 
         encoded_vertices = self.coord_encoder((vertices + 1) / 2).type_as(vertices)
 
-        template_deformation = self.template_deformer(encoded_vertices) 
+        template_deformation = self.template_deformer(encoded_vertices) * 0.1
 
         # concat feature and encoded vertices. vertices has shape of N_VERTICES, 16 and features has shape of N_BATCH, 64
         deformer_input = torch.cat([encoded_vertices[None].repeat(features.shape[0], 1, 1), \

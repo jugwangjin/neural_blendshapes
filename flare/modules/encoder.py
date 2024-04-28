@@ -4,8 +4,8 @@ import torchvision
 
 import numpy as np
 
-PI = torch.pi
-HALF_PI = torch.pi / 2
+PI = torch.pi * 1.5
+HALF_PI = 1.5 * torch.pi / 2
 
 class ResnetEncoder(nn.Module):
     def __init__(self, outsize):

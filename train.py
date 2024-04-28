@@ -151,8 +151,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "roughness_regularization": args.weight_roughness_regularization,
         "white_light_regularization": args.weight_white_lgt_regularization,
         "fresnel_coeff": args.weight_fresnel_coeff,
-        "normal": args.weight_normal,
-        "normal_laplacian": args.weight_normal_laplacian,
+        # "normal": args.weight_normal,
+        # "normal_laplacian": args.weight_normal_laplacian,
         "landmark": args.weight_landmark,
         "closure": args.weight_closure,
         "ict": args.weight_ict,
@@ -191,6 +191,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     if 'debug' not in run_name:
         wandb.init(project="neural_blendshape", name=run_name, config=args)
     for epoch in progress_bar:
+        if epoch == epochs // 10: 
+            loss_weights["normal_laplacian"] = args.weight_normal_laplacian
+        # "normal_laplacian": args.weight_normal_laplacian,
+            
         for iter_, views_subset in enumerate(dataloader_train):
             # views_subset = debug_views
             iteration += 1
@@ -262,8 +266,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # losses['closure'] = closure_loss(ict_facekit, gbuffers, views_subset, device)
 
             # normal loss
-            # losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
-            losses['normal'], losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
+            if epoch >= epochs // 10:
+                losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
+            # losses['normal'], losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
 
             # ict loss
             # losses['ict'], losses['random_ict'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
@@ -292,24 +297,34 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 acc_total_loss = 0
 
             if iteration % 100 == 0:
-                DIRECTION_PAIRS = torch.tensor([[36, 64],[45, 48]]).int()
-                landmark_indices = ict_facekit.landmark_indices
-                landmarks_on_clip_space = gbuffers['deformed_verts_clip_space'][:, landmark_indices].clone()
-                landmarks_on_clip_space = landmarks_on_clip_space[..., :3] / torch.clamp(landmarks_on_clip_space[..., 3:], min=1e-8) # shape of B, N, 3
+                facs = features[0, :53]
+                euler_angle = features[0, 53:56]
+                translation = features[0, 56:59]
+                scale = features[0, -1:]
+
+                print(facs)
+                print(euler_angle)
+                print(translation)
+                print(scale)
+
+                # DIRECTION_PAIRS = torch.tensor([[36, 64],[45, 48]]).int()
+                # landmark_indices = ict_facekit.landmark_indices
+                # landmarks_on_clip_space = gbuffers['deformed_verts_clip_space'][:, landmark_indices].clone()
+                # landmarks_on_clip_space = landmarks_on_clip_space[..., :3] / torch.clamp(landmarks_on_clip_space[..., 3:], min=1e-8) # shape of B, N, 3
     
-                detected_landmarks = views_subset['landmark'].detach().data  # shape of B N 3        
-                detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
-                detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
+                # detected_landmarks = views_subset['landmark'].detach().data  # shape of B N 3        
+                # detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
+                # detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
 
-                detected_normal = detected_landmarks[:, DIRECTION_PAIRS[:, 0], :3] - detected_landmarks[:, DIRECTION_PAIRS[:, 1], :3]
-                detected_normal = torch.cross(detected_normal[:, 0], detected_normal[:, 1], dim=1)
-                detected_normal = detected_normal / (torch.norm(detected_normal, dim=1, keepdim=True) + 1e-8)
+                # detected_normal = detected_landmarks[:, DIRECTION_PAIRS[:, 0], :3] - detected_landmarks[:, DIRECTION_PAIRS[:, 1], :3]
+                # detected_normal = torch.cross(detected_normal[:, 0], detected_normal[:, 1], dim=1)
+                # detected_normal = detected_normal / (torch.norm(detected_normal, dim=1, keepdim=True) + 1e-8)
 
-                deformed_normal = landmarks_on_clip_space[:, DIRECTION_PAIRS[:, 0], :3] - landmarks_on_clip_space[:, DIRECTION_PAIRS[:, 1], :3]
-                deformed_normal = torch.cross(deformed_normal[:, 0], deformed_normal[:, 1], dim=1)
-                deformed_normal = deformed_normal / (torch.norm(deformed_normal, dim=1, keepdim=True) + 1e-8)
+                # deformed_normal = landmarks_on_clip_space[:, DIRECTION_PAIRS[:, 0], :3] - landmarks_on_clip_space[:, DIRECTION_PAIRS[:, 1], :3]
+                # deformed_normal = torch.cross(deformed_normal[:, 0], deformed_normal[:, 1], dim=1)
+                # deformed_normal = deformed_normal / (torch.norm(deformed_normal, dim=1, keepdim=True) + 1e-8)
 
-                print(torch.cat([detected_normal, deformed_normal, detected_normal - deformed_normal], dim=1))
+                # print(torch.cat([detected_normal, deformed_normal, detected_normal - deformed_normal], dim=1))
 
                 print("=="*50)
                 for k, v in losses.items():
