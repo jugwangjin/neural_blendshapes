@@ -97,9 +97,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
-    neural_blendshapes.set_template((ict_canonical_mesh.vertices[ict_facekit.head_indices], ict_canonical_mesh.vertices[ict_facekit.eyeball_indices]),
-                                    (ict_canonical_mesh._uv_coords[ict_facekit.head_indices], ict_canonical_mesh._uv_coords[ict_facekit.eyeball_indices]),
-                                    ict_canonical_mesh.vertices.shape, ict_facekit.head_indices, ict_facekit.eyeball_indices)
+    neural_blendshapes.set_template(ict_canonical_mesh.vertices,
+                                    ict_canonical_mesh._uv_coords,)
 
     neural_blendshapes = neural_blendshapes.to(device)
 
