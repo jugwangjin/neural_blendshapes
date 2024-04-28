@@ -44,11 +44,11 @@ class ResnetEncoder(nn.Module):
         features = self.layers(features)
 
         # we will use first 52 elements as FACS features
-        features[:, :56] = torch.nn.functional.sigmoid(features[:, :56])
+        features[..., :56] = torch.nn.functional.sigmoid(features[..., :56])
 
-        features[:, 53:56] = features[:, 53:56] * PI - HALF_PI
+        features[..., 53:56] = features[..., 53:56] * PI - HALF_PI
 
-        features[:, -1] = torch.exp(features[:, -1] * 0.1)
+        features[..., -1] = torch.exp(features[..., -1] * 0.1)
 
         return features
 

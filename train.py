@@ -191,8 +191,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     if 'debug' not in run_name:
         wandb.init(project="neural_blendshape", name=run_name, config=args)
     for epoch in progress_bar:
-        if epoch == epochs // 10: 
-            loss_weights["normal_laplacian"] = args.weight_normal_laplacian
+        # if epoch == epochs // 8: 
+        #     loss_weights["normal_laplacian"] = args.weight_normal_laplacian
         # "normal_laplacian": args.weight_normal_laplacian,
             
         for iter_, views_subset in enumerate(dataloader_train):
@@ -266,8 +266,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # losses['closure'] = closure_loss(ict_facekit, gbuffers, views_subset, device)
 
             # normal loss
-            if epoch >= epochs // 10:
-                losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
+            # if epoch >= epochs // 8:
+            #     losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
             # losses['normal'], losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
 
             # ict loss
@@ -358,6 +358,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             progress_bar.set_postfix({'loss': loss.detach().cpu().item()})
 
+            torch.cuda.empty_cache()
             # ==============================================================================================
             # warning: check if light mlp diverged
             # ==============================================================================================

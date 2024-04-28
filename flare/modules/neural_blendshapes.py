@@ -48,7 +48,7 @@ class NeuralBlendshapes(nn.Module):
                                     )
         
         self.template_deformer = nn.Sequential(
-                    nn.Linear(32, 32),
+                    nn.Linear(3, 32),
                     nn.Softplus(),
                     nn.Linear(32,32),
                     nn.Softplus(),
@@ -56,7 +56,7 @@ class NeuralBlendshapes(nn.Module):
         )
         
         self.pose_weight = nn.Sequential(
-                    nn.Linear(3+60, 64),
+                    nn.Linear(3+7, 64),
                     nn.Softplus(),
                     nn.Linear(64,64),
                     nn.Softplus(),
@@ -101,7 +101,7 @@ class NeuralBlendshapes(nn.Module):
 
         encoded_vertices = self.coord_encoder((vertices + 1) / 2).type_as(vertices)
 
-        template_deformation = self.template_deformer(encoded_vertices) * 0.1
+        template_deformation = self.template_deformer(vertices) * 0.5
 
         # concat feature and encoded vertices. vertices has shape of N_VERTICES, 16 and features has shape of N_BATCH, 64
         deformer_input = torch.cat([encoded_vertices[None].repeat(features.shape[0], 1, 1), \
@@ -114,16 +114,16 @@ class NeuralBlendshapes(nn.Module):
         
         expression_vertices = vertices[None] + expression_deformation + template_deformation[None]
 
-        pose_weight = self.pose_weight(torch.cat([expression_vertices, \
-                                                features[:, None].repeat(1, V, 1)], dim=2)) # shape of B V 1
+        pose_weight = self.pose_weight(torch.cat([vertices[None].repeat(features.shape[0], 1, 1), \
+                                                features[:, None, 53:].repeat(1, V, 1)], dim=2)) # shape of B V 1
         
-        euler_angle = features[:, 53:56]
-        translation = features[:, 56:59]
-        scale = features[:, -1:]
+        euler_angle = features[..., 53:56]
+        translation = features[..., 56:59]
+        scale = features[..., -1:]
 
         local_coordinate_vertices = expression_vertices - self.transform_origin[None, None]
 
-        scale = scale[:, None].repeat(1, V, 3)
+        scale = scale[:, None]
         local_coordinate_vertices = local_coordinate_vertices * scale
 
         rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle, convention = 'XYZ')

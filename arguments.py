@@ -60,7 +60,7 @@ def config_parser():
     parser.add_argument('--weight_ict', type=float, default=1, help="Weight of the ict term")
     parser.add_argument('--weight_random_ict', type=float, default=1, help="Weight of the ict term")
     parser.add_argument('--weight_ict_identity', type=float, default=1e-4, help="Weight of the flame term")
-    parser.add_argument('--weight_feature_regularization', type=float, default=1e-4, help="Weight of the flame term")
+    parser.add_argument('--weight_feature_regularization', type=float, default=1e-3, help="Weight of the flame term")
     parser.add_argument('--weight_head_direction', type=float, default=1, help="Weight of the flame term")
     parser.add_argument('--weight_direction_estimation', type=float, default=1, help="Weight of the flame term")
     parser.add_argument('--weight_ict_landmark', type=float, default=1, help="Weight of the flame term")
