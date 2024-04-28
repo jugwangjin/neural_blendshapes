@@ -196,7 +196,7 @@ class Mesh:
 
         self.vertices = self.vertices[vmapping]
         self.indices = faces
-
+        print(self._uv_coords.shape, self.vertices.shape)
 
     def compute_connectivity(self):
         self.xatlas_uvmap()

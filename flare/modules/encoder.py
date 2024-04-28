@@ -25,6 +25,8 @@ class ResnetEncoder(nn.Module):
             nn.SiLU(),
             nn.Linear(min(feature_size, 512), min(feature_size, 512)),
             nn.SiLU(),
+            nn.Linear(min(feature_size, 512), min(feature_size, 512)),
+            nn.SiLU(),
             nn.Linear(min(feature_size, 512), outsize),
         )
 
@@ -40,7 +42,7 @@ class ResnetEncoder(nn.Module):
         inputs = (inputs - self.mean) / self.std
          
         features = self.encoder(inputs)
-        features = torch.cat([features.reshape(features.size(0), -1), lmks.reshape(lmks.size(0), -1)], dim=-1)
+        features = torch.cat([features.reshape(features.size(0), -1), lmks[..., :3].reshape(lmks.size(0), -1)], dim=-1)
         features = self.layers(features)
 
         # we will use first 52 elements as FACS features

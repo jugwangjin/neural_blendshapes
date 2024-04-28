@@ -37,7 +37,7 @@ class NeuralBlendshapes(nn.Module):
         #                     },      
         #                 ).to('cuda')
 
-        self.coords_encoder, dim = get_embedder(6)
+        self.coords_encoder, dim = get_embedder(6, input_dims=5)
 
 
         self.expression_deformer = nn.Sequential(
@@ -72,7 +72,7 @@ class NeuralBlendshapes(nn.Module):
         #                 ).to('cuda')
 
 
-        self.coarse_coords_encoder, dim = get_embedder(2)
+        self.coarse_coords_encoder, dim = get_embedder(2, input_dims=5)
 
         self.eye_expression_deformer = nn.Sequential(
                                     nn.Linear(dim+53, 128),
@@ -107,19 +107,23 @@ class NeuralBlendshapes(nn.Module):
 
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
 
-        initialize_weights(self.expression_deformer)
-        initialize_weights(self.template_deformer, gain=0.01)
-        initialize_weights(self.pose_weight, gain=0.01)
+        # initialize_weights(self.expression_deformer)
+        # initialize_weights(self.eye_expression_deformer)
+        # initialize_weights(self.template_deformer, gain=0.01)
+        # initialize_weights(self.pose_weight, gain=0.01)
 
                                     # ict_canonical_mesh.vertices.shape, ict_facekit.head_indices, ict_facekit.eyeball_indices)
         
-    def set_template(self, template, full_shape, head_indices, eyeball_indices):
+    def set_template(self, template, uv_template, full_shape, head_indices, eyeball_indices):
         # assert len(template.shape) == 2, "template should be a tensor shape of (num_vertices, 3) but got shape of {}".format(template.shape)
         face_template, eye_template = template
+        face_uv_template, eye_uv_template = uv_template
         # self.register_buffer('template', template)
 
-        self.register_buffer('face_template', face_template)
-        self.register_buffer('eye_template', eye_template)
+
+
+        self.register_buffer('face_template', torch.cat([face_template, face_uv_template], dim=1))
+        self.register_buffer('eye_template', torch.cat([eye_template, eye_uv_template], dim=1))
 
         self.register_buffer('encoded_vertices', self.coords_encoder(self.face_template))
         self.register_buffer('coarse_encoded_vertices', self.coarse_coords_encoder(self.face_template))
@@ -166,7 +170,7 @@ class NeuralBlendshapes(nn.Module):
 
         expression_deformation = self.expression_deformer(deformer_input)
 
-        expression_vertices = face_vertices[None] + expression_deformation + template_deformation[None]
+        expression_vertices = face_vertices[None][..., :3] + expression_deformation + template_deformation[None]
 
 
         pose_weight = self.pose_weight(torch.cat([coarse_encoded_vertices[None].repeat(features.shape[0], 1, 1), \
@@ -190,7 +194,7 @@ class NeuralBlendshapes(nn.Module):
         
         eye_expression_deformation = self.eye_expression_deformer(eye_deformer_input)
 
-        eye_expression_vertices = eye_vertices[None] + eye_expression_deformation + eye_template_deformation[None]
+        eye_expression_vertices = eye_vertices[None][..., :3] + eye_expression_deformation + eye_template_deformation[None]
 
         eye_pose_weight = self.pose_weight(torch.cat([eye_encoded_vertices[None].repeat(features.shape[0], 1, 1), \
                                                 features[:, None, 53:].repeat(1, eye_encoded_vertices.shape[0], 1)], dim=2)) # shape of B V 1

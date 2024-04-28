@@ -1,5 +1,5 @@
 import torch
-def feature_regularization_loss(feature):
+def feature_regularization_loss(feature, gt_facs, iterations):
     facs = feature[..., :53]
     rotation = feature[..., 53:56]
     translation = feature[..., 56:59]
@@ -14,4 +14,7 @@ def feature_regularization_loss(feature):
 
 
     loss = facs_regularization * 1e-3 + latent_regularization
-    return loss
+    if iterations < 2000:
+        return loss + torch.mean(torch.pow(facs - gt_facs, 2)) * 1e2
+    else:
+        return loss

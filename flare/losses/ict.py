@@ -89,7 +89,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     closure_loss = eye_closure_loss + lip_closure_loss
     
-    ict_landmark_loss = ict_landmark_loss + 10 * closure_loss
+    ict_landmark_loss = ict_landmark_loss + 5 * closure_loss
 
     # with torch.no_grad():
     random_features = torch.randn_like(features)

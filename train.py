@@ -98,6 +98,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
     neural_blendshapes.set_template((ict_canonical_mesh.vertices[ict_facekit.head_indices], ict_canonical_mesh.vertices[ict_facekit.eyeball_indices]),
+                                    (ict_canonical_mesh._uv_coords[ict_facekit.head_indices], ict_canonical_mesh._uv_coords[ict_facekit.eyeball_indices]),
                                     ict_canonical_mesh.vertices.shape, ict_facekit.head_indices, ict_facekit.eyeball_indices)
 
     neural_blendshapes = neural_blendshapes.to(device)
@@ -236,15 +237,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # loss function 
             # ==============================================================================================
             ## ======= regularization autoencoder========
-            # losses['normal_regularization'] = 0
-            # losses['laplacian_regularization'] = 0
-            # num_meshes = deformed_vertices.shape[0]
-            # for nth_mesh in range(num_meshes):
-            #     mesh_ = ict_canonical_mesh.with_vertices(deformed_vertices[nth_mesh])
-            losses['normal_regularization'] = normal_consistency_loss(mesh)
-            losses['laplacian_regularization'] = laplacian_loss(mesh)
-            # losses['normal_regularization'] /= num_meshes
-            # losses['laplacian_regularization'] /= num_meshes
+            losses['normal_regularization'] = 0
+            losses['laplacian_regularization'] = 0
+            num_meshes = deformed_vertices.shape[0]
+            for nth_mesh in range(num_meshes):
+                mesh_ = ict_canonical_mesh.with_vertices(deformed_vertices[nth_mesh])
+                losses['normal_regularization'] += normal_consistency_loss(mesh_)
+                losses['laplacian_regularization'] += laplacian_loss(mesh_)
+            losses['normal_regularization'] /= num_meshes
+            losses['laplacian_regularization'] /= num_meshes
 
             ## ============== color + regularization for color ==============================
             pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
@@ -276,7 +277,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['ict'], losses['random_ict'], losses['ict_landmark'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
             
             # feature regularization
-            losses['feature_regularization'] = feature_regularization_loss(features)
+            losses['feature_regularization'] = feature_regularization_loss(features, views_subset['facs'][..., ict_facekit.mediapipe_to_ict], iteration)
 
             loss = torch.tensor(0., device=device) 
             
