@@ -24,7 +24,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     ict_loss = torch.mean(torch.pow(template_deformation[frontal_indices], 2))
 
     # return ict_loss, random_ict_loss
-    return ict_loss, 
+    return ict_loss
 
 def ict_identity_regularization(ict_facekit):
     identity_loss = torch.mean(ict_facekit.identity ** 2)
