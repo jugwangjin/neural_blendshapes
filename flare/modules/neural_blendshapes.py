@@ -37,22 +37,22 @@ class NeuralBlendshapes(nn.Module):
         #                     },      
         #                 ).to('cuda')
 
-        self.coords_encoder, dim = get_embedder(6, input_dims=5)
+        self.coords_encoder, dim = get_embedder(4, input_dims=3)
 
 
-        self.expression_deformer = nn.Sequential(
-                                    nn.Linear(dim+53, 128),
-                                    nn.SiLU(),
-                                    nn.Linear(128, 128),
-                                    nn.SiLU(),
-                                    nn.Linear(128, 128),
-                                    nn.SiLU(),
-                                    nn.Linear(128, 128),
-                                    nn.SiLU(),
-                                    nn.Linear(128, 128),
-                                    nn.SiLU(),
-                                    nn.Linear(128, 3)
-                                    )
+        # self.expression_deformer = nn.Sequential(
+        #                             nn.Linear(dim+53, 128),
+        #                             nn.SiLU(),
+        #                             nn.Linear(128, 128),
+        #                             nn.SiLU(),
+        #                             nn.Linear(128, 128),
+        #                             nn.SiLU(),
+        #                             nn.Linear(128, 128),
+        #                             nn.SiLU(),
+        #                             nn.Linear(128, 128),
+        #                             nn.SiLU(),
+        #                             nn.Linear(128, 3)
+        #                             )
         
         # L = 8; F = 2; log2_T = 19; N_min = 16
         # b = np.exp(np.log(2048/N_min)/(L-1))
@@ -114,11 +114,12 @@ class NeuralBlendshapes(nn.Module):
 
                                     # ict_canonical_mesh.vertices.shape, ict_facekit.head_indices, ict_facekit.eyeball_indices)
         
-    def set_template(self, template, uv_template, full_shape=None, head_indices=None, eyeball_indices=None):
+    def set_template(self, template, ict_facekit):
         # assert len(template.shape) == 2, "template should be a tensor shape of (num_vertices, 3) but got shape of {}".format(template.shape)
         # face_template, eye_template = template
         # face_uv_template, eye_uv_template = uv_template
-        self.register_buffer('template', torch.cat([template, uv_template], dim=1))     
+        self.register_buffer('template', template)     
+        self.ict_facekit = ict_facekit
         # self.register_buffer('uv_template', uv_template)
 
 
@@ -164,14 +165,9 @@ class NeuralBlendshapes(nn.Module):
 
         template_deformation = self.template_deformer(encoded_vertices)
 
-        deformer_input = torch.cat([encoded_vertices[None].repeat(features.shape[0], 1, 1), \
-                                    features[:, None, :53].repeat(1, encoded_vertices.shape[0], 1)], dim=2)
+        expression_vertices= self.ict_facekit(expression_weights = features[:, :53], to_canonical = True)
 
-        B, V, _ = deformer_input.shape
-
-        expression_deformation = self.expression_deformer(deformer_input)
-
-        expression_vertices = vertices[None][..., :3] + expression_deformation + template_deformation[None]
+        B, V, _ = expression_vertices.shape 
 
         pose_weight = self.pose_weight(torch.cat([encoded_vertices[None].repeat(features.shape[0], 1, 1), \
                                                 features[:, None, 53:].repeat(1, V, 1)], dim=2)) # shape of B V 1
@@ -211,7 +207,6 @@ class NeuralBlendshapes(nn.Module):
         return_dict['features'] = features
 
         return_dict['full_template_deformation'] = template_deformation
-        return_dict['full_expression_deformation'] = expression_deformation
         return_dict['full_expression_mesh'] = expression_vertices
         return_dict['pose_weight'] = pose_weight
         return_dict['full_deformed_mesh'] = deformed_mesh

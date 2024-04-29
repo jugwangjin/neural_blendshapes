@@ -98,7 +98,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
     neural_blendshapes.set_template(ict_canonical_mesh.vertices,
-                                    ict_canonical_mesh._uv_coords,)
+                                    ict_facekit)
 
     neural_blendshapes = neural_blendshapes.to(device)
 
@@ -157,8 +157,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "landmark": args.weight_landmark,
         "closure": args.weight_closure,
         "ict": args.weight_ict,
-        "ict_landmark": args.weight_ict_landmark,
-        "random_ict": args.weight_random_ict,
+        # "ict_landmark": args.weight_ict_landmark,
+        # "random_ict": args.weight_random_ict,
         # "ict_identity": args.weight_ict_identity,
         "feature_regularization": args.weight_feature_regularization,
         # "head_direction": args.weight_head_direction,
@@ -236,15 +236,17 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # loss function 
             # ==============================================================================================
             ## ======= regularization autoencoder========
-            losses['normal_regularization'] = 0
-            losses['laplacian_regularization'] = 0
-            num_meshes = deformed_vertices.shape[0]
-            for nth_mesh in range(num_meshes):
-                mesh_ = ict_canonical_mesh.with_vertices(deformed_vertices[nth_mesh])
-                losses['normal_regularization'] += normal_consistency_loss(mesh_)
-                losses['laplacian_regularization'] += laplacian_loss(mesh_)
-            losses['normal_regularization'] /= num_meshes
-            losses['laplacian_regularization'] /= num_meshes
+            # losses['normal_regularization'] = 0
+            # losses['laplacian_regularization'] = 0
+            # num_meshes = deformed_vertices.shape[0]
+            # for nth_mesh in range(num_meshes):
+            #     mesh_ = ict_canonical_mesh.with_vertices(deformed_vertices[nth_mesh])
+            #     losses['normal_regularization'] += normal_consistency_loss(mesh_)
+            #     losses['laplacian_regularization'] += laplacian_loss(mesh_)
+            # losses['normal_regularization'] /= num_meshes
+            # losses['laplacian_regularization'] /= num_meshes
+            losses['normal_regularization'] = normal_consistency_loss(mesh)
+            losses['laplacian_regularization'] = laplacian_loss(mesh)
 
             ## ============== color + regularization for color ==============================
             pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
@@ -273,7 +275,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             # ict loss
             # losses['ict'], losses['random_ict'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
-            losses['ict'], losses['random_ict'], losses['ict_landmark'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
+            losses['ict'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
             
             # feature regularization
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['facs'][..., ict_facekit.mediapipe_to_ict], iteration)
@@ -396,7 +398,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     ## ============== visualize ==============================
                     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
                     del debug_gbuffer, debug_cbuffers
-            if iteration == 1 or iteration % (args.visualization_frequency * 10) == 0:
+            if iteration == 1 or iteration % (args.visualization_frequency * 5) == 0:
                 print(images_save_path / "grid" / f'grid_{iteration}.png')
                 if 'debug' not in run_name:
                     wandb.log({"Grid": [wandb.Image(str(images_save_path / "grid" / f'grid_{iteration}.png'))]}, step=iteration)

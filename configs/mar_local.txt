@@ -1,4 +1,4 @@
-run_name = mar_v1
+run_name = mar_v1_ict_expression
 
 input_dir = ../flare_data/marcel
 train_dir = ["MVI_1797", "MVI_1801"]
