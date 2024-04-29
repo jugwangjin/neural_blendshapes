@@ -14,7 +14,7 @@ def feature_regularization_loss(feature, gt_facs, iterations):
 
 
     loss = facs_regularization * 1e-3 + latent_regularization
-    if iterations < 2000:
-        return loss + torch.mean(torch.pow(facs - gt_facs, 2)) * 1e2
+    if iterations < 1000:
+        return loss + torch.mean(torch.pow(facs - gt_facs, 2)) * 1e3
     else:
         return loss

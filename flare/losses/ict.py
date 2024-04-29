@@ -31,7 +31,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     # aligned_ict, to_canonical = align_to_canonical(ict, deformed_vertices, ict_facekit.landmark_indices)
 
     ict_loss = torch.mean(torch.pow(ict * 10 - deformed_vertices * 10, 2)) + \
-                torch.mean(torch.pow(ict[:, frontal_indices] * 10 - deformed_vertices_w_template[:, frontal_indices] * 10, 2)) 
+                0.1 * torch.mean(torch.pow(ict[:, frontal_indices] * 10 - deformed_vertices_w_template[:, frontal_indices] * 10, 2)) 
 
 
 
@@ -89,7 +89,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     closure_loss = eye_closure_loss + lip_closure_loss
     
-    ict_landmark_loss = ict_landmark_loss + 5 * closure_loss
+    ict_landmark_loss = ict_landmark_loss + 2.5 * closure_loss
 
     # with torch.no_grad():
     random_features = torch.randn_like(features)
@@ -108,7 +108,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     # random_aligned_ict = align_to_canonical(random_ict, random_deformed_vertices, ict_facekit.landmark_indices)
 
     random_ict_loss = torch.mean(torch.pow(random_ict * 10 - random_deformed_vertices * 10, 2)) + \
-                      torch.mean(torch.pow(random_ict[:, frontal_indices] * 10 - random_deformed_vertices_w_template[:, frontal_indices] * 10, 2))
+                      0.1 * torch.mean(torch.pow(random_ict[:, frontal_indices] * 10 - random_deformed_vertices_w_template[:, frontal_indices] * 10, 2))
     
 
 

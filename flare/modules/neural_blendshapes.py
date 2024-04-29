@@ -85,9 +85,9 @@ class NeuralBlendshapes(nn.Module):
         #                             )
 
         self.template_deformer = nn.Sequential(
-                    nn.Linear(dim, 32),
+                    nn.Linear(dim, 64),
                     nn.SiLU(),
-                    nn.Linear(32,32),
+                    nn.Linear(64,32),
                     nn.SiLU(),
                     nn.Linear(32,32),
                     nn.SiLU(),
