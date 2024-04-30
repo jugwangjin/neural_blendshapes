@@ -1,6 +1,6 @@
 from .fc import FC
 from .neuralshader import NeuralShader
-from .deformer_network import *
+
 from .displacement import Displacement
-from .encoder import *
-from .deformer import *
+
+from .neural_blendshapes import get_neural_blendshapes
