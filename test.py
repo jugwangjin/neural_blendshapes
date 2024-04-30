@@ -41,17 +41,7 @@ if torch.cuda.is_available() and devices >= 0:
 from flare.utils.ict_model import ICTFaceKitTorch
 import open3d as o3d
 
-def load_ict_facekit(args, device):
-    ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
-    ict_facekit = ict_facekit.to(device)
-    ict_facekit.eval()
 
-    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, device=device)
-    
-    ict_canonical_mesh.compute_connectivity()
-    ict_facekit.update_vmapping(ict_canonical_mesh.vmapping.cpu().data.numpy())
-
-    return ict_facekit, ict_canonical_mesh
 # ==============================================================================================
 # evaluation
 # ==============================================================================================    
@@ -140,7 +130,12 @@ if __name__ == '__main__':
     dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=args.sample_idx_ratio, pre_load=True)
     dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=4, collate_fn=dataset_val.collate, shuffle=False)
 
-    ict_facekit, ict_canonical_mesh = load_ict_facekit(args, device)    
+    ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
+    ict_facekit = ict_facekit.to(device)
+
+    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit.uvs.cpu().data,device=device)
+    ict_canonical_mesh.compute_connectivity()
+
 
     ## ============== renderer ==============================
     aabb = AABB(ict_canonical_mesh.vertices.cpu().numpy())

@@ -12,6 +12,7 @@ class ICTFaceKitTorch(torch.nn.Module):
 
         neutral_mesh = model_dict['neutral_mesh']
         faces = model_dict['faces']
+        uvs = model_dict['uvs']
 
         expression_shape_modes = model_dict['expression_shape_modes']
         identity_shape_modes = model_dict['identity_shape_modes']
@@ -28,6 +29,8 @@ class ICTFaceKitTorch(torch.nn.Module):
 
         self.register_buffer('neutral_mesh', torch.tensor(neutral_mesh, dtype=torch.float32)[None])
         self.register_buffer('faces', torch.tensor(faces, dtype=torch.long))
+        self.register_buffer('uvs', torch.tensor(uvs, dtype=torch.float32))
+
         self.register_buffer('expression_shape_modes', torch.tensor(expression_shape_modes, dtype=torch.float32)[None])
         self.register_buffer('identity_shape_modes', torch.tensor(identity_shape_modes, dtype=torch.float32)[None])
 
@@ -55,6 +58,8 @@ class ICTFaceKitTorch(torch.nn.Module):
         # with torch.no_grad():
         canonical = self.forward(expression_weights=self.expression, identity_weights=self.identity, to_canonical=True)
         self.register_buffer('canonical', canonical)
+
+        # self.debug_indices()
 
 
     def to_canonical_space(self, mesh):
@@ -226,3 +231,69 @@ class ICTFaceKitTorch(torch.nn.Module):
                                     mediapipe_indices['mouthShrugUpper'], mediapipe_indices['mouthSmileLeft'], mediapipe_indices['mouthSmileRight'], mediapipe_indices['mouthStretchLeft'], 
                                     mediapipe_indices['mouthStretchRight'], mediapipe_indices['mouthUpperUpLeft'], mediapipe_indices['mouthUpperUpRight'], mediapipe_indices['noseSneerLeft'], 
                                     mediapipe_indices['noseSneerRight'],]).astype(np.int32)        
+            
+            
+    def debug_indices(self):
+        # debug
+        import open3d as o3d
+        vertices = self.neutral_mesh.squeeze().cpu().numpy()
+        faces = self.faces.cpu().numpy()
+
+        # head indices
+        mesh = o3d.geometry.TriangleMesh()
+        mesh.vertices = o3d.utility.Vector3dVector(vertices)
+        mesh.triangles = o3d.utility.Vector3iVector(faces)
+        
+        inverted_head_indices = set(range(vertices.shape[0])) - set(self.head_indices)
+        mesh.remove_vertices_by_index(list(inverted_head_indices))
+        o3d.io.write_triangle_mesh('debug/head.obj', mesh)
+        
+        # point cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(vertices)
+        o3d.io.write_point_cloud('debug/head_pointcloud.ply', pcd)
+
+
+        # eyeball indices
+        mesh = o3d.geometry.TriangleMesh()
+        mesh.vertices = o3d.utility.Vector3dVector(vertices)
+        mesh.triangles = o3d.utility.Vector3iVector(faces)
+        
+        inverted_eyeball_indices = set(range(vertices.shape[0])) - set(self.eyeball_indices)
+        mesh.remove_vertices_by_index(list(inverted_eyeball_indices))
+        o3d.io.write_triangle_mesh('debug/eyeball.obj', mesh)
+
+        # point cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(vertices)
+        o3d.io.write_point_cloud('debug/eyeball_pointcloud.ply', pcd)
+
+        # face indices
+        mesh = o3d.geometry.TriangleMesh()
+        mesh.vertices = o3d.utility.Vector3dVector(vertices)
+        mesh.triangles = o3d.utility.Vector3iVector(faces)
+
+        inverted_face_indices = set(range(vertices.shape[0])) - set(self.face_indices)
+        mesh.remove_vertices_by_index(list(inverted_face_indices))
+        o3d.io.write_triangle_mesh('debug/face.obj', mesh)
+
+        # point cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(vertices)
+        o3d.io.write_point_cloud('debug/face_pointcloud.ply', pcd)
+
+        # not face indices
+        mesh = o3d.geometry.TriangleMesh()
+        mesh.vertices = o3d.utility.Vector3dVector(vertices)
+        mesh.triangles = o3d.utility.Vector3iVector(faces)
+
+        inverted_not_face_indices = set(range(vertices.shape[0])) - set(self.not_face_indices)
+        mesh.remove_vertices_by_index(list(inverted_not_face_indices))
+        o3d.io.write_triangle_mesh('debug/notface.obj', mesh)
+
+        # point cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(vertices)
+        o3d.io.write_point_cloud('debug/notface_pointcloud.ply', pcd)
+
+        exit()

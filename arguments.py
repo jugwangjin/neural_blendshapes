@@ -7,6 +7,7 @@ def config_parser():
     parser.add_argument('--config', is_config_file=True,
                         help='config file path')
     parser.add_argument('--run_name', type=str, default=None, help="Name of this run")
+    parser.add_argument('--wandb_name', type=str, default=None, help="Name of this run")
     parser.add_argument('--batch_size', type=int, default=8, help="Number of views used per iteration.")
     
     # path

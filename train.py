@@ -43,14 +43,6 @@ import time
 from flare.utils.ict_model import ICTFaceKitTorch
 import open3d as o3d
 
-def load_ict_facekit(args, device):
-    ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
-    ict_facekit = ict_facekit.to(device)
-    # ict_facekit.eval()
-
-    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ,device=device)
-
-    return ict_facekit, ict_canonical_mesh
 
 def main(args, device, dataset_train, dataloader_train, debug_views):
     ## ============== Dir ==============================
@@ -59,7 +51,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     copy_sources(args, run_name)
 
     ## ============== load ict facekit ==============================
-    ict_facekit, ict_canonical_mesh = load_ict_facekit(args, device)    
+    ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
+    ict_facekit = ict_facekit.to(device)
+
+    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, uv_coords=ict_facekit.uvs.cpu().data, device=device)
+    ict_canonical_mesh.compute_connectivity()
+
     write_mesh(Path(meshes_save_path / "init_ict_canonical.obj"), ict_canonical_mesh.to('cpu'))
 
     # ict_identity_path = Path(experiment_dir / "stage_1" / "network_weights" / f"ict_identity_latest.pt")
@@ -186,7 +183,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     acc_total_loss = 0
     import wandb
     if 'debug' not in run_name:
-        wandb.init(project="neural_blendshape", name=run_name, config=args)
+        wandb_name = args.wandb_name if args.wandb_name is not None else run_name
+        wandb.init(project="neural_blendshape", name=wandb_name, config=args)
     for epoch in progress_bar:
         # if epoch == epochs // 8: 
         #     loss_weights["normal_laplacian"] = args.weight_normal_laplacian

@@ -20,23 +20,6 @@ class NeuralBlendshapes(nn.Module):
         super().__init__()
         self.image_encoder = ResnetEncoder(60)
 
-        # L = 8; F = 4; log2_T = 19; N_min = 16
-        # b = np.exp(np.log(2048/N_min)/(L-1))
-
-        # self.coord_encoder = tcnn.Encoding(
-        #                 n_input_dims=3, 
-        #                 encoding_config={
-        #                     "otype": "Grid",
-        #                     "type": "Hash",
-        #                     "n_levels": L,
-        #                     "n_features_per_level": F,
-        #                     "log2_hashmap_size": log2_T,
-        #                     "base_resolution": N_min,
-        #                     "per_level_scale": b,
-        #                     "interpolation": "Linear"
-        #                     },      
-        #                 ).to('cuda')
-
         self.coords_encoder, dim = get_embedder(6, input_dims=5)
 
 
@@ -54,36 +37,6 @@ class NeuralBlendshapes(nn.Module):
                                     nn.Linear(128, 3)
                                     )
         
-        # L = 8; F = 2; log2_T = 19; N_min = 16
-        # b = np.exp(np.log(2048/N_min)/(L-1))
-
-        # self.coarse_coord_encoder = tcnn.Encoding(
-        #                 n_input_dims=3, 
-        #                 encoding_config={
-        #                     "otype": "Grid",
-        #                     "type": "Hash",
-        #                     "n_levels": L,
-        #                     "n_features_per_level": F,
-        #                     "log2_hashmap_size": log2_T,
-        #                     "base_resolution": N_min,
-        #                     "per_level_scale": b,
-        #                     "interpolation": "Linear"
-        #                     },      
-        #                 ).to('cuda')
-
-
-        # self.coarse_coords_encoder, dim = get_embedder(2, input_dims=5)
-
-        # self.eye_expression_deformer = nn.Sequential(
-        #                             nn.Linear(dim+53, 128),
-        #                             nn.SiLU(),
-        #                             nn.Linear(128, 128),
-        #                             nn.SiLU(),
-        #                             nn.Linear(128, 128),
-        #                             nn.SiLU(),
-        #                             nn.Linear(128, 3)
-        #                             )
-
         self.template_deformer = nn.Sequential(
                     nn.Linear(dim, 64),
                     nn.SiLU(),
@@ -106,35 +59,12 @@ class NeuralBlendshapes(nn.Module):
         )
 
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
+    
 
-        # initialize_weights(self.expression_deformer)
-        # initialize_weights(self.eye_expression_deformer)
-        # initialize_weights(self.template_deformer, gain=0.01)
-        # initialize_weights(self.pose_weight, gain=0.01)
-
-                                    # ict_canonical_mesh.vertices.shape, ict_facekit.head_indices, ict_facekit.eyeball_indices)
-        
     def set_template(self, template, uv_template, full_shape=None, head_indices=None, eyeball_indices=None):
-        # assert len(template.shape) == 2, "template should be a tensor shape of (num_vertices, 3) but got shape of {}".format(template.shape)
-        # face_template, eye_template = template
-        # face_uv_template, eye_uv_template = uv_template
         self.register_buffer('template', torch.cat([template, uv_template], dim=1))     
-        # self.register_buffer('uv_template', uv_template)
-
-
-
-        # self.register_buffer('face_template', torch.cat([face_template, face_uv_template], dim=1))
-        # self.register_buffer('eye_template', torch.cat([eye_template, eye_uv_template], dim=1))
-
         self.register_buffer('encoded_vertices', self.coords_encoder(self.template))
-        # self.register_buffer('coarse_encoded_vertices', self.coarse_coords_encoder(self.face_template))
 
-        # self.register_buffer('eye_encoded_vertices', self.coarse_coords_encoder(self.eye_template))
-        
-        # self.full_shape = list(full_shape)
-
-        # self.head_indices = head_indices
-        # self.eyeball_indices = eyeball_indices
 
     def forward(self, image=None, lmks=None, image_input=True, features=None, vertices=None, coords_min=None, coords_max=None):
         if image_input:
@@ -148,19 +78,10 @@ class NeuralBlendshapes(nn.Module):
         scale = features[..., -1:]
 
         if vertices is None:
-            # face_vertices = self.face_template
-            # eye_vertices = self.eye_template
             vertices = self.template
-
-            # coarse_encoded_vertices = self.coarse_encoded_vertices
             encoded_vertices = self.encoded_vertices
-            # eye_encoded_vertices = self.eye_encoded_vertices
         else:
-
             encoded_vertices = self.coords_encoder(vertices)
-            # coarse_encoded_vertices = self.coarse_coords_encoder(face_vertices)
-            # eye_encoded_vertices = self.coarse_coords_encoder(eye_vertices)
-
 
         template_deformation = self.template_deformer(encoded_vertices)
 

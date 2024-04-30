@@ -80,7 +80,7 @@ class Mesh:
             vertices (tensor): New vertex positions (Vx3)
         """
         assert len(vertices) == len(self.vertices)
-        mesh_new = Mesh(vertices, self.indices, self.device)
+        mesh_new = Mesh(vertices, self.indices, device=self.device)
         mesh_new._edges = self._edges
         mesh_new._connected_faces = self._connected_faces
         mesh_new._laplacian = self._laplacian
@@ -199,7 +199,7 @@ class Mesh:
         print(self._uv_coords.shape, self.vertices.shape)
 
     def compute_connectivity(self):
-        self.xatlas_uvmap()
+        # self.xatlas_uvmap()
         self._faces_idx = self.face_idx
         self._edges = self.edges
         self._connected_faces = self.connected_faces
