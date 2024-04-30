@@ -48,11 +48,7 @@ def load_ict_facekit(args, device):
     ict_facekit = ict_facekit.to(device)
     # ict_facekit.eval()
 
-    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, device=device)
-    print(ict_canonical_mesh.vmapping.shape if ict_canonical_mesh.vmapping is not None else None)
-    ict_canonical_mesh.compute_connectivity()
-    print(ict_canonical_mesh.vmapping.shape)
-    ict_facekit.update_vmapping(ict_canonical_mesh.vmapping.cpu().data.numpy())
+    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ,device=device)
 
     return ict_facekit, ict_canonical_mesh
 

@@ -11,22 +11,16 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.num_identity = model_dict['num_identity']
 
         neutral_mesh = model_dict['neutral_mesh']
+        faces = model_dict['faces']
 
         expression_shape_modes = model_dict['expression_shape_modes']
         identity_shape_modes = model_dict['identity_shape_modes']
 
-        self.landmark_indices = [1225, 1888, 1052, 367, 1719, 1722, 2199, 1447, 966, 3661, 
-                                 4390, 3927, 3924, 2608, 3272, 4088, 3443, 268, 493, 1914, 
-                                 2044, 1401, 3615, 4240, 4114, 2734, 2509, 978, 4527, 4942, 
-                                 4857, 1140, 2075, 1147, 4269, 3360, 1507, 1542, 1537, 1528, 
-                                 1518, 1511, 3742, 3751, 3756, 3721, 3725, 3732, 5708, 5695, 
-                                 2081, 0, 4275, 6200, 6213, 6346, 6461, 5518, 5957, 5841, 5702, 
-                                 5711, 5533, 6216, 6207, 6470, 5517, 5966]
-
-        neutral_mesh = neutral_mesh[:25351]
-        faces = self.convert_quad_mesh_to_triangle_mesh(model_dict['quad_faces'][:25304])
-        expression_shape_modes = expression_shape_modes[:, :25351]
-        identity_shape_modes = identity_shape_modes[:, :25351]
+        self.landmark_indices = model_dict['landmark_indices']
+        self.face_indices = model_dict['face_indices']
+        self.not_face_indices = model_dict['not_face_indices']
+        self.eyeball_indices = model_dict['eyeball_indices']
+        self.head_indices = model_dict['head_indices']
 
         self.expression_names = model_dict['expression_names']
         self.identity_names = model_dict['identity_names']
@@ -62,17 +56,6 @@ class ICTFaceKitTorch(torch.nn.Module):
         canonical = self.forward(expression_weights=self.expression, identity_weights=self.identity, to_canonical=True)
         self.register_buffer('canonical', canonical)
 
-        self.face_indices = list(range(0, 9409)) + list(range(11248, 21451)) + list(range(24591, 24999))
-        self.not_face_indices = list(range(9409, 11248))
-        self.eyeball_indices = list(range(21451, 24591)) + list(range(24999, 25351))
-        self.head_indices = self.face_indices + self.not_face_indices
-
-        self.facial_mask = torch.zeros(self.canonical.size(1))
-        self.facial_mask[self.face_indices] = 1
-        self.facial_mask[self.eyeball_indices] = 1
-
-        self.register_buffer('coords_min', torch.amin(self.canonical, dim=1)[0]) # shape of (3)
-        self.register_buffer('coords_max', torch.amax(self.canonical, dim=1)[0]) # shape of (3)
 
     def to_canonical_space(self, mesh):
         """
@@ -160,6 +143,8 @@ class ICTFaceKitTorch(torch.nn.Module):
 
     def update_vmapping(self, vmapping):
         """
+        NOT USED, BUT MAY BE USEFUL IN ANOTHER SCENARIO
+        CURRENTLY, I manually update the UV and vertex mapping, instead of mapping from the result of xatlas
         Update the vertex mapping and adjust the relevant attributes accordingly.
 
         Args:
@@ -210,36 +195,6 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.not_face_indices = not_face_indices
         self.eyeball_indices = eyeball_indices
 
-        # for i, v in enumerate(vmapping):
-        #     if v in self.face_indices:
-        #         self.face_indices[i] = vmapping_dict[v]
-            
-
-
-        # # Update the face indices based on the new vertex mapping
-        # print('face', len(self.face_indices))
-        # face_indices = []
-        # for i in self.face_indices:
-        #     face_indices.append(vmapping_dict[i])
-        # self.face_indices = face_indices
-        # print(len(self.face_indices))
-
-        # # Update the not face indices based on the new vertex mapping
-        # print('not face', len(self.not_face_indices))
-        # not_face_indices = []
-        # for i in self.not_face_indices:
-        #     not_face_indices.append(vmapping_dict[i])
-        # self.not_face_indices = not_face_indices
-        # print(len(self.not_face_indices))
-
-        # # Update the eyeball indices based on the new vertex mapping
-        # print('eyeball', len(self.eyeball_indices))
-        # eyeball_indices = []
-        # for i in self.eyeball_indices:
-        #     eyeball_indices.append(vmapping_dict[i])
-        # self.eyeball_indices = eyeball_indices
-        # print(len(self.eyeball_indices))
-        
         # Update the head indices based on the new vertex mapping
         print('head', len(self.head_indices))
         head_indices = self.face_indices + self.not_face_indices
