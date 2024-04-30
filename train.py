@@ -141,16 +141,17 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "laplacian_regularization": args.weight_laplacian_regularization,
         "shading": args.weight_shading,
         "perceptual_loss": args.weight_perceptual_loss,
-        "albedo_regularization": args.weight_albedo_regularization,
-        "roughness_regularization": args.weight_roughness_regularization,
-        "white_light_regularization": args.weight_white_lgt_regularization,
-        "fresnel_coeff": args.weight_fresnel_coeff,
+        # "albedo_regularization": args.weight_albedo_regularization,
+        # "roughness_regularization": args.weight_roughness_regularization,
+        # "white_light_regularization": args.weight_white_lgt_regularization,
+        # "fresnel_coeff": args.weight_fresnel_coeff,
         # "normal": args.weight_normal,
         # "normal_laplacian": args.weight_normal_laplacian,
         "landmark": args.weight_landmark,
         "closure": args.weight_closure,
         "ict": args.weight_ict,
         "ict_landmark": args.weight_ict_landmark,
+        "ict_landmark_closure": args.weight_closure,
         "random_ict": args.weight_random_ict,
         # "ict_identity": args.weight_ict_identity,
         "feature_regularization": args.weight_feature_regularization,
@@ -186,10 +187,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         wandb_name = args.wandb_name if args.wandb_name is not None else run_name
         wandb.init(project="neural_blendshape", name=wandb_name, config=args)
     for epoch in progress_bar:
-        # if epoch == epochs // 8: 
-        #     loss_weights["normal_laplacian"] = args.weight_normal_laplacian
-        # "normal_laplacian": args.weight_normal_laplacian,
-            
         for iter_, views_subset in enumerate(dataloader_train):
             # views_subset = debug_views
             iteration += 1
@@ -241,7 +238,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['laplacian_regularization'] /= num_meshes
 
             ## ============== color + regularization for color ==============================
-            pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
+            pred_color_masked, _, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
 
             losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
             losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
@@ -249,25 +246,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
 
             ## ======= regularization color ========
-            losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration)
-            losses['white_light_regularization'] = white_light(cbuffers)
-            losses['roughness_regularization'] = roughness_regularization(cbuffers["roughness"], views_subset["skin_mask"], views_subset["mask"], r_mean=args.r_mean)
-            losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
+            # losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration)
             
             # landmark losses
             losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, device)
-            # losses['landmark'], losses['closure'], losses['head_direction'], losses['direction_estimation'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, device)
-             
-            # losses['closure'] = closure_loss(ict_facekit, gbuffers, views_subset, device)
 
-            # normal loss
-            # if epoch >= epochs // 8:
-            #     losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
-            # losses['normal'], losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
-
-            # ict loss
-            # losses['ict'], losses['random_ict'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
-            losses['ict'], losses['random_ict'], losses['ict_landmark'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
+            losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
             
             # feature regularization
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['facs'][..., ict_facekit.mediapipe_to_ict], iteration)
@@ -302,25 +286,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 print(translation)
                 print(scale)
 
-                # DIRECTION_PAIRS = torch.tensor([[36, 64],[45, 48]]).int()
-                # landmark_indices = ict_facekit.landmark_indices
-                # landmarks_on_clip_space = gbuffers['deformed_verts_clip_space'][:, landmark_indices].clone()
-                # landmarks_on_clip_space = landmarks_on_clip_space[..., :3] / torch.clamp(landmarks_on_clip_space[..., 3:], min=1e-8) # shape of B, N, 3
-    
-                # detected_landmarks = views_subset['landmark'].detach().data  # shape of B N 3        
-                # detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
-                # detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
-
-                # detected_normal = detected_landmarks[:, DIRECTION_PAIRS[:, 0], :3] - detected_landmarks[:, DIRECTION_PAIRS[:, 1], :3]
-                # detected_normal = torch.cross(detected_normal[:, 0], detected_normal[:, 1], dim=1)
-                # detected_normal = detected_normal / (torch.norm(detected_normal, dim=1, keepdim=True) + 1e-8)
-
-                # deformed_normal = landmarks_on_clip_space[:, DIRECTION_PAIRS[:, 0], :3] - landmarks_on_clip_space[:, DIRECTION_PAIRS[:, 1], :3]
-                # deformed_normal = torch.cross(deformed_normal[:, 0], deformed_normal[:, 1], dim=1)
-                # deformed_normal = deformed_normal / (torch.norm(deformed_normal, dim=1, keepdim=True) + 1e-8)
-
-                # print(torch.cat([detected_normal, deformed_normal, detected_normal - deformed_normal], dim=1))
-
                 print("=="*50)
                 for k, v in losses.items():
                     # if k in losses_to_print:
@@ -336,12 +301,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             neural_blendshapes.zero_grad()
 
             loss.backward()
-            # print grad of parameters of neural_blendshapes.template_deformer
-            # for name, param in neural_blendshapes.template_deformer.named_parameters():
-            #     if param.grad is not None:
-            #         print(name, param)
-            #     if param.grad is None:
-            #         print(name, "None")
             
             torch.cuda.synchronize()
 
@@ -361,25 +320,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             progress_bar.set_postfix({'loss': loss.detach().cpu().item()})
 
             torch.cuda.empty_cache()
-            # ==============================================================================================
-            # warning: check if light mlp diverged
-            # ==============================================================================================
-            '''
-            We do not use an activation function for the output layer of light MLP because we are learning in sRGB space where the values 
-            are not restricted between 0 and 1. As a result, the light MLP diverges sometimes and predicts only zero values. 
-            Hence, we have included the try and catch block to automatically restart the training during this case. 
-            '''
-            if iteration == 100:
-                convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
-                try:
-                    diffuse_shading = convert_uint(cbuffers["shading"])
-                    specular_shading = convert_uint(cbuffers["specu"])
-                    if torch.count_nonzero(diffuse_shading) == 0 or torch.count_nonzero(specular_shading) == 0:
-                        raise ValueError("All values predicted from light MLP are zero")
-                except ValueError as e:
-                    print(f"Error: {e}")
-                    raise  # Raise the exception to exit the current execution of main()
-            
+
             # ==============================================================================================
             # V I S U A L I Z A T I O N S
             # ==============================================================================================
@@ -480,18 +421,3 @@ if __name__ == '__main__':
             print(e)
             print('Error: Unexpected error occurred. Aborting the training.')
             raise e
-
-    ### ============== defaults: fine tune color ==============================
-    # set_defaults_finetune(args)
-
-    # while True:
-    #     try:
-    #         main(args, device, dataset_train, dataloader_train, debug_views)
-    #         break  # Exit the loop if main() runs successfully
-    #     except Exception as e:
-    #         print(e)
-    #         #time.sleep(10)
-    #         print("--"*50)
-    #         print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
-    #         print("--"*50)
-    #         raise e

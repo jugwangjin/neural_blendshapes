@@ -20,6 +20,8 @@ import torch
 import tinycudann as tcnn
 import nvdiffrec.render.renderutils.ops as ru
 import nvdiffrast.torch as dr
+# from . import util
+from nvdiffrec.render import util
 
 
 class NeuralShader(torch.nn.Module):
@@ -73,11 +75,11 @@ class NeuralShader(torch.nn.Module):
         # create MLP
         # ==============================================================================================
         self.material_mlp_ch = disentangle_network_params['material_mlp_ch']
-        self.material_mlp = FC(self.inp_size, self.material_mlp_ch, disentangle_network_params["material_mlp_dims"], activation, last_activation).to(device) #sigmoid
+        self.material_mlp = FC(self.inp_size+38+38, self.material_mlp_ch, disentangle_network_params["material_mlp_dims"], activation, last_activation).to(device) #sigmoid
         
-        self.light_mlp = FC(38, 3, disentangle_network_params["light_mlp_dims"], activation=activation, last_activation=None, bias=True).to(device) 
+        # self.light_mlp = FC(38, 3, disentangle_network_params["light_mlp_dims"], activation=activation, last_activation=None, bias=True).to(device) 
         self.dir_enc_func = generate_ide_fn(deg_view=4, device=self.device)
-        self.dir_enc_func_normals = generate_ide_fn(deg_view=4, device=self.device)
+        # self.dir_enc_func_normals = generate_ide_fn(deg_view=4, device=self.device)
         
         print(disentangle_network_params)
 
@@ -102,33 +104,18 @@ class NeuralShader(torch.nn.Module):
         view_dir = view_direction[:, None, None, :]
         normal_bend = self.get_shading_normals(deformed_position, view_dir, gbuffer, mesh)
 
-        # ==============================================================================================
-        # Albedo ; roughness; specular intensity 
-        # ==============================================================================================   
-        all_tex = self.material_mlp(pe_input.view(-1, self.inp_size).to(torch.float32)) 
-        kd = all_tex[..., :3].view(bz, h, w, ch) 
-        kr = all_tex[..., 3:4] 
-        kr = kr.view(bz, h, w, 1).to(self.device)
-        ko = all_tex[..., 4:5]
-        ko = ko.view(bz, h, w, 1)
-
-        if skin_mask is not None:
-            fresnel_constant = torch.ones((bz, h, w, 1)).to(self.device) * 0.047
-            fresnel_constant[skin_mask] = 0.028
-        else:
-            fresnel_constant = 0.04
-   
-        # ========= diffuse shading ===========
         kr_max = torch.ones((bz, h, w, 1))
         kr_max = kr_max.to(self.device)                    
-        enc_nd_kr_max = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
-        shading = self.light_mlp(enc_nd_kr_max)
-        shading = shading.view(bz, h, w, 3) 
+        normal_dir = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
 
-        # ========= specular shading shading ===========
-        color, buffers = light.shade_pbr_ipe(deformed_position, shading, self.dir_enc_func, self.light_mlp, normal_bend, kd, kr, view_dir, ko, normal_bend, fresnel_constant)
+        wo = util.safe_normalize(view_dir - deformed_position)
+        reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
+        view_dir = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
 
-        return color, kd, buffers
+        mlp_input = torch.cat([pe_input.view(-1, self.inp_size).to(torch.float32), normal_dir, view_dir], dim=1)
+        color = self.material_mlp(mlp_input) 
+        return color, None, None
+
 
     # ==============================================================================================
     # prepare the final color output
@@ -148,28 +135,21 @@ class NeuralShader(torch.nn.Module):
             skin_mask_bool = None
 
         ### compute the final color, and c-buffers 
-        pred_color, albedo, buffers = self.forward(positions, gbuffer, view_direction, mesh, light=lgt,
+        pred_color, _, _ = self.forward(positions, gbuffer, view_direction, mesh, light=lgt,
                                             deformed_position=gbuffer["position"], skin_mask=skin_mask_bool)
         pred_color = pred_color.view(positions.shape) 
-        albedo = albedo.view(positions.shape)
 
         ### !! we mask directly with alpha values from the rasterizer !! ###
         pred_color_masked = torch.lerp(torch.zeros((batch_size, H, W, 4)).to(self.device), 
                                     torch.concat([pred_color, torch.ones_like(pred_color[..., 0:1]).to(self.device)], axis=3), gbuffer["mask"].float())
-        roughness_masked = torch.lerp(torch.zeros((batch_size, H, W, 1)).to(self.device), buffers["k_r"], gbuffer["mask"].float())
-        ko_masked = torch.lerp(torch.zeros((batch_size, H, W, 1)).to(self.device), buffers["ko"], gbuffer["mask"].float())
-        albedo_masked = torch.lerp(torch.zeros((batch_size, H, W, 4)).to(self.device), 
-                                    torch.concat([albedo, torch.ones_like(pred_color[..., 0:1]).to(self.device)], axis=3), gbuffer["mask"].float())
+        
     
         ### we antialias the final color here (!)
         pred_color_masked = dr.antialias(pred_color_masked.contiguous(), gbuffer["rast"], gbuffer["deformed_verts_clip_space"], mesh.indices.int())
-        roughness_masked = dr.antialias(roughness_masked.contiguous(), gbuffer["rast"], gbuffer["deformed_verts_clip_space"], mesh.indices.int())
-        ko_masked = dr.antialias(ko_masked.contiguous(), gbuffer["rast"], gbuffer["deformed_verts_clip_space"], mesh.indices.int())
+        
+        cbuffers = {}
 
-        buffers["albedo"] = albedo_masked[..., :3]
-        buffers["roughness"] = roughness_masked[..., :1]
-        buffers["specular_intensity"] = ko_masked[..., :1]
-        return pred_color_masked[..., :3], buffers, pred_color_masked[..., -1:]
+        return pred_color_masked[..., :3], cbuffers, pred_color_masked[..., -1:]
 
     # ==============================================================================================
     # prepare the final color output

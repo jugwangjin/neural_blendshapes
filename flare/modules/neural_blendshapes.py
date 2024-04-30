@@ -105,29 +105,6 @@ class NeuralBlendshapes(nn.Module):
 
         deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + self.transform_origin[None, None]
 
-
-        # eye_template_deformation = self.template_deformer(eye_encoded_vertices)
-
-        # eye_deformer_input = torch.cat([eye_encoded_vertices[None].repeat(features.shape[0], 1, 1), \
-        #                             features[:, None, :53].repeat(1, eye_encoded_vertices.shape[0], 1)], dim=2)
-        
-        # B, V, _ = eye_deformer_input.shape
-        
-        # eye_expression_deformation = self.eye_expression_deformer(eye_deformer_input)
-
-        # eye_expression_vertices = eye_vertices[None][..., :3] + eye_expression_deformation + eye_template_deformation[None]
-
-        # eye_pose_weight = self.pose_weight(torch.cat([eye_encoded_vertices[None].repeat(features.shape[0], 1, 1), \
-        #                                         features[:, None, 53:].repeat(1, eye_encoded_vertices.shape[0], 1)], dim=2)) # shape of B V 1
-        
-        # rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle[:, None].repeat(1, V, 1) * eye_pose_weight, convention = 'XYZ')
-
-        # eye_local_coordinate_vertices = eye_expression_vertices - self.transform_origin[None, None]
-
-        # eye_local_coordinate_vertices = eye_local_coordinate_vertices * scale[:, None]
-
-        # eye_deformed_mesh = torch.einsum('bvd, bvdj -> bvj', eye_local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + self.transform_origin[None, None]
-        
         return_dict = {} 
         return_dict['features'] = features
 
@@ -136,33 +113,6 @@ class NeuralBlendshapes(nn.Module):
         return_dict['full_expression_mesh'] = expression_vertices
         return_dict['pose_weight'] = pose_weight
         return_dict['full_deformed_mesh'] = deformed_mesh
-
-        # return_dict['eye_template_deformation'] = eye_template_deformation
-        # return_dict['eye_expression_deformation'] = eye_expression_deformation
-        # return_dict['eye_expression_mesh'] = eye_expression_vertices
-        # return_dict['eye_pose_weight'] = eye_pose_weight
-        # return_dict['eye_deformed_mesh'] = eye_deformed_mesh
-
-        # full_template_deformation = torch.zeros(self.full_shape, device = template_deformation.device)
-        # full_template_deformation[self.head_indices] = template_deformation
-        # full_template_deformation[self.eyeball_indices] = eye_template_deformation
-
-        # full_expression_deformation = torch.zeros([B] + self.full_shape, device = template_deformation.device)
-        # full_expression_deformation[:, self.head_indices] = expression_deformation
-        # full_expression_deformation[:, self.eyeball_indices] = eye_expression_deformation
-
-        # full_expression_mesh = torch.zeros([B] + self.full_shape, device = template_deformation.device)
-        # full_expression_mesh[:, self.head_indices] = expression_vertices
-        # full_expression_mesh[:, self.eyeball_indices] = eye_expression_vertices
-
-        # full_deformed_mesh = torch.zeros([B] + self.full_shape, device = template_deformation.device)
-        # full_deformed_mesh[:, self.head_indices] = deformed_mesh
-        # full_deformed_mesh[:, self.eyeball_indices] = eye_deformed_mesh
-
-        # return_dict['full_template_deformation'] = full_template_deformation
-        # return_dict['full_expression_deformation'] = full_expression_deformation
-        # return_dict['full_expression_mesh'] = full_expression_mesh
-        # return_dict['full_deformed_mesh'] = full_deformed_mesh
 
         return return_dict
         

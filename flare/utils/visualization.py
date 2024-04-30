@@ -140,10 +140,10 @@ def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images
     color_list += [list_torchgrid(convert_uint(debug_view["img"]), grid_path, save_name=None, nrow=1, save=False, scale_factor=1).unsqueeze(0)]
     color_list += [list_torchgrid(convert_uint(shaded_image), grid_path, save_name=None, nrow=1, save=False, scale_factor=1).unsqueeze(0)]
 
-    if 'shading' in cbuffers:
-        color_list += [list_torchgrid(convert_uint(cbuffers["albedo"]), grid_path, save_name=None, nrow=1, save=False, scale_factor=1).unsqueeze(0)]
-        color_list += [list_torchgrid(convert_uint(cbuffers["shading"] * gbuffer_mask), grid_path, save_name=None, nrow=1, save=False, scale_factor=1).unsqueeze(0)]
-        add_buffer(cbuffers, gbuffer_mask, color_list, convert_uint) ## visualize roughness and specular intensity
+    # if 'shading' in cbuffers:
+    #     color_list += [list_torchgrid(convert_uint(cbuffers["albedo"]), grid_path, save_name=None, nrow=1, save=False, scale_factor=1).unsqueeze(0)]
+    #     color_list += [list_torchgrid(convert_uint(cbuffers["shading"] * gbuffer_mask), grid_path, save_name=None, nrow=1, save=False, scale_factor=1).unsqueeze(0)]
+    #     add_buffer(cbuffers, gbuffer_mask, color_list, convert_uint) ## visualize roughness and specular intensity
     color_list += [list_torchgrid(normal_image, grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
     color_list += [list_torchgrid(shading.to(device), grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
     save_name = f'grid_{iteration}.png'
