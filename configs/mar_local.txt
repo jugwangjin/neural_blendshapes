@@ -28,9 +28,9 @@ weight_laplacian_regularization = 0.01
 
 weight_normal = 0.25
 weight_normal_laplacian = 1
-weight_landmark = 1
-weight_closure = 1
-weight_ict_landmark = 1
+weight_landmark = 10
+weight_closure = 10
+weight_ict_landmark = 10
 weight_ict = 2
 
 

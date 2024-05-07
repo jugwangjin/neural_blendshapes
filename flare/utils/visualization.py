@@ -115,7 +115,7 @@ def diffuse_specular(cbuffers, gbuffer_mask, color_list, convert_uint):
     H, W = 512, 512
 
 # ==================== visualizations =================================
-def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images_save_path, iteration):
+def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images_save_path, iteration, save_name=None):
     device = shaded_image.device
     convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
 
@@ -146,7 +146,10 @@ def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images
     #     add_buffer(cbuffers, gbuffer_mask, color_list, convert_uint) ## visualize roughness and specular intensity
     color_list += [list_torchgrid(normal_image, grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
     color_list += [list_torchgrid(shading.to(device), grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
-    save_name = f'grid_{iteration}.png'
+    if save_name is None:
+        save_name = f'grid_{iteration}.png'
+    else:
+        save_name = f'grid_{iteration}_{save_name}.png'
     list_torchgrid(color_list, grid_path, save_name, nrow=len(color_list), scale_factor=1)
     del color_list
 

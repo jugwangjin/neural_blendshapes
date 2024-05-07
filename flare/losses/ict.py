@@ -68,7 +68,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     # random_deformed_vertices_w_template = random_deformed_vertices + random_return_dict['full_template_deformation']
 
-    random_ict_loss = torch.mean(torch.pow(random_ict * 10 - random_deformed_vertices * 10, 2)) 
+    random_ict_loss = torch.mean(torch.pow(random_ict - random_deformed_vertices, 2)) 
                     #   0.1 * torch.mean(torch.pow(random_ict[:, frontal_indices] * 10 - random_deformed_vertices_w_template[:, frontal_indices] * 10, 2))
 
 
@@ -85,7 +85,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     # local_coordinate_vertices = local_coordinate_vertices 
 
-    # rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle, convention = 'XYZ')
+    # rotation_matrix = pt3d.eulzr_angles_to_matrix(euler_angle, convention = 'XYZ')
 
     # transformed_ict = torch.einsum('bvd, bdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + neural_blendshapes.transform_origin[None, None]
 
@@ -98,7 +98,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     # exit()
     detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
 
-    ict_landmark_loss = torch.mean(torch.abs(detected_landmarks[..., :2] - ict_landmarks_clip_space[..., :2]) * detected_landmarks[..., -1:])
+    ict_landmark_loss = torch.mean(torch.pow(detected_landmarks[..., :2] - ict_landmarks_clip_space[..., :2], 2) * detected_landmarks[..., -1:])
     # ict_landmark_loss = torch.mean(lmk_adaptive.lossfun(((detected_landmarks[..., :2] - ict_landmarks_clip_space[..., :2]) * detected_landmarks[..., -1:]).view(-1, 2)**2))
 
 
@@ -107,14 +107,14 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     closure_confidence = torch.minimum(detected_landmarks[:, EYELID_PAIRS[:, 0], -1:], detected_landmarks[:, EYELID_PAIRS[:, 1], -1:])
     
     # eye_closure_loss = torch.mean(lmk_adaptive.lossfun(((detected_eye_closure - deformer_eye_closure) * closure_confidence).view(-1, 2)**2))
-    eye_closure_loss = torch.mean(torch.abs(detected_eye_closure - deformer_eye_closure) * closure_confidence)
+    eye_closure_loss = torch.mean(torch.pow(detected_eye_closure - deformer_eye_closure, 2) * closure_confidence)
     
     detected_lip_closure = detected_landmarks[:, LIP_PAIRS[:, 0], :2] - detected_landmarks[:, LIP_PAIRS[:, 1], :2]
     deformer_lip_closure = ict_landmarks_clip_space[:, LIP_PAIRS[:, 0], :2] - ict_landmarks_clip_space[:, LIP_PAIRS[:, 1], :2]
     closure_confidence = torch.minimum(detected_landmarks[:, LIP_PAIRS[:, 0], -1:], detected_landmarks[:, LIP_PAIRS[:, 1], -1:])
 
     # lip_closure_loss = torch.mean(lmk_adaptive.lossfun(((detected_lip_closure - deformer_lip_closure) * closure_confidence).view(-1, 2)**2))
-    lip_closure_loss = torch.mean(torch.abs(detected_lip_closure - deformer_lip_closure) * closure_confidence)
+    lip_closure_loss = torch.mean(torch.pow(detected_lip_closure - deformer_lip_closure, 2) * closure_confidence)
 
     closure_loss = eye_closure_loss + lip_closure_loss
     

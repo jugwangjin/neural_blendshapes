@@ -365,8 +365,32 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 with torch.no_grad():
                     debug_rgb_pred, debug_gbuffer, debug_cbuffers = run(args, mesh, debug_views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt)
 
+
+
                     ## ============== visualize ==============================
                     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
+
+                    return_dict_ = neural_blendshapes(debug_views["img"].to(device), debug_views["landmark"].to(device))
+                    
+                    ict = ict_facekit(expression_weights = return_dict_['features'][:, :53], to_canonical = True).clone().detach()
+                    deformed_verts = neural_blendshapes.apply_deformation(ict, return_dict_['features'])
+
+                    # mesh_ = ict_canonical_mesh.with_vertices(deformed_verts)
+
+
+                    d_normals = mesh.fetch_all_normals(deformed_verts, mesh)
+
+
+                    debug_gbuffer = renderer.render_batch(debug_views['camera'], deformed_verts.contiguous(), d_normals, 
+                                            channels=channels_gbuffer, with_antialiasing=True, 
+                                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh) 
+
+                    debug_rgb_pred, debug_cbuffers, gbuffer_mask = shader.shade(debug_gbuffer, debug_views, mesh, args.finetune_color, lgt)
+
+
+                    visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration, save_name='ict')
+
+
 
                     del debug_gbuffer, debug_cbuffers
             if iteration == 1 or iteration % (args.visualization_frequency * 10) == 0:
@@ -452,7 +476,7 @@ if __name__ == '__main__':
             print("--"*50)
             print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
             print("--"*50)
-            # raise e
+            raise e
             time.sleep(5)
 
         except Exception as e:
