@@ -61,6 +61,10 @@ class NeuralBlendshapes(nn.Module):
         )
 
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
+
+        initialize_weights(self.expression_deformer, gain=0.1)
+        initialize_weights(self.template_deformer, gain=0.1)
+        initialize_weights(self.pose_weight, gain=0.1)
     
 
     def set_template(self, template, uv_template, vertex_parts=None, full_shape=None, head_indices=None, eyeball_indices=None):

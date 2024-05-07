@@ -171,13 +171,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "ict": args.weight_ict,
         "ict_landmark": args.weight_ict_landmark,
         "ict_landmark_closure": args.weight_closure,
-        "random_ict": args.weight_random_ict,
+        "random_ict": args.weight_ict,
         # "ict_identity": args.weight_ict_identity,
         "feature_regularization": args.weight_feature_regularization,
         # "head_direction": args.weight_head_direction,
         # "direction_estimation": args.weight_direction_estimation,
     }
-
+    [print(k, v) for k, v in loss_weights.items()]
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
     print(loss_weights)
     if loss_weights["perceptual_loss"] > 0.0:
@@ -321,7 +321,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 print(scale)
                 print(neural_blendshapes.transform_origin.data)
 
-            if iteration % 100 == 0:
+            if iteration % 100 == 1:
                 print("=="*50)
                 for k, v in losses.items():
                     # if k in losses_to_print:
@@ -345,8 +345,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 shader.fourier_feature_transform.params.grad /= 8.0
 
             # clip gradients
-            torch.nn.utils.clip_grad_norm_(shader.parameters(), 10.0)
-            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 10.0)
+            torch.nn.utils.clip_grad_norm_(shader.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 1.0)
 
 
             optimizer_shader.step()

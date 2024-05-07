@@ -68,7 +68,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     # random_deformed_vertices_w_template = random_deformed_vertices + random_return_dict['full_template_deformation']
 
-    random_ict_loss = torch.mean(torch.pow(random_ict - random_deformed_vertices, 2)) 
+    random_ict_loss = torch.mean(torch.pow(random_ict * 10 - random_deformed_vertices * 10, 2)) 
                     #   0.1 * torch.mean(torch.pow(random_ict[:, frontal_indices] * 10 - random_deformed_vertices_w_template[:, frontal_indices] * 10, 2))
 
 
