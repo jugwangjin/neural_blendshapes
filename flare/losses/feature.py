@@ -10,7 +10,7 @@ def feature_regularization_loss(feature, gt_facs, estim_lmks, gt_lmks, iteration
     facs_regularization = torch.mean(torch.pow(facs+1e-6, 0.75))
 
     # latent regularization: rotation, translation to be zero, scale to be 1
-    latent_regularization = torch.mean(torch.pow(rotation, 2)) * 1e-1 +  1e1 * torch.mean(torch.pow(translation, 2)) 
+    latent_regularization = torch.mean(torch.pow(rotation, 2)) * 1e-1 +  1e2 * torch.mean(torch.pow(translation, 2)) 
 
     
 

@@ -70,8 +70,8 @@ class ResnetEncoder(nn.Module):
         features[..., :56] = torch.nn.functional.sigmoid(features[..., :56])
 
         features[..., 53:56] = features[..., 53:56] * PI - HALF_PI
-        features[..., -4:-1] = 0
-        # features[..., -2] = 0
+        # features[..., -4:-1] = 0
+        features[..., -2] = 0
         features[..., -1] = torch.sigmoid(features[..., -1]) * 2
 
         return features, estim_landmarks
