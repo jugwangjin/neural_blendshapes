@@ -20,6 +20,34 @@ def laplacian_loss(mesh: Mesh):
     
     return loss.mean()
 
+
+def laplacian_loss(mesh: Mesh, canonical_vertices):
+    """ Compute the Laplacian term as the mean squared Euclidean norm of the differential coordinates.
+
+    Args:
+        mesh (Mesh): Mesh used to build the differential coordinates.
+    """
+
+    L = mesh.laplacian
+    V = mesh.vertices
+
+    mesh_laplacian = L.mm(V)
+    canonical_laplacian = L.mm(canonical_vertices)
+
+    # print(mesh_laplacian.shape)
+    # exit()
+
+    loss = mesh_laplacian - canonical_laplacian
+    loss = loss.norm(dim=1)**2
+
+    return loss.mean()
+
+    loss = L.mm(V)
+    loss = loss.norm(dim=1)**2
+    
+    return loss.mean()
+
+
 def normal_consistency_loss(mesh: Mesh):
     """ Compute the normal consistency term as the cosine similarity between neighboring face normals.
 

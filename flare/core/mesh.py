@@ -31,7 +31,7 @@ class Mesh:
         device (torch.device): Device where the mesh buffers are stored
     """
 
-    def __init__(self, vertices, indices, uv_coords=None, device='cpu'):
+    def __init__(self, vertices, indices, ict_facekit=None, device='cpu'):
         self.device = device
 
         self.vertices = vertices.to(device, dtype=torch.float32) if torch.is_tensor(vertices) else torch.tensor(vertices, dtype=torch.float32, device=device)
@@ -43,10 +43,14 @@ class Mesh:
         self._edges = None
         self._connected_faces = None
         self._laplacian = None
-        self._uv_coords = uv_coords.to(device, dtype=torch.float32) if torch.is_tensor(uv_coords) else torch.tensor(uv_coords, dtype=torch.float32, device=device) if uv_coords is not None else None
-        self._uv_idx = None if uv_coords is None else self.indices
-        self.vmapping = None
         self._faces_idx = None
+        self.vmapping = None
+        if ict_facekit is None:
+            self._uv_coords = None
+            self._uv_idx = None
+        else:
+            self._uv_coords = ict_facekit.uvs.to(device, dtype=torch.float32) if torch.is_tensor(ict_facekit.uvs) else torch.tensor(ict_facekit.uvs, dtype=torch.float32, device=device)
+            self._uv_idx = ict_facekit.uv_faces.to(device, dtype=torch.int64) if torch.is_tensor(ict_facekit.uv_faces) else torch.tensor(ict_facekit.uv_faces, dtype=torch.int64, device=device)
 
     def to(self, device):
         mesh = Mesh(self.vertices.to(device), self.indices.to(device), device=device)

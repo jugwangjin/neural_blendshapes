@@ -54,7 +54,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
-    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, uv_coords=ict_facekit.uvs.cpu().data, device=device)
+    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
     ict_canonical_mesh.compute_connectivity()
 
     write_mesh(Path(meshes_save_path / "init_ict_canonical.obj"), ict_canonical_mesh.to('cpu'))
@@ -91,13 +91,32 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
     neural_blendshapes.set_template(ict_canonical_mesh.vertices,
-                                    ict_canonical_mesh._uv_coords,)
+                                    ict_facekit.uv_neutral_mesh, ict_facekit.vertex_parts)
 
     neural_blendshapes = neural_blendshapes.to(device)
 
     
+    from robust_loss_pytorch.adaptive import AdaptiveLossFunction
+    lmk_adaptive = AdaptiveLossFunction(num_dims=2, float_dtype=np.float32, device=device)
+    lmk_adaptive_params = list(lmk_adaptive.parameters()) ## need to train it
 
-    optimizer_neural_blendshapes = torch.optim.Adam(list(neural_blendshapes.parameters()), lr=args.lr_deformer)
+    facs_adaptive = AdaptiveLossFunction(num_dims=53, float_dtype=np.float32, device=device)
+    facs_adaptive_params = list(facs_adaptive.parameters()) ## need to train it
+
+    # neural_blendshapes_params = list(neural_blendshapes.parameters())
+    # # exclude transform_origin to apply args.lr_deformer * 0.1
+    # neural_blendshapes_params = [p for p in neural_blendshapes_params if 'transform_origin' not in p.name]
+    # optimizer_neural_blendshapes = torch.optim.Adam([{'params': neural_blendshapes_params}, \
+    #                                                 {'params': [neural_blendshapes.transform_origin], 'lr': args.lr_deformer*0.1}], 
+    #                                                 lr=args.lr_deformer)
+        
+        # neural_blendshapes_params + lmk_adaptive_params + facs_adaptive_params, lr=args.lr_deformer)
+
+
+    optimizer_neural_blendshapes = torch.optim.Adam(list(neural_blendshapes.parameters()) + lmk_adaptive_params + facs_adaptive_params, lr=args.lr_deformer)
+    # optimizer_neural_blendshapes = torch.optim.Adam(list(neural_blendshapes.parameters()), lr=args.lr_deformer)
+    print(optimizer_neural_blendshapes)
+
     # for name, param in neural_blendshapes.named_parameters():
     #     print(name)
     # print(neural_blendshapes.coords_min, neural_blendshapes.coords_max)
@@ -137,7 +156,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # Initialize the loss weights and losses
     loss_weights = {
         "mask": args.weight_mask,
-        "normal_regularization": args.weight_normal_regularization,
+        # "normal_regularization": args.weight_normal_regularization,
         "laplacian_regularization": args.weight_laplacian_regularization,
         "shading": args.weight_shading,
         "perceptual_loss": args.weight_perceptual_loss,
@@ -221,22 +240,25 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # ==============================================================================================
             gbuffers = renderer.render_batch(views_subset['camera'], deformed_vertices.contiguous(), d_normals, 
                                     channels=channels_gbuffer, with_antialiasing=True, 
-                                    canonical_v=mesh.vertices, canonical_idx=mesh.indices) 
+                                    canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh) 
             
             # ============================================= =================================================
             # loss function 
             # ==============================================================================================
             ## ======= regularization autoencoder========
-            losses['normal_regularization'] = 0
-            losses['laplacian_regularization'] = 0
-            num_meshes = deformed_vertices.shape[0]
-            for nth_mesh in range(num_meshes):
-                mesh_ = ict_canonical_mesh.with_vertices(deformed_vertices[nth_mesh])
-                losses['normal_regularization'] += normal_consistency_loss(mesh_)
-                losses['laplacian_regularization'] += laplacian_loss(mesh_)
-            losses['normal_regularization'] /= num_meshes
-            losses['laplacian_regularization'] /= num_meshes
+            # losses['normal_regularization'] = 0
+            # losses['laplacian_regularization'] = 0
+            # num_meshes = deformed_vertices.shape[0]
+            # for nth_mesh in range(num_meshes):
+                # mesh_ = ict_canonical_mesh.with_vertices(return_dict["full_expression_mesh"][nth_mesh])
+                # losses['normal_regularization'] += normal_consistency_loss(mesh_)
+                # losses['laplacian_regularization'] += laplacian_loss(mesh_)
+            # losses['normal_regularization'] /= num_meshes
+            # losses['laplacian_regularization'] /= num_meshes
+            # losses['normal_regularization'] += normal_consistency_loss(mesh)
+            losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices)
 
+            # if iteration > args.iterations // 8:
             ## ============== color + regularization for color ==============================
             pred_color_masked, _, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
 
@@ -249,12 +271,24 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration)
             
             # landmark losses
-            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, device)
+            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
 
-            losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers)
+            if iteration < args.iterations // 8:
+                losses["shading"] *= 0.1
+                losses["perceptual_loss"] *= 0.1
+                losses["mask"] *= 0.1
+                losses["landmark"] *= 0.1
+                losses["closure"] *= 0.1
+
+                losses["landmark"] += torch.mean(torch.pow(return_dict["pose_weight"] - 1, 2))
+
+            losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers, lmk_adaptive, fullhead_template=False)
             
             # feature regularization
-            losses['feature_regularization'] = feature_regularization_loss(features, views_subset['facs'][..., ict_facekit.mediapipe_to_ict], iteration)
+            # facs gt weightterm starts from 1e3, reduces to zero over half of the iterations exponentially
+            facs_weight = 1e3 if iteration < args.iterations // 8 else 1e2 if iteration < args.iterations // 4 else 0
+            losses['feature_regularization'] = feature_regularization_loss(features, views_subset['facs'][..., ict_facekit.mediapipe_to_ict], 
+                                                                           return_dict["estim_lmks"], views_subset["landmark"], iteration, facs_adaptive, facs_weight)
 
             loss = torch.tensor(0., device=device) 
             
@@ -281,16 +315,18 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 translation = features[0, 56:59]
                 scale = features[0, -1:]
 
-                print(facs)
+                # print(facs)
                 print(euler_angle)
                 print(translation)
                 print(scale)
+                print(neural_blendshapes.transform_origin.data)
 
+            if iteration % 100 == 0:
                 print("=="*50)
                 for k, v in losses.items():
                     # if k in losses_to_print:
                     if v > 0:
-                        print(f"{k}: {v.item()}")
+                        print(f"{k}: {v.item() * loss_weights[k]}")
                 print("=="*50)
 
             # ==============================================================================================
@@ -309,8 +345,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 shader.fourier_feature_transform.params.grad /= 8.0
 
             # clip gradients
-            torch.nn.utils.clip_grad_norm_(shader.parameters(), 2.0)
-            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 2.0)
+            torch.nn.utils.clip_grad_norm_(shader.parameters(), 10.0)
+            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 10.0)
 
 
             optimizer_shader.step()
@@ -328,8 +364,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             
                 with torch.no_grad():
                     debug_rgb_pred, debug_gbuffer, debug_cbuffers = run(args, mesh, debug_views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt)
+
                     ## ============== visualize ==============================
                     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
+
                     del debug_gbuffer, debug_cbuffers
             if iteration == 1 or iteration % (args.visualization_frequency * 10) == 0:
                 print(images_save_path / "grid" / f'grid_{iteration}.png')

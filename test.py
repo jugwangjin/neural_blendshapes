@@ -54,7 +54,7 @@ def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, de
     ## ============== Rasterize ==============================
     gbuffers = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
                         channels=channels_gbuffer, with_antialiasing=True, 
-                        canonical_v=mesh.vertices, canonical_idx=mesh.indices)
+                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
     
     ## ============== predict color ==============================
     rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffers, views, mesh, args.finetune_color, lgt)
@@ -73,7 +73,7 @@ def run_relight(args, mesh, views, ict_facekit, neural_blendshapes, shader, rend
     ## ============== Rasterize ==============================
     gbuffers = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
                         channels=channels_gbuffer, with_antialiasing=True, 
-                        canonical_v=mesh.vertices, canonical_idx=mesh.indices)
+                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
     
     ## ============== predict color ==============================
     relit_imgs, cbuffers, gbuffer_mask = shader.relight(gbuffers, views, mesh, args.finetune_color, lgt_list)
@@ -133,7 +133,7 @@ if __name__ == '__main__':
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
-    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit.uvs.cpu().data,device=device)
+    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit,device=device)
     ict_canonical_mesh.compute_connectivity()
 
 

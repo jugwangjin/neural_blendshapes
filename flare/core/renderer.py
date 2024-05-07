@@ -126,7 +126,7 @@ class Renderer:
         P_batch = gbuffers["P_batch"]
         return Renderer.transform_pos_batch(P_batch, vertices)
 
-    def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx):
+    def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx, canonical_uv):
         """ Render G-buffers from a set of views.
 
         Args:
@@ -173,7 +173,10 @@ class Renderer:
         if "mask" in channels:
             gbuffer["mask"] = (rast[..., -1:] > 0.).float() 
 
-            
+        uv_coordinates, _ = dr.interpolate(canonical_uv, rast, idx, rast_db=rast_out_db, diff_attrs='all')
+        gbuffer["uv_coordinates"] = dr.antialias(uv_coordinates, rast, deformed_vertices_clip_space, idx) if with_antialiasing else uv_coordinates
+
+  
         # We store the deformed vertices in clip space, the transformed camera matrix and the barycentric coordinates
         # to antialias texture and mask after computing the color 
         gbuffer["rast"] = rast

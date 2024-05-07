@@ -11,7 +11,9 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.num_identity = model_dict['num_identity']
 
         neutral_mesh = model_dict['neutral_mesh']
+        uv_neutral_mesh = model_dict['uv_neutral_mesh']
         faces = model_dict['faces']
+        uv_faces = model_dict['uv_faces']
         uvs = model_dict['uvs']
 
         expression_shape_modes = model_dict['expression_shape_modes']
@@ -23,12 +25,22 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.eyeball_indices = model_dict['eyeball_indices']
         self.head_indices = model_dict['head_indices']
 
+        vertex_parts = model_dict['vertex_parts']
+        self.vertex_parts = vertex_parts
+
+        vertex_parts = torch.tensor(vertex_parts)
+        vertex_parts = vertex_parts / torch.amax(vertex_parts)
+        
+        uv_neutral_mesh = torch.cat([torch.tensor(uv_neutral_mesh, dtype=torch.float32), vertex_parts[..., None]], dim=1)
+
         self.expression_names = model_dict['expression_names']
         self.identity_names = model_dict['identity_names']
         self.model_config = model_dict['model_config']
 
         self.register_buffer('neutral_mesh', torch.tensor(neutral_mesh, dtype=torch.float32)[None])
+        self.register_buffer('uv_neutral_mesh', torch.tensor(uv_neutral_mesh, dtype=torch.float32)[None].clone().detach())
         self.register_buffer('faces', torch.tensor(faces, dtype=torch.long))
+        self.register_buffer('uv_faces', torch.tensor(uv_faces, dtype=torch.long))
         self.register_buffer('uvs', torch.tensor(uvs, dtype=torch.float32))
 
         self.register_buffer('expression_shape_modes', torch.tensor(expression_shape_modes, dtype=torch.float32)[None])

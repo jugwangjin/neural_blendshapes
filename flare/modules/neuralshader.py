@@ -75,10 +75,10 @@ class NeuralShader(torch.nn.Module):
         # create MLP
         # ==============================================================================================
         self.material_mlp_ch = disentangle_network_params['material_mlp_ch']
-        self.material_mlp = FC(self.inp_size+38+38, self.material_mlp_ch, disentangle_network_params["material_mlp_dims"], activation, last_activation).to(device) #sigmoid
+        self.material_mlp = FC(self.inp_size+20+20, self.material_mlp_ch, disentangle_network_params["material_mlp_dims"], activation, last_activation).to(device) #sigmoid
         
         # self.light_mlp = FC(38, 3, disentangle_network_params["light_mlp_dims"], activation=activation, last_activation=None, bias=True).to(device) 
-        self.dir_enc_func = generate_ide_fn(deg_view=4, device=self.device)
+        self.dir_enc_func = generate_ide_fn(deg_view=3, device=self.device)
         # self.dir_enc_func_normals = generate_ide_fn(deg_view=4, device=self.device)
         
         print(disentangle_network_params)
@@ -99,20 +99,20 @@ class NeuralShader(torch.nn.Module):
 
     def forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None):
         bz, h, w, ch = position.shape
-        pe_input = self.apply_pe(position=position)
+        uv_coordinates = gbuffer["uv_coordinates"]
+        pe_input = self.apply_pe(position=uv_coordinates)
 
         view_dir = view_direction[:, None, None, :]
         normal_bend = self.get_shading_normals(deformed_position, view_dir, gbuffer, mesh)
 
         kr_max = torch.ones((bz, h, w, 1))
         kr_max = kr_max.to(self.device)                    
-        normal_dir = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
 
         wo = util.safe_normalize(view_dir - deformed_position)
         reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
         view_dir = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
 
-        mlp_input = torch.cat([pe_input.view(-1, self.inp_size).to(torch.float32), normal_dir, view_dir], dim=1)
+        mlp_input = torch.cat([pe_input.view(-1, self.inp_size).to(torch.float32), self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1)), view_dir], dim=1)
         color = self.material_mlp(mlp_input) 
         return color, None, None
 
