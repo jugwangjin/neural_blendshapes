@@ -18,7 +18,7 @@ def initialize_weights(m, gain=0.1):
 class NeuralBlendshapes(nn.Module):
     def __init__(self):
         super().__init__()
-        self.image_encoder = ResnetEncoder(60)
+        self.image_encoder = ResnetEncoder(62)
 
         self.coords_encoder, dim = get_embedder(6, input_dims=6)
 
@@ -61,6 +61,7 @@ class NeuralBlendshapes(nn.Module):
         )
 
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
+        self.scale = torch.nn.Parameter(torch.tensor([1.]))
 
         initialize_weights(self.expression_deformer, gain=0.1)
         initialize_weights(self.template_deformer, gain=0.1)
@@ -76,16 +77,14 @@ class NeuralBlendshapes(nn.Module):
 
     def forward(self, image=None, lmks=None, image_input=True, features=None, vertices=None, coords_min=None, coords_max=None):
         if image_input:
+            # print(image.shape)
             if image.shape[1] != 3 and image.shape[3] == 3:
                 image = image.permute(0, 3, 1, 2)
-
+            # print(image.shape)
             features, estim_lmks = self.image_encoder(image, lmks)
         else:
             estim_lmks = None
-        euler_angle = features[..., 53:56]
-        translation = features[..., 56:59]
-        scale = features[..., -1:]
-
+        # print(features.shape, estim_lmks.shape)
         if vertices is None:
             vertices = self.template
             encoded_vertices = self.encoded_vertices
@@ -107,7 +106,7 @@ class NeuralBlendshapes(nn.Module):
         expression_vertices = vertices[None][..., :3] + expression_deformation + template_deformation[None]
 
         pose_weight = self.pose_weight(torch.cat([encoded_only_vertices[None].repeat(features.shape[0], 1, 1), \
-                                                features[:, None, 53:-1].repeat(1, V, 1)], dim=2)) # shape of B V 1
+                                                features[:, None, 53:59].repeat(1, V, 1)], dim=2)) # shape of B V 1
         
         deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
 
@@ -138,16 +137,22 @@ class NeuralBlendshapes(nn.Module):
 
         euler_angle = features[..., 53:56]
         translation = features[..., 56:59]
-        scale = features[..., -1:]
+        scale = self.scale
 
         if weights is None:
             weights = torch.ones_like(vertices[..., :1])
 
         B, V, _ = vertices.shape
+        # print(features.shape, euler_angle.shape)
+        # rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle, convention = 'XYZ')
+        # print(rotation_matrix[0])
+        # print(rotation_matrix[1])
 
         rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle[:, None].repeat(1, V, 1) * weights, convention = 'XYZ')
 
-        local_coordinate_vertices = vertices - self.transform_origin[None, None] * 0.1
+        
+
+        local_coordinate_vertices = (vertices  - self.transform_origin[None, None] * 0.1) * scale
         deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + self.transform_origin[None, None] * 0.1
 
         return deformed_mesh

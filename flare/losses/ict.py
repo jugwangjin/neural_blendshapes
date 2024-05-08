@@ -19,10 +19,15 @@ def align_to_canonical(source, target, landmark_indices):
 
     return aligned, to_canonical
 
+def closure_loss_fun(gt_closure, deformed_closure, confidence):
+    gt_closure_distance = torch.norm(gt_closure, dim=-1)
+    deformed_closure_distance = torch.norm(deformed_closure, dim=-1)
+    return torch.mean(torch.abs(gt_closure_distance - deformed_closure_distance) * confidence)
+
 
 def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, gbuffers, lmk_adaptive, fullhead_template=False):
     features = return_dict['features']
-    ict = ict_facekit(expression_weights = features[:, :53], to_canonical = True).clone().detach()
+    ict = ict_facekit(expression_weights = features[:, :53], to_canonical = True)
 
     frontal_indices = ict_facekit.face_indices + ict_facekit.eyeball_indices
 
@@ -45,13 +50,14 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     # transformed_ict = (torch.bmm(local_coordinate_vertices, rotation_matrix.transpose(1, 2)) + translation[:, None, :] + neural_blendshapes.transform_origin[None, None]).clone().detach  z()
 
+    ict_ = ict.detach().clone()
     if fullhead_template:
-        ict_loss = torch.mean(torch.pow(ict * 10 - deformed_vertices * 10, 2)) + \
-                torch.mean(torch.pow(ict * 10 - deformed_vertices_w_template * 10, 2))
+        ict_loss = torch.mean(torch.pow(ict_ * 10 - deformed_vertices * 10, 2)) + \
+                torch.mean(torch.pow(ict_ * 10 - deformed_vertices_w_template * 10, 2))
         
     else:
-        ict_loss = torch.mean(torch.pow(ict * 10 - deformed_vertices * 10, 2)) + \
-                torch.mean(torch.pow(ict[:, frontal_indices] * 10 - deformed_vertices_w_template[:, frontal_indices] * 10, 2))
+        ict_loss = torch.mean(torch.pow(ict_ * 10 - deformed_vertices * 10, 2)) + \
+                torch.mean(torch.pow(ict_[:, frontal_indices] * 10 - deformed_vertices_w_template[:, frontal_indices] * 10, 2))
                 # torch.mean(torch.pow(transformed_ict[:, frontal_indices] - return_dict['full_deformed_mesh'][:, frontal_indices], 2)) 
 
 
@@ -61,7 +67,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     random_features = torch.randn_like(features)
     random_features[..., :53] = torch.nn.functional.sigmoid(random_features[..., :53] * 2)
 
-    random_ict = ict_facekit(expression_weights = random_features[..., :53], to_canonical = True).clone().detach()
+    random_ict = ict_facekit(expression_weights = random_features[..., :53], to_canonical = True)
     
     random_return_dict = neural_blendshapes(image_input=False, lmks=None, features=random_features)
     random_deformed_vertices = random_return_dict['full_expression_deformation'] + ict_facekit.canonical
@@ -72,7 +78,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
                     #   0.1 * torch.mean(torch.pow(random_ict[:, frontal_indices] * 10 - random_deformed_vertices_w_template[:, frontal_indices] * 10, 2))
 
 
-    canonical_landmarks = ict[:, ict_facekit.landmark_indices].clone().detach()
+    canonical_landmarks = ict[:, ict_facekit.landmark_indices]
 
     transformed_ict = neural_blendshapes.apply_deformation(canonical_landmarks, features)
 
@@ -94,11 +100,25 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     detected_landmarks = views_subset['landmark'].clone().detach()
     detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
+    # detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
     # print(detected_landmarks)
     # exit()
     detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
 
-    ict_landmark_loss = torch.mean(torch.pow(detected_landmarks[..., :2] - ict_landmarks_clip_space[..., :2], 2) * detected_landmarks[..., -1:])
+    # print_indices = [0,8,16,21,30]
+# /    print("ict", detected_landmarks[:, print_indices, :3] - ict_landmarks_clip_space[:, print_indices, :3])
+    # print(detected_landmarks[:, print_indices, :3])
+
+
+    # ict_landmarks_clip_space__ = renderer.get_vertices_clip_space(gbuffers, canonical_landmarks)
+    # ict_landmarks_clip_space__ = ict_landmarks_clip_space__[..., :3] / torch.clamp(ict_landmarks_clip_space__[..., 3:], min=1e-8)
+
+    # print(ict_landmarks_clip_space__[:, print_indices])
+
+    # print(torch.cat([detected_landmarks[..., :3], ict_landmarks_clip_space], dim=-1))
+    # exit()
+
+    ict_landmark_loss = torch.mean(torch.abs(detected_landmarks[..., :2] - ict_landmarks_clip_space[..., :2]) * detected_landmarks[..., -1:])
     # ict_landmark_loss = torch.mean(lmk_adaptive.lossfun(((detected_landmarks[..., :2] - ict_landmarks_clip_space[..., :2]) * detected_landmarks[..., -1:]).view(-1, 2)**2))
 
 
@@ -107,26 +127,21 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     closure_confidence = torch.minimum(detected_landmarks[:, EYELID_PAIRS[:, 0], -1:], detected_landmarks[:, EYELID_PAIRS[:, 1], -1:])
     
     # eye_closure_loss = torch.mean(lmk_adaptive.lossfun(((detected_eye_closure - deformer_eye_closure) * closure_confidence).view(-1, 2)**2))
-    eye_closure_loss = torch.mean(torch.pow(detected_eye_closure - deformer_eye_closure, 2) * closure_confidence)
+    # eye_closure_loss = closure_loss_fun(detected_eye_closure, deformer_eye_closure, closure_confidence)
+    eye_closure_loss = torch.mean(torch.abs(detected_eye_closure - deformer_eye_closure) * closure_confidence)
     
     detected_lip_closure = detected_landmarks[:, LIP_PAIRS[:, 0], :2] - detected_landmarks[:, LIP_PAIRS[:, 1], :2]
     deformer_lip_closure = ict_landmarks_clip_space[:, LIP_PAIRS[:, 0], :2] - ict_landmarks_clip_space[:, LIP_PAIRS[:, 1], :2]
     closure_confidence = torch.minimum(detected_landmarks[:, LIP_PAIRS[:, 0], -1:], detected_landmarks[:, LIP_PAIRS[:, 1], -1:])
 
     # lip_closure_loss = torch.mean(lmk_adaptive.lossfun(((detected_lip_closure - deformer_lip_closure) * closure_confidence).view(-1, 2)**2))
-    lip_closure_loss = torch.mean(torch.pow(detected_lip_closure - deformer_lip_closure, 2) * closure_confidence)
+    lip_closure_loss = torch.mean(torch.abs(detected_lip_closure - deformer_lip_closure) * closure_confidence)
+    # lip_closure_loss = closure_loss_fun(detected_lip_closure, deformer_lip_closure, closure_confidence)
 
     closure_loss = eye_closure_loss + lip_closure_loss
     
     ict_landmark_loss = ict_landmark_loss
     ict_landmark_closure_loss = closure_loss
-
-
-    
-
-
-
-
 
 
     # return ict_loss, random_ict_loss

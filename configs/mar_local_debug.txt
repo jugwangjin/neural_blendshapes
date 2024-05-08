@@ -6,7 +6,7 @@ eval_dir = ["MVI_1802"]
 working_dir = 
 output_dir = out/
 
-batch_size = 1
+batch_size = 2
 sample_idx_ratio = 55
 
 iterations = 20000

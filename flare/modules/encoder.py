@@ -4,8 +4,8 @@ import torchvision
 
 import numpy as np
 
-PI = torch.pi * 1.1
-HALF_PI = 1.1 * torch.pi / 2
+PI = torch.pi 
+HALF_PI = torch.pi / 2
 
 
 def initialize_weights(m, gain=0.1):
@@ -64,17 +64,23 @@ class ResnetEncoder(nn.Module):
         # features = torch.cat([features, lmks[..., :3].reshape(lmks.size(0), -1)], dim=-1)
         features = self.layers(features)
 
-        features, estim_landmarks = features[..., :-68*3], features[..., -68*3:]
+        features, estim_landmarks = features[..., :self.outsize], features[..., self.outsize:]
 
         # we will use first 52 elements as FACS features
-        features[..., :56] = torch.nn.functional.sigmoid(features[..., :56])
+        features[..., :53] = torch.nn.functional.sigmoid(features[..., :53])
 
-        features[..., 53:56] = features[..., 53:56] * PI - HALF_PI
-        # features[..., -4:-1] = 0
-        features[..., -2] = 0
-        features[..., -1] = torch.sigmoid(features[..., -1]) * 2
+        sin_and_cos = features[..., 53:56]
+        sin = torch.sin(sin_and_cos * HALF_PI)
+        cos = torch.cos(sin_and_cos * HALF_PI)
+        euler_angles = torch.atan2(sin, cos)
 
-        return features, estim_landmarks
+        translation = features[..., 56:59]
+        translation[..., -1] = 0
+
+        updated_features = torch.cat([features[..., :53], euler_angles, translation], dim=-1)
+
+
+        return updated_features, estim_landmarks
 
     def save(self, path):
         data = {

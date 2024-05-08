@@ -153,7 +153,7 @@ def main(args):
     new_landmark_indices = []
     for landmark_index in landmark_indices:
         new_landmark_indices.append(vmapping_dict[landmark_index])
-    landmark_indices = new_landmark_indices
+    # landmark_indices = new_landmark_indices
 
         # build original indices to face / not face / eyeball dict
     region_dict = [0] * (len(face_indices) + len(not_face_indices) + len(eyeball_indices))
