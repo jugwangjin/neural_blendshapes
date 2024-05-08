@@ -70,8 +70,8 @@ class ResnetEncoder(nn.Module):
         features[..., :53] = torch.nn.functional.sigmoid(features[..., :53])
 
         sin_and_cos = features[..., 53:56]
-        sin = torch.sin(sin_and_cos * HALF_PI)
-        cos = torch.cos(sin_and_cos * HALF_PI)
+        sin = torch.sin(sin_and_cos)
+        cos = torch.cos(sin_and_cos)
         euler_angles = torch.atan2(sin, cos)
 
         translation = features[..., 56:59]

@@ -57,7 +57,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
         
     else:
         ict_loss = torch.mean(torch.pow(ict_ * 10 - deformed_vertices * 10, 2)) + \
-                torch.mean(torch.pow(ict_[:, frontal_indices] * 10 - deformed_vertices_w_template[:, frontal_indices] * 10, 2))
+                0.1 * torch.mean(torch.pow(ict_[:, frontal_indices] * 10 - deformed_vertices_w_template[:, frontal_indices] * 10, 2))
                 # torch.mean(torch.pow(transformed_ict[:, frontal_indices] - return_dict['full_deformed_mesh'][:, frontal_indices], 2)) 
 
 
@@ -105,6 +105,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     # exit()
     detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
 
+
     # print_indices = [0,8,16,21,30]
 # /    print("ict", detected_landmarks[:, print_indices, :3] - ict_landmarks_clip_space[:, print_indices, :3])
     # print(detected_landmarks[:, print_indices, :3])
@@ -118,7 +119,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     # print(torch.cat([detected_landmarks[..., :3], ict_landmarks_clip_space], dim=-1))
     # exit()
 
-    ict_landmark_loss = torch.mean(torch.abs(detected_landmarks[..., :2] - ict_landmarks_clip_space[..., :2]) * detected_landmarks[..., -1:])
+    ict_landmark_loss = torch.mean(torch.abs(detected_landmarks[:, 17:, :2] - ict_landmarks_clip_space[:, 17:, :2]) * detected_landmarks[:, 17:, -1:])
     # ict_landmark_loss = torch.mean(lmk_adaptive.lossfun(((detected_landmarks[..., :2] - ict_landmarks_clip_space[..., :2]) * detected_landmarks[..., -1:]).view(-1, 2)**2))
 
 

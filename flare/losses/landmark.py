@@ -33,7 +33,7 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, features, nueral_blendsha
     
     # Convert the deformed landmarks to normalized coordinates
     landmarks_on_clip_space = landmarks_on_clip_space[..., :3] / torch.clamp(landmarks_on_clip_space[..., 3:], min=1e-8)
-    
+
     # with torch.no_grad():
         # Normalize the detected landmarks to the range [-1, 1]
     detected_landmarks = views_subset['landmark'].clone().detach()
@@ -41,9 +41,10 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, features, nueral_blendsha
     # detected_landmarks[..., 1:3] = detected_landmarks[..., 1:3] * -1
     detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
 
+
     # print("ict", detected_landmarks)
     # Calculate the loss by comparing the detected landmarks with the deformed landmarks
-    landmark_loss = torch.mean(torch.abs(detected_landmarks[..., :2] - landmarks_on_clip_space[..., :2]) * detected_landmarks[..., -1:])
+    landmark_loss = torch.mean(torch.abs(detected_landmarks[:, 17:, :2] - landmarks_on_clip_space[:, 17:, :2]) * detected_landmarks[:, 17:, -1:])
     # landmark_loss = torch.mean(lmk_adaptive.lossfun(((detected_landmarks[..., :2] - landmarks_on_clip_space[..., :2]) * detected_landmarks[..., -1:]).view(-1, 2)**2))
 
 

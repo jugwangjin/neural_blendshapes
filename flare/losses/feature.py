@@ -14,7 +14,7 @@ def feature_regularization_loss(feature, gt_facs, estim_lmks, gt_lmks, model_sca
 
     
 
-    loss = facs_regularization * 1e-3 + latent_regularization + torch.mean(torch.pow(estim_lmks - gt_lmks[..., :3].reshape(-1, 68*3), 2))
+    loss = facs_regularization * 1e-3 + latent_regularization + torch.mean(torch.pow(estim_lmks - gt_lmks[..., :3].reshape(-1, 68*3), 2)) * 1e3
     
     if facs_weight > 0:
         return loss + torch.mean(torch.pow(facs - gt_facs, 2)) * facs_weight

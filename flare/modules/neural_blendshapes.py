@@ -152,8 +152,8 @@ class NeuralBlendshapes(nn.Module):
 
         
 
-        local_coordinate_vertices = (vertices  - self.transform_origin[None, None] * 0.1) * scale
-        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + self.transform_origin[None, None] * 0.1
+        local_coordinate_vertices = (vertices  - self.transform_origin[None, None]) * scale
+        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + self.transform_origin[None, None] 
 
         return deformed_mesh
 

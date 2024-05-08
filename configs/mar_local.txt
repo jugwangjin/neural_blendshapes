@@ -14,7 +14,7 @@ upsample_iterations = [500]
 
 lr_encoder = 1e-4
 lr_shader = 1e-3
-lr_deformer = 5e-5
+lr_deformer = 1e-4
 
 weight_shading = 1.0
 weight_perceptual_loss = 0.1
