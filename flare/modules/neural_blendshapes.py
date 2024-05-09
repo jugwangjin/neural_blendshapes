@@ -39,44 +39,47 @@ class NeuralBlendshapes(nn.Module):
         
         self.only_coords_encoder, dim = get_embedder(3, input_dims=3)
         
-        self.template_deformer = nn.Sequential(
-                    nn.Linear(dim, 64),
-                    nn.SiLU(),
-                    nn.Linear(64,32),
-                    nn.SiLU(),
-                    nn.Linear(32,32),
-                    nn.SiLU(),
-                    nn.Linear(32,3)
-        )
+        # self.template_deformer = nn.Sequential(
+        #             nn.Linear(dim, 64),
+        #             nn.SiLU(),
+        #             nn.Linear(64,32),
+        #             nn.SiLU(),
+        #             nn.Linear(32,32),
+        #             nn.SiLU(),
+        #             nn.Linear(32,3)
+        # )
         
-        self.pose_weight = nn.Sequential(
-                    nn.Linear(dim+6, 64),
-                    nn.SiLU(),
-                    nn.Linear(64,32),
-                    nn.SiLU(),
-                    nn.Linear(32,32),
-                    nn.SiLU(),
-                    nn.Linear(32,1),
-                    nn.Sigmoid(),
-        )
+        # self.pose_weight = nn.Sequential(
+        #             nn.Linear(dim+6, 64),
+        #             nn.SiLU(),
+        #             nn.Linear(64,32),
+        #             nn.SiLU(),
+        #             nn.Linear(32,32),
+        #             nn.SiLU(),
+        #             nn.Linear(32,1),
+        #             nn.Sigmoid(),
+        # )
 
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
         self.scale = torch.nn.Parameter(torch.tensor([1.]))
 
         initialize_weights(self.expression_deformer, gain=0.1)
-        initialize_weights(self.template_deformer, gain=0.1)
-        initialize_weights(self.pose_weight, gain=0.1)
+        # initialize_weights(self.template_deformer, gain=0.1)
+        # initialize_weights(self.pose_weight, gain=0.1)
 
         # set bias of last nn.linear of pose_weight to 2
-        self.pose_weight[-2].bias.data = torch.tensor([2.])
+        # self.pose_weight[-2].bias.data = torch.tensor([2.])
 
-    
+
+
 
     def set_template(self, template, uv_template, vertex_parts=None, full_shape=None, head_indices=None, eyeball_indices=None):
         self.register_buffer('template', torch.cat([template, uv_template[0]], dim=1))     
         self.register_buffer('encoded_vertices', self.coords_encoder(self.template))
         self.register_buffer('encoded_only_vertices', self.only_coords_encoder(template))
 
+        self.pose_weight = torch.nn.Parameter((torch.ones(template.shape[0], 1)*5))
+        self.template_deformation = torch.nn.Parameter((torch.zeros(template.shape[0], 3)))
 
 
     def forward(self, image=None, lmks=None, image_input=True, features=None, vertices=None, coords_min=None, coords_max=None):
@@ -98,7 +101,8 @@ class NeuralBlendshapes(nn.Module):
 
         bsize = features.shape[0]
 
-        template_deformation = self.template_deformer(encoded_only_vertices)
+        # template_deformation = self.template_deformer(encoded_only_vertices)
+        template_deformation = self.template_deformation
 
         deformer_input = torch.cat([encoded_vertices[None].repeat(bsize, 1, 1), \
                                     features[:, None, :53].repeat(1, encoded_vertices.shape[0], 1)], dim=2)
@@ -109,8 +113,10 @@ class NeuralBlendshapes(nn.Module):
 
         expression_vertices = vertices[None][..., :3] + expression_deformation + template_deformation[None]
 
-        pose_weight = self.pose_weight(torch.cat([encoded_only_vertices[None].repeat(bsize, 1, 1), \
-                                                features[:, None, 53:59].repeat(1, V, 1)], dim=2)) # shape of B V 1
+        pose_weight = torch.nn.functional.sigmoid(self.pose_weight)[None]
+        
+        # self.pose_weight(torch.cat([encoded_only_vertices[None].repeat(bsize, 1, 1), \
+        #                                         features[:, None, 53:59].repeat(1, V, 1)], dim=2)) # shape of B V 1
         
         deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
 

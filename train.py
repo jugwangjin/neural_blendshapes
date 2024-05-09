@@ -242,7 +242,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             iteration += 1
             progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}')
 
-            pretrain = iteration < args.iterations // 10
+            pretrain = iteration < args.iterations // 6
 
             # ==============================================================================================
             # update/displace vertices
