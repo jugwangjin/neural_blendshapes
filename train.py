@@ -201,6 +201,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     acc_losses = []
     acc_total_loss = 0
+    
     import wandb
     if 'debug' not in run_name:
         wandb_name = args.wandb_name if args.wandb_name is not None else run_name

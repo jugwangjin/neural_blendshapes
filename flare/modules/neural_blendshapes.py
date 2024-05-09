@@ -66,6 +66,10 @@ class NeuralBlendshapes(nn.Module):
         initialize_weights(self.expression_deformer, gain=0.1)
         initialize_weights(self.template_deformer, gain=0.1)
         initialize_weights(self.pose_weight, gain=0.1)
+
+        # set bias of last nn.linear of pose_weight to 2
+        self.pose_weight[-2].bias.data = torch.tensor([2.])
+
     
 
     def set_template(self, template, uv_template, vertex_parts=None, full_shape=None, head_indices=None, eyeball_indices=None):
@@ -93,10 +97,11 @@ class NeuralBlendshapes(nn.Module):
             encoded_vertices = self.coords_encoder(vertices)
             encoded_only_vertices = self.only_coords_encoder(vertices[..., :3])
 
+        bsize = features.shape[0]
 
         template_deformation = self.template_deformer(encoded_only_vertices)
 
-        deformer_input = torch.cat([encoded_vertices[None].repeat(features.shape[0], 1, 1), \
+        deformer_input = torch.cat([encoded_vertices[None].repeat(bsize, 1, 1), \
                                     features[:, None, :53].repeat(1, encoded_vertices.shape[0], 1)], dim=2)
 
         B, V, _ = deformer_input.shape
@@ -105,7 +110,7 @@ class NeuralBlendshapes(nn.Module):
 
         expression_vertices = vertices[None][..., :3] + expression_deformation + template_deformation[None]
 
-        pose_weight = self.pose_weight(torch.cat([encoded_only_vertices[None].repeat(features.shape[0], 1, 1), \
+        pose_weight = 1 - self.pose_weight(torch.cat([encoded_only_vertices[None].repeat(bsize, 1, 1), \
                                                 features[:, None, 53:59].repeat(1, V, 1)], dim=2)) # shape of B V 1
         
         deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
@@ -134,7 +139,6 @@ class NeuralBlendshapes(nn.Module):
 
     def apply_deformation(self, vertices, features, weights=None):
         
-
         euler_angle = features[..., 53:56]
         translation = features[..., 56:59]
         scale = self.scale

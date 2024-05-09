@@ -68,19 +68,20 @@ class ResnetEncoder(nn.Module):
 
         # we will use first 52 elements as FACS features
         features[..., :53] = torch.nn.functional.sigmoid(features[..., :53])
+        features[..., 53:56] = torch.nn.functional.tanh(features[..., 53:56])
 
-        sin_and_cos = features[..., 53:56]
-        sin = torch.sin(sin_and_cos)
-        cos = torch.cos(sin_and_cos)
-        euler_angles = torch.atan2(sin, cos)
+        # sin_and_cos = features[..., 53:56]
+        # sin = torch.sin(sin_and_cos)
+        # cos = torch.cos(sin_and_cos)
+        # euler_angles = torch.atan2(sin, cos)
 
-        translation = features[..., 56:59]
-        translation[..., -1] = 0
+        # translation = features[..., 56:59]
+        # translation[..., -1] = 0
 
-        updated_features = torch.cat([features[..., :53], euler_angles, translation], dim=-1)
+        # updated_features = torch.cat([features[..., :53], euler_angles, translation], dim=-1)
 
 
-        return updated_features, estim_landmarks
+        return features, estim_landmarks
 
     def save(self, path):
         data = {
