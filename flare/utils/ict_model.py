@@ -228,6 +228,7 @@ class ICTFaceKitTorch(torch.nn.Module):
 
         with open(mediapipe_name_to_ict, 'rb') as f:
             mediapipe_indices = pickle.load(f)
+            self.mediapipe_indices = mediapipe_indices
 
             self.mediapipe_to_ict = np.array([mediapipe_indices['browDownLeft'], mediapipe_indices['browDownRight'], mediapipe_indices['browInnerUp'], mediapipe_indices['browInnerUp'], 
                                     mediapipe_indices['browOuterUpLeft'], mediapipe_indices['browOuterUpRight'], mediapipe_indices['cheekPuff'], mediapipe_indices['cheekPuff'], 

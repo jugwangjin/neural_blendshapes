@@ -85,9 +85,8 @@ class NeuralBlendshapes(nn.Module):
             if image.shape[1] != 3 and image.shape[3] == 3:
                 image = image.permute(0, 3, 1, 2)
             # print(image.shape)
-            features, estim_lmks = self.image_encoder(image, lmks)
-        else:
-            estim_lmks = None
+            features = self.image_encoder(image, lmks)
+        # else:
         # print(features.shape, estim_lmks.shape)
         if vertices is None:
             vertices = self.template
@@ -110,7 +109,7 @@ class NeuralBlendshapes(nn.Module):
 
         expression_vertices = vertices[None][..., :3] + expression_deformation + template_deformation[None]
 
-        pose_weight = 1 - self.pose_weight(torch.cat([encoded_only_vertices[None].repeat(bsize, 1, 1), \
+        pose_weight = self.pose_weight(torch.cat([encoded_only_vertices[None].repeat(bsize, 1, 1), \
                                                 features[:, None, 53:59].repeat(1, V, 1)], dim=2)) # shape of B V 1
         
         deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
@@ -125,8 +124,6 @@ class NeuralBlendshapes(nn.Module):
 
         return_dict = {} 
         return_dict['features'] = features
-
-        return_dict['estim_lmks'] = estim_lmks
 
         return_dict['full_template_deformation'] = template_deformation
         return_dict['full_expression_deformation'] = expression_deformation
@@ -157,7 +154,7 @@ class NeuralBlendshapes(nn.Module):
         
 
         local_coordinate_vertices = (vertices  - self.transform_origin[None, None]) * scale
-        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + self.transform_origin[None, None] 
+        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] * weights + self.transform_origin[None, None] 
 
         return deformed_mesh
 

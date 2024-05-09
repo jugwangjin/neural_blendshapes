@@ -122,6 +122,14 @@ class Renderer:
             
         return torch.cat(p_l, dim=0), torch.cat(rt_gl, dim=0)
     
+    def get_vertices_clip_space_from_view(self, views, vertices):
+        batch_size = vertices.shape[0]
+        # single fixed camera and for now we fix res also
+        resolution = (512, 512)
+        P_batch, Rt = Renderer.to_gl_camera_batch(views, resolution, n=self.near, f=self.far)
+        deformed_vertices_clip_space = Renderer.transform_pos_batch(P_batch, vertices)
+        return deformed_vertices_clip_space
+
     def get_vertices_clip_space(self, gbuffers, vertices):
         P_batch = gbuffers["P_batch"]
         return Renderer.transform_pos_batch(P_batch, vertices)
