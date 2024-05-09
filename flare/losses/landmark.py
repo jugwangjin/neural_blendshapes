@@ -8,6 +8,7 @@ DIRECTION_PAIRS = torch.tensor([[36, 64],[45, 48]]).int()
 import pytorch3d.transforms as pt3d
 
 def closure_loss_fun(gt_closure, deformed_closure, confidence):
+    return torch.mean(torch.abs(gt_closure - deformed_closure) * confidence)
     gt_closure_distance = torch.norm(gt_closure, dim=-1)
     deformed_closure_distance = torch.norm(deformed_closure, dim=-1)
     return torch.mean(torch.abs(gt_closure_distance - deformed_closure_distance) * confidence)

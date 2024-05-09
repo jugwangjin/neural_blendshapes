@@ -43,7 +43,7 @@ class ResnetEncoder(nn.Module):
             nn.SiLU(),
             nn.Linear(min(feature_size, 512), min(feature_size, 512)),
             nn.SiLU(),
-            nn.Linear(min(feature_size, 512), outsize + 68*3),
+            nn.Linear(min(feature_size, 512), outsize),
         )
 
         self.resize = nn.Upsample(size=(224, 224), mode='bilinear')
@@ -51,6 +51,9 @@ class ResnetEncoder(nn.Module):
         self.register_buffer('std', torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
         initialize_weights(self.layers, gain=0.01)
+
+        self.layers[-1].bias.data[:53] = torch.tensor([-2.]*53)
+
 
     def forward(self, image, lmks):
         # print(inputs.shape)
@@ -64,11 +67,12 @@ class ResnetEncoder(nn.Module):
         # features = torch.cat([features, lmks[..., :3].reshape(lmks.size(0), -1)], dim=-1)
         features = self.layers(features)
 
-        features, estim_landmarks = features[..., :self.outsize], features[..., self.outsize:]
 
         # we will use first 52 elements as FACS features
         features[..., :53] = torch.nn.functional.sigmoid(features[..., :53])
         features[..., 53:56] = torch.nn.functional.tanh(features[..., 53:56])
+
+        features[..., 58] = 0
 
         # sin_and_cos = features[..., 53:56]
         # sin = torch.sin(sin_and_cos)
@@ -81,7 +85,7 @@ class ResnetEncoder(nn.Module):
         # updated_features = torch.cat([features[..., :53], euler_angles, translation], dim=-1)
 
 
-        return features, estim_landmarks
+        return features
 
     def save(self, path):
         data = {

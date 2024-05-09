@@ -199,7 +199,8 @@ class DatasetLoader(Dataset):
                 # print(landmark.shape, score.shape)
                 landmark = torch.cat([landmark, score[:, None]], dim=1).data
 
-        return img[None, ...], mask[None, ...], semantic[None, ...], flame_expression[None, ...], facs[None, ...], flame_pose[None, ...], camera, frame_name, landmark[None, ...] # Add batch dimension
+        return img[None, ...], mask[None, ...], semantic[None, ...], flame_expression[None, ...], facs[None, ...], flame_pose[None, ...], \
+                camera, frame_name, landmark[None, ...] # Add batch dimension
     
     def __len__(self):
         return self.len_img
@@ -313,4 +314,5 @@ class DatasetLoader(Dataset):
                 # print(landmark.shape, score.shape)
                 landmark = torch.cat([landmark, score[:, None]], dim=1).data
 
-        return img[None, ...], mask[None, ...], semantic[None, ...], flame_expression[None, ...], facs[None, ...], flame_pose[None, ...], camera, frame_name, landmark[None, ...], normal[None, ...] # Add batch dimension
+        return img[None, ...], mask[None, ...], semantic[None, ...], flame_expression[None, ...], facs[None, ...], flame_pose[None, ...], \
+                camera, frame_name, landmark[None, ...], normal[None, ...] # Add batch dimension
