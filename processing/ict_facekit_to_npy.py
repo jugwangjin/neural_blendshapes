@@ -69,7 +69,7 @@ def main(args):
     # half edge representation
     file_path = os.path.join('ICT_FaceKit/FaceXModel/generic_neutral_mesh.obj')
     generic_neutral_mesh = om.read_polymesh(file_path, halfedge_tex_coord = True)
-    faces = generic_neutral_mesh.face_vertex_indices()[:25304]
+    faces = generic_neutral_mesh.face_vertex_indices()[:24692]
     vertices = generic_neutral_mesh.points()
     tex_coords = generic_neutral_mesh.halfedge_texcoords2D()
     uv_quads = tex_coords[generic_neutral_mesh.face_halfedge_indices()]
@@ -123,8 +123,8 @@ def main(args):
 
     ict_num_expression = ict_model._num_expression_shapes
     ict_num_identity = ict_model._num_identity_shapes
-    ict_expression_shape_modes = ict_model._expression_shape_modes
-    ict_identity_shape_modes = ict_model._identity_shape_modes
+    ict_expression_shape_modes = ict_model._expression_shape_modes[:, :24591]
+    ict_identity_shape_modes = ict_model._identity_shape_modes[:, :24591]
 
     landmark_indices = [1225, 1888, 1052, 367, 1719, 1722, 2199, 1447, 966, 3661, 
                                  4390, 3927, 3924, 2608, 3272, 4088, 3443, 268, 493, 1914, 
@@ -133,12 +133,15 @@ def main(args):
                                  1518, 1511, 3742, 3751, 3756, 3721, 3725, 3732, 5708, 5695, 
                                  2081, 0, 4275, 6200, 6213, 6346, 6461, 5518, 5957, 5841, 5702, 
                                  5711, 5533, 6216, 6207, 6470, 5517, 5966]
-    face_indices = list(range(0, 9409)) + list(range(11248, 21451)) + list(range(24591, 24999)) + list(range(25047, 25351))
+    face_indices = list(range(0, 9409)) + list(range(11248, 21451)) 
     not_face_indices = list(range(9409, 11248))
-    eyeball_indices = list(range(21451, 24591)) + list(range(24999, 25047))
+    eyeball_indices = list(range(21451, 24591)) 
     head_indices = face_indices + not_face_indices
 
-    parts_split = [9409, 14062, 17039, 21451, 24591, 24999, 25047, 25351]
+    vertices = vertices[:24591]
+    vertex_uvs = vertex_uvs[:24591]
+
+    parts_split = [9409, 14062, 17039, 21451, 24591]
     vertex_parts = [0] * len(vertices)
     
     for i, part in enumerate(parts_split):
