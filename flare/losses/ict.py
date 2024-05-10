@@ -31,6 +31,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     frontal_indices = ict_facekit.face_indices + ict_facekit.eyeball_indices
 
+    
 
     deformed_vertices = return_dict['full_expression_deformation'] + ict_facekit.canonical
 

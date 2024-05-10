@@ -21,7 +21,8 @@ def feature_regularization_loss(feature, gt_facs,  gt_lmks, model_scale, iterati
     
 
     # facs regularization is to be pseudo L0 Norm
-    facs_regularization = facs_loss + torch.mean(torch.pow(facs+1e-1, 0.75)) * 1e-4
+    # facs_regularization = torch.mean(torch.pow(facs+1e-1, 0.75)) * 1e-4
+    facs_regularization = facs_loss * 1e1
 
     # latent regularization: rotation, translation to be zero, scale to be 1
     latent_regularization = torch.mean(torch.pow(rotation, 2)) * 1e-1 +  torch.mean(torch.pow(translation, 2)) + torch.mean(torch.pow(scale - 1, 2))
