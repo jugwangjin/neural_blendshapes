@@ -59,61 +59,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     write_mesh(Path(meshes_save_path / "init_ict_canonical.obj"), ict_canonical_mesh.to('cpu'))
 
-    # os.makedirs('debug', exist_ok=True)
-    # for name in ict_facekit.expression_names.tolist():
-    #     feat = torch.zeros(1, 53).to(device)
-    #     feat[0, ict_facekit.expression_names.tolist().index(name)] = 1.
-    #     ict = ict_facekit(expression_weights = feat, to_canonical = True)
-
-    #     me = ict_canonical_mesh.with_vertices(ict[0])
-        
-    #     write_mesh(f'debug/{name}.obj', me.to('cpu'))
-
-    # import pickle
-    # mediapipe_name_to_ict = './assets/mediapipe_name_to_indices.pkl'
-    # with open(mediapipe_name_to_ict, 'rb') as f:
-    #     mediapipe_indices = pickle.load(f)
-    #     mediapipe_indices = mediapipe_indices
-
-    #     mediapipe_to_ict = np.array([mediapipe_indices['browDownLeft'], mediapipe_indices['browDownRight'], mediapipe_indices['browInnerUp'], mediapipe_indices['browInnerUp'], 
-    #                             mediapipe_indices['browOuterUpLeft'], mediapipe_indices['browOuterUpRight'], mediapipe_indices['cheekPuff'], mediapipe_indices['cheekPuff'], 
-    #                             mediapipe_indices['cheekSquintLeft'], mediapipe_indices['cheekSquintRight'], mediapipe_indices['eyeBlinkLeft'], mediapipe_indices['eyeBlinkRight'], 
-    #                             mediapipe_indices['eyeLookDownLeft'], mediapipe_indices['eyeLookDownRight'], mediapipe_indices['eyeLookInLeft'], mediapipe_indices['eyeLookInRight'], 
-    #                             mediapipe_indices['eyeLookOutLeft'], mediapipe_indices['eyeLookOutRight'], mediapipe_indices['eyeLookUpLeft'], mediapipe_indices['eyeLookUpRight'], 
-    #                             mediapipe_indices['eyeSquintLeft'], mediapipe_indices['eyeSquintRight'], mediapipe_indices['eyeWideLeft'], mediapipe_indices['eyeWideRight'], 
-    #                             mediapipe_indices['jawForward'], mediapipe_indices['jawLeft'], mediapipe_indices['jawOpen'], mediapipe_indices['jawRight'], 
-    #                             mediapipe_indices['mouthClose'], mediapipe_indices['mouthDimpleLeft'], mediapipe_indices['mouthDimpleRight'], mediapipe_indices['mouthFrownLeft'], 
-    #                             mediapipe_indices['mouthFrownRight'], mediapipe_indices['mouthFunnel'], mediapipe_indices['mouthLeft'], mediapipe_indices['mouthLowerDownLeft'], 
-    #                             mediapipe_indices['mouthLowerDownRight'], mediapipe_indices['mouthPressLeft'], mediapipe_indices['mouthPressRight'], mediapipe_indices['mouthPucker'], 
-    #                             mediapipe_indices['mouthRight'], mediapipe_indices['mouthRollLower'], mediapipe_indices['mouthRollUpper'], mediapipe_indices['mouthShrugLower'], 
-    #                             mediapipe_indices['mouthShrugUpper'], mediapipe_indices['mouthSmileLeft'], mediapipe_indices['mouthSmileRight'], mediapipe_indices['mouthStretchLeft'], 
-    #                             mediapipe_indices['mouthStretchRight'], mediapipe_indices['mouthUpperUpLeft'], mediapipe_indices['mouthUpperUpRight'], mediapipe_indices['noseSneerLeft'], 
-    #                             mediapipe_indices['noseSneerRight'],]).astype(np.int32)       
-
-    #     mediapipe_names = ['browDownLeft', 'browDownRight', 'browInnerUp', 'browInnerUp',                                 
-    #                             'browOuterUpLeft', 'browOuterUpRight', 'cheekPuff', 'cheekPuff',                                 
-    #                             'cheekSquintLeft', 'cheekSquintRight', 'eyeBlinkLeft', 'eyeBlinkRight',                                 
-    #                             'eyeLookDownLeft', 'eyeLookDownRight', 'eyeLookInLeft', 'eyeLookInRight',                                 
-    #                             'eyeLookOutLeft', 'eyeLookOutRight', 'eyeLookUpLeft', 'eyeLookUpRight',                                 
-    #                             'eyeSquintLeft', 'eyeSquintRight', 'eyeWideLeft', 'eyeWideRight',                                 
-    #                             'jawForward', 'jawLeft', 'jawOpen', 'jawRight',                                 
-    #                             'mouthClose', 'mouthDimpleLeft', 'mouthDimpleRight', 'mouthFrownLeft',                                 
-    #                             'mouthFrownRight', 'mouthFunnel', 'mouthLeft', 'mouthLowerDownLeft',                                 
-    #                             'mouthLowerDownRight', 'mouthPressLeft', 'mouthPressRight', 'mouthPucker',                                
-    #                             'mouthRight', 'mouthRollLower', 'mouthRollUpper', 'mouthShrugLower',                                 
-    #                             'mouthShrugUpper', 'mouthSmileLeft', 'mouthSmileRight', 'mouthStretchLeft',                                 
-    #                             'mouthStretchRight', 'mouthUpperUpLeft', 'mouthUpperUpRight', 'noseSneerLeft',                                 'noseSneerRight',]
-    # print(len(mediapipe_names))
-    # [print(i, ict_facekit.expression_names[i], mediapipe_names[i], mediapipe_indices[mediapipe_names[i]]) for i in range(53)]
-
-
-    # exit()
-
-    # ict_identity_path = Path(experiment_dir / "stage_1" / "network_weights" / f"ict_identity_latest.pt")
-    # assert os.path.exists(ict_identity_path)
-    # ict_identity = torch.load(str(ict_identity_path))
-    # ict_facekit.identity.data = ict_identity
-
     ## ============== renderer ==============================
     aabb = AABB(ict_canonical_mesh.vertices.cpu().numpy())
     ict_mesh_aabb = [torch.min(ict_canonical_mesh.vertices, dim=0).values, torch.max(ict_canonical_mesh.vertices, dim=0).values]
@@ -138,7 +83,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     print("=="*50)
     print("Training Deformer")
 
-    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, device=device) 
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
     neural_blendshapes.set_template(ict_canonical_mesh.vertices,
                                     ict_facekit.uv_neutral_mesh, ict_facekit.vertex_parts)
@@ -185,28 +130,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # Initialize the loss weights and losses
     loss_weights = {
         "mask": args.weight_mask,
-        # "normal_regularization": args.weight_normal_regularization,
         "laplacian_regularization": args.weight_laplacian_regularization,
         "shading": args.weight_shading,
         "perceptual_loss": args.weight_perceptual_loss,
-        # "albedo_regularization": args.weight_albedo_regularization,
-        # "roughness_regularization": args.weight_roughness_regularization,
-        # "white_light_regularization": args.weight_white_lgt_regularization,
-        # "fresnel_coeff": args.weight_fresnel_coeff,
-        # "normal": args.weight_normal,
-        # "normal_laplacian": args.weight_normal_laplacian,
         "landmark": args.weight_landmark,
         "closure": args.weight_closure,
-        "ict": args.weight_ict,
-        "ict_landmark": args.weight_ict_landmark,
-        "ict_landmark_closure": args.weight_closure,
-        "random_ict": args.weight_ict,
-        # "ict_identity": args.weight_ict_identity,
         "feature_regularization": args.weight_feature_regularization,
-        # "head_direction": args.weight_head_direction,
-        # "direction_estimation": args.weight_direction_estimation,
     }
-    # [print(k, v) for k, v in loss_weights.items()]
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
     print(loss_weights)
     if loss_weights["perceptual_loss"] > 0.0:
@@ -271,33 +201,23 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # ==============================================================================================
             # R A S T E R I Z A T I O N
             # ==============================================================================================
-            if not pretrain:
-                gbuffers = renderer.render_batch(views_subset['camera'], deformed_vertices.contiguous(), d_normals, 
-                                        channels=channels_gbuffer, with_antialiasing=True, 
-                                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh) 
-                pred_color_masked, _, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
 
-                losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
-                losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
-                
-                losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
-                losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
+            gbuffers = renderer.render_batch(views_subset['camera'], deformed_vertices.contiguous(), d_normals, 
+                                    channels=channels_gbuffer, with_antialiasing=True, 
+                                    canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh) 
+            pred_color_masked, _, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
+
+            losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
+            losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
+            
+            losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
+            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
             # ============================================= =================================================
             # loss function 
             # ==============================================================================================
             ## ======= regularization autoencoder========
             losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices)
 
-            ## ============== color + regularization for color ==============================
-
-            ## ======= regularization color ========
-            # landmark losses
-
-            losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive, fullhead_template=pretrain)
-            
-            # feature regularization
-            # facs gt weightterm starts from 1e3, reduces to zero over half of the iterations exponentially
-            
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['facs'][..., ict_facekit.mediapipe_to_ict], 
                                                                            views_subset["landmark"], neural_blendshapes.scale, iteration, facs_adaptive, facs_weight=1e3 if pretrain else 0)
                 
@@ -327,49 +247,16 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 facs = features[0, :53]
                 euler_angle = features[0, 53:56]
                 translation = features[0, 56:59]
-                scale = features[0, -1:]
 
-                # print(facs)
                 print(euler_angle)
                 print(translation)
                 print(neural_blendshapes.transform_origin.data)
                 print(neural_blendshapes.scale.data)
 
-                # import pytorch3d.transforms as pt3d
-
-                # rotation_matrix = pt3d.euler_angles_to_matrix(features[..., 53:56], convention = 'XYZ')
-                # print(rotation_matrix)
-                if not pretrain:
-                    print_indices = [0,8,16,21,30]
-
-                    detected_landmarks = views_subset['landmark'].clone().detach()
-                    detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
-                    # detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
-                    # print(detected_landmarks)
-                    # exit()
-                    detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
-
-                    gt = detected_landmarks[:, print_indices]
-                    # Get the indices of landmarks used by the handle-based deformer
-                    landmark_indices = ict_facekit.landmark_indices
-                    
-                    # Extract the deformed landmarks in clip space
-                    landmarks_on_clip_space = gbuffers['deformed_verts_clip_space'][:, landmark_indices].clone()
-                    
-                    # Convert the deformed landmarks to normalized coordinates
-                    landmarks_on_clip_space = landmarks_on_clip_space[..., :3] / torch.clamp(landmarks_on_clip_space[..., 3:], min=1e-8)
-
-                    ours = landmarks_on_clip_space[:, print_indices]
-
-                    print(torch.cat([gt[0], ours[0]], dim=-1))
-
-
-    # print(torch.cat([detected_landmarks[..., :3], ict_landmarks_clip_space], dim=-1))
 
             if iteration % 100 == 1:
                 print("=="*50)
                 for k, v in losses.items():
-                    # if k in losses_to_print:
                     if v > 0:
                         print(f"{k}: {v.item() * loss_weights[k]}")
                 print("=="*50)
@@ -377,8 +264,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # ==============================================================================================
             # Optimizer step
             # ==============================================================================================
-            if pretrain:
-                optimizer_shader.zero_grad()
+
+            optimizer_shader.zero_grad()
         
             neural_blendshapes.zero_grad()
 
@@ -386,17 +273,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             
             torch.cuda.synchronize()
 
+            if args.grad_scale and args.fourier_features == "hashgrid":
+                shader.fourier_feature_transform.params.grad /= 8.0
             ### increase the gradients of positional encoding following tinycudnn
-            if pretrain:
-                optimizer_shader.step()
-        
-                if args.grad_scale and args.fourier_features == "hashgrid":
-                    shader.fourier_feature_transform.params.grad /= 8.0
-
             # clip gradients
             torch.nn.utils.clip_grad_norm_(shader.parameters(), 10.0)
             torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 10.0)
 
+            optimizer_shader.step()
             optimizer_neural_blendshapes.step()
 
             progress_bar.set_postfix({'loss': loss.detach().cpu().item()})
@@ -410,8 +294,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             
                 with torch.no_grad():
                     debug_rgb_pred, debug_gbuffer, debug_cbuffers = run(args, mesh, debug_views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt)
-
-
 
                     ## ============== visualize ==============================
                     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
@@ -430,27 +312,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     print('gt, eyeblink_L_index', debug_views['facs'][:, ict_facekit.mediapipe_to_ict][:, eyeblink_L_index])
                     print('gt, eyeblink_R_index', debug_views['facs'][:, ict_facekit.mediapipe_to_ict][:, eyeblink_R_index])
 
-                    ict = ict_facekit(expression_weights = return_dict_['features'][:, :53], to_canonical = True)
-                    deformed_verts = neural_blendshapes.apply_deformation(ict, return_dict_['features'])
-
-                    # mesh_ = ict_canonical_mesh.with_vertices(deformed_verts)
-
-
-                    d_normals = mesh.fetch_all_normals(deformed_verts, mesh)
-
-
-                    debug_gbuffer = renderer.render_batch(debug_views['camera'], deformed_verts.contiguous(), d_normals, 
-                                            channels=channels_gbuffer, with_antialiasing=True, 
-                                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh) 
-
-                    debug_rgb_pred, debug_cbuffers, gbuffer_mask = shader.shade(debug_gbuffer, debug_views, mesh, args.finetune_color, lgt)
-
-
-                    visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration, save_name='ict')
-
-
-
                     del debug_gbuffer, debug_cbuffers
+
             if iteration == 1 or iteration % (args.visualization_frequency * 10) == 0:
                 print(images_save_path / "grid" / f'grid_{iteration}.png')
                 if 'debug' not in run_name:
@@ -459,7 +322,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             ## ============== save intermediate ==============================
             if (args.save_frequency > 0) and (iteration == 1 or iteration % args.save_frequency == 0):
                 with torch.no_grad():
-                    write_mesh(meshes_save_path / f"mesh.obj", mesh.detach().to('cpu'))                                
+                    write_mesh(meshes_save_path / f"mesh_iter{iteration:06d}.obj", mesh.detach().to('cpu'))                                
                     shader.save(shaders_save_path / f'shader.pt')
                     neural_blendshapes.save(shaders_save_path / f'neural_blendshapes.pt')
 
