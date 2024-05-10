@@ -340,7 +340,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 # print(facs)
                 print(euler_angle)
                 print(translation)
-                print(scale)
                 print(neural_blendshapes.transform_origin.data)
                 print(neural_blendshapes.scale.data)
 
