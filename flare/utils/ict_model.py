@@ -28,6 +28,8 @@ class ICTFaceKitTorch(torch.nn.Module):
         vertex_parts = model_dict['vertex_parts']
         self.vertex_parts = vertex_parts
 
+        
+
         vertex_parts = torch.tensor(vertex_parts)
         vertex_parts = vertex_parts / torch.amax(vertex_parts)
         
