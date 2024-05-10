@@ -39,15 +39,15 @@ class NeuralBlendshapes(nn.Module):
         
         self.only_coords_encoder, dim = get_embedder(3, input_dims=3)
         
-        # self.template_deformer = nn.Sequential(
-        #             nn.Linear(dim, 64),
-        #             nn.SiLU(),
-        #             nn.Linear(64,32),
-        #             nn.SiLU(),
-        #             nn.Linear(32,32),
-        #             nn.SiLU(),
-        #             nn.Linear(32,3)
-        # )
+        self.template_deformer = nn.Sequential(
+                    nn.Linear(dim, 64),
+                    nn.SiLU(),
+                    nn.Linear(64,32),
+                    nn.SiLU(),
+                    nn.Linear(32,32),
+                    nn.SiLU(),
+                    nn.Linear(32,3)
+        )
         
         # self.pose_weight = nn.Sequential(
         #             nn.Linear(dim+6, 64),
@@ -64,7 +64,7 @@ class NeuralBlendshapes(nn.Module):
         self.scale = torch.nn.Parameter(torch.tensor([1.]))
 
         initialize_weights(self.expression_deformer, gain=0.1)
-        # initialize_weights(self.template_deformer, gain=0.1)
+        initialize_weights(self.template_deformer, gain=0.1)
         # initialize_weights(self.pose_weight, gain=0.1)
 
         # set bias of last nn.linear of pose_weight to 2
@@ -101,8 +101,8 @@ class NeuralBlendshapes(nn.Module):
 
         bsize = features.shape[0]
 
-        # template_deformation = self.template_deformer(encoded_only_vertices)
-        template_deformation = self.template_deformation
+        template_deformation = self.template_deformer(encoded_only_vertices)
+        # template_deformation = self.template_deformation
 
         deformer_input = torch.cat([encoded_vertices[None].repeat(bsize, 1, 1), \
                                     features[:, None, :53].repeat(1, encoded_vertices.shape[0], 1)], dim=2)

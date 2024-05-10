@@ -149,6 +149,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     facs_adaptive = None
     
     optimizer_neural_blendshapes = torch.optim.Adam(list(neural_blendshapes.parameters()), lr=args.lr_deformer)
+    # scheduler: lower lr by 10x at 2/3 and 3/4 of the iterations
+    scheduler_neural_blendshapes = torch.optim.lr_scheduler.MultiStepLR(optimizer_neural_blendshapes, milestones=[int(args.iterations * 2 / 3), int(args.iterations * 3 / 4)], gamma=0.1)
 
     # ==============================================================================================
     # shading
@@ -178,6 +180,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         params += list(_adaptive.parameters()) ## need to train it
 
     optimizer_shader = torch.optim.Adam(params, lr=args.lr_shader)
+
+    # scheduler: lower lr by 10x at 2/3 and 3/4 of the iterations
+    scheduler_shader = torch.optim.lr_scheduler.MultiStepLR(optimizer_shader, milestones=[int(args.iterations * 2 / 3), int(args.iterations * 3 / 4)], gamma=0.1)
+    
 
     # ==============================================================================================
     # Loss Functions
@@ -378,7 +384,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # ==============================================================================================
             # Optimizer step
             # ==============================================================================================
-            if pretrain:
+            if not pretrain:
                 optimizer_shader.zero_grad()
         
             neural_blendshapes.zero_grad()
@@ -386,19 +392,22 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             loss.backward()
             
             torch.cuda.synchronize()
+            torch.nn.utils.clip_grad_norm_(shader.parameters(), 10.0)
+            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 10.0)
 
             ### increase the gradients of positional encoding following tinycudnn
-            if pretrain:
-                optimizer_shader.step()
+            if not pretrain:
         
                 if args.grad_scale and args.fourier_features == "hashgrid":
                     shader.fourier_feature_transform.params.grad /= 8.0
 
+                optimizer_shader.step()
             # clip gradients
-            torch.nn.utils.clip_grad_norm_(shader.parameters(), 10.0)
-            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 10.0)
 
             optimizer_neural_blendshapes.step()
+
+            scheduler_shader.step()
+            scheduler_neural_blendshapes.step()
 
             progress_bar.set_postfix({'loss': loss.detach().cpu().item()})
 
