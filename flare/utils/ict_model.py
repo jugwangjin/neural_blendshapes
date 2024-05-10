@@ -110,7 +110,7 @@ class ICTFaceKitTorch(torch.nn.Module):
         assert len(expression_weights.size()) == 2 and len(identity_weights.size()) == 2
 
         bsize = identity_weights.size(0)
-
+        # print(self.neutral_mesh.shape, self.expression_shape_modes.shape, self.identity_shape_modes.shape)
         # Compute the deformed mesh by applying expression and identity shape modes to the neutral mesh
         deformed_mesh = self.neutral_mesh + \
                         torch.einsum('bn, bnmd -> bmd', expression_weights, self.expression_shape_modes.repeat(bsize, 1, 1, 1)) + \
