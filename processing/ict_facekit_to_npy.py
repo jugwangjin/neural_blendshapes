@@ -114,6 +114,12 @@ def main(args):
     vmapping = np.array(vmapping)
     new_faces = np.vstack(new_faces)
     
+    # subtract all integer parts to keep only decimal parts in new_uvs and vertex_uvs
+    new_uvs -= np.floor(new_uvs)
+    vertex_uvs -= np.floor(vertex_uvs)
+    
+
+
     # debug
     # trimesh_mesh = trimesh.Trimesh(vertices=new_vertices, faces=new_faces, process=False)
     # trimesh_mesh.visual = trimesh.visual.TextureVisuals(uv=new_uvs)
@@ -123,8 +129,8 @@ def main(args):
 
     ict_num_expression = ict_model._num_expression_shapes
     ict_num_identity = ict_model._num_identity_shapes
-    ict_expression_shape_modes = ict_model._expression_shape_modes[:, :24591]
-    ict_identity_shape_modes = ict_model._identity_shape_modes[:, :24591]
+    ict_expression_shape_modes = ict_model._expression_shape_modes[:, 24591]
+    ict_identity_shape_modes = ict_model._identity_shape_modes[:, 24591]
 
     landmark_indices = [1225, 1888, 1052, 367, 1719, 1722, 2199, 1447, 966, 3661, 
                                  4390, 3927, 3924, 2608, 3272, 4088, 3443, 268, 493, 1914, 

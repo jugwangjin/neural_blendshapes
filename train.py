@@ -562,4 +562,9 @@ if __name__ == '__main__':
             print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
             print("--"*50)
             raise e
-            time.
+            time.sleep(5)
+
+        except Exception as e:
+            print(e)
+            print('Error: Unexpected error occurred. Aborting the training.')
+            raise e
