@@ -39,12 +39,10 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     ict_ = ict.detach().clone()
     if fullhead_template:
-        ict_loss = torch.mean(torch.pow(ict_ * 10 - deformed_vertices * 10, 2)) + \
-                torch.mean(torch.pow(ict_ * 10 - deformed_vertices_w_template * 10, 2))
+        ict_loss = torch.mean(torch.pow(ict_ * 10 - deformed_vertices * 10, 2)) 
         
     else:
-        ict_loss = torch.mean(torch.pow(ict_ * 10 - deformed_vertices * 10, 2)) + \
-                0.1 * torch.mean(torch.pow(ict_[:, frontal_indices] * 10 - deformed_vertices_w_template[:, frontal_indices] * 10, 2))
+        ict_loss = torch.mean(torch.pow(ict_ * 10 - deformed_vertices * 10, 2)) 
 
 
     random_features = torch.randn_like(features)
@@ -75,7 +73,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     deformer_eye_closure = ict_landmarks_clip_space[:, EYELID_PAIRS[:, 0], :2] - ict_landmarks_clip_space[:, EYELID_PAIRS[:, 1], :2]
     closure_confidence = torch.minimum(detected_landmarks[:, EYELID_PAIRS[:, 0], -1:], detected_landmarks[:, EYELID_PAIRS[:, 1], -1:])
 
-    eye_closure_loss = torch.mean(torch.abs(detected_eye_closure - deformer_eye_closure) * closure_confidence)
+    eye_closure_loss = torch.mean(torch.abs(detected_eye_closure - deformer_eye_closure) * closure_confidence) * 2
     
     detected_lip_closure = detected_landmarks[:, LIP_PAIRS[:, 0], :2] - detected_landmarks[:, LIP_PAIRS[:, 1], :2]
     deformer_lip_closure = ict_landmarks_clip_space[:, LIP_PAIRS[:, 0], :2] - ict_landmarks_clip_space[:, LIP_PAIRS[:, 1], :2]

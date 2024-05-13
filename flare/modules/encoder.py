@@ -11,8 +11,8 @@ HALF_PI = torch.pi / 2
 def initialize_weights(m, gain=0.1):
     
     for name, param in m.named_parameters():
-        if 'weight' in name:
-            nn.init.xavier_uniform_(param.data, gain=gain)
+        # if 'weight' in name:
+        #     nn.init.xavier_uniform_(param.data, gain=gain)
         if 'bias' in name:
             param.data.zero_()
 
@@ -52,7 +52,7 @@ class ResnetEncoder(nn.Module):
 
         initialize_weights(self.layers, gain=0.01)
 
-        self.layers[-1].bias.data[:53] = torch.tensor([-2.]*53)
+        # self.layers[-1].bias.data[:53] = torch.tensor([-2.]*53)
 
 
     def forward(self, image, lmks):

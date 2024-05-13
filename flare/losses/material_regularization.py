@@ -24,6 +24,22 @@ def safe_normalize(x: torch.Tensor, eps: float =1e-20) -> torch.Tensor:
     return x / length(x, eps)
 
 
+def cbuffers_regularization(cbuffers):
+    material = cbuffers["material"]
+    light = cbuffers["light"]
+
+    diffuse = material[..., :3]
+    roughness = material[..., 3:4]
+    
+    # roughness to be zero
+    loss = torch.mean(roughness**2)
+
+    # light to be white
+    loss += torch.mean((light[..., :3] - 1.0) ** 2)
+
+    return loss
+
+
 def albedo_regularization(_adaptive, shader, mesh, device, displacements, iteration=0):
     position = mesh.vertices
     

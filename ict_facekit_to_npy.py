@@ -114,6 +114,12 @@ def main(args):
     vmapping = np.array(vmapping)
     new_faces = np.vstack(new_faces)
     
+    # subtract all integer parts to keep only decimal parts in new_uvs and vertex_uvs
+    new_uvs -= np.floor(new_uvs)
+    vertex_uvs -= np.floor(vertex_uvs)
+    
+
+
     # debug
     # trimesh_mesh = trimesh.Trimesh(vertices=new_vertices, faces=new_faces, process=False)
     # trimesh_mesh.visual = trimesh.visual.TextureVisuals(uv=new_uvs)

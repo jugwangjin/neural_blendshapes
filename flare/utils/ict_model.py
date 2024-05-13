@@ -28,7 +28,7 @@ class ICTFaceKitTorch(torch.nn.Module):
         vertex_parts = model_dict['vertex_parts']
         self.vertex_parts = vertex_parts
 
-        
+        # print(neutral_mesh.shape, uv_neutral_mesh.shape, expression_shape_modes.shape, identity_shape_modes.shape, faces.shape, uv_faces.shape, uvs.shape, len(vertex_parts))
 
         vertex_parts = torch.tensor(vertex_parts)
         vertex_parts = vertex_parts / torch.amax(vertex_parts)
@@ -41,6 +41,9 @@ class ICTFaceKitTorch(torch.nn.Module):
 
         self.register_buffer('neutral_mesh', torch.tensor(neutral_mesh, dtype=torch.float32)[None])
         self.register_buffer('uv_neutral_mesh', torch.tensor(uv_neutral_mesh, dtype=torch.float32)[None].clone().detach())
+
+        print(torch.min(self.uv_neutral_mesh), torch.max(self.uv_neutral_mesh))
+
         self.register_buffer('faces', torch.tensor(faces, dtype=torch.long))
         self.register_buffer('uv_faces', torch.tensor(uv_faces, dtype=torch.long))
         self.register_buffer('uvs', torch.tensor(uvs, dtype=torch.float32))

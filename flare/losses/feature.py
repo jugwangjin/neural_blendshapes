@@ -10,7 +10,7 @@ def feature_regularization_loss(feature, gt_facs,  gt_lmks, model_scale, iterati
     # I would like to extract only signs of gt facs 
     bsize = facs.size(0)
     if bsize > 1:
-        gt_facs_sign = - (gt_facs[None] - gt_facs[:, None]) # shape of B, B, 53
+        gt_facs_sign = -10 * (gt_facs[None] - gt_facs[:, None]) # shape of B, B, 53
         # gt_facs_sign = -torch.sign(gt_facs_sign) # shape of B, B, 53
 
         facs_diff = facs[None] - facs[:, None] # shape of B, B, 53
@@ -22,7 +22,7 @@ def feature_regularization_loss(feature, gt_facs,  gt_lmks, model_scale, iterati
 
     # facs regularization is to be pseudo L0 Norm
     # facs_regularization = torch.mean(torch.pow(facs+1e-1, 0.75)) * 1e-4
-    facs_regularization = facs_loss * 1e1
+    facs_regularization = facs_loss * 5e3 + torch.mean(torch.pow(facs+1e-1, 0.75)) * 1e-2
 
     # latent regularization: rotation, translation to be zero, scale to be 1
     latent_regularization = torch.mean(torch.pow(rotation, 2)) * 1e-1 +  torch.mean(torch.pow(translation, 2)) + torch.mean(torch.pow(scale - 1, 2))

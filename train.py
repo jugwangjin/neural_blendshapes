@@ -150,9 +150,24 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     lmk_adaptive = None
     facs_adaptive = None
     
-    optimizer_neural_blendshapes = torch.optim.Adam(list(neural_blendshapes.parameters()), lr=args.lr_deformer)
+    neural_blendshapes_params = list(neural_blendshapes.parameters())
+    neural_blendshapes_encoder_params = list(neural_blendshapes.image_encoder.parameters())
+    # neural_blendshapes_others_params = [p for p in neural_blendshapes_params if p not in neural_blendshapes_encoder_params]
+
+    neural_blendshapes_others_params = list(set(neural_blendshapes_params) - set(neural_blendshapes_encoder_params))
+
+    # adam optimizer, args.lr_encoder for the encoder, args.lr_deformer for the rest
+    optimizer_neural_blendshapes = torch.optim.Adam([{'params': neural_blendshapes_encoder_params, 'lr': args.lr_encoder},
+                                                    {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer}])
+                                                     
+
+    # optimizer_neural_blendshapes = torch.optim.Adam(list(neural_blendshapes.parameters()), lr=args.lr_deformer)
     # scheduler: lower lr by 10x at 2/3 and 3/4 of the iterations
-    scheduler_neural_blendshapes = torch.optim.lr_scheduler.MultiStepLR(optimizer_neural_blendshapes, milestones=[int(args.iterations * 2 / 3), int(args.iterations * 3 / 4)], gamma=0.1)
+    
+    scheduler_milestones = [int(args.iterations / 2), int(args.iterations * 2 / 3)]
+    scheduler_gamma = 0.5
+
+    scheduler_neural_blendshapes = torch.optim.lr_scheduler.MultiStepLR(optimizer_neural_blendshapes, milestones=scheduler_milestones, gamma=scheduler_gamma)
 
     # ==============================================================================================
     # shading
@@ -184,7 +199,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     optimizer_shader = torch.optim.Adam(params, lr=args.lr_shader)
 
     # scheduler: lower lr by 10x at 2/3 and 3/4 of the iterations
-    scheduler_shader = torch.optim.lr_scheduler.MultiStepLR(optimizer_shader, milestones=[int(args.iterations * 2 / 3), int(args.iterations * 3 / 4)], gamma=0.1)
+    scheduler_shader = torch.optim.lr_scheduler.MultiStepLR(optimizer_shader, milestones=scheduler_milestones, gamma=scheduler_gamma)
     
 
     # ==============================================================================================
@@ -211,6 +226,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "random_ict": args.weight_ict,
         # "ict_identity": args.weight_ict_identity,
         "feature_regularization": args.weight_feature_regularization,
+        "cbuffers_regularization": args.weight_cbuffers_regularization,
         # "head_direction": args.weight_head_direction,
         # "direction_estimation": args.weight_direction_estimation,
     }
@@ -250,7 +266,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             iteration += 1
             progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}')
 
-            pretrain = iteration < args.iterations // 6
+            pretrain = iteration < args.iterations // 3
 
             # ==============================================================================================
             # update/displace vertices
@@ -279,17 +295,17 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # ==============================================================================================
             # R A S T E R I Z A T I O N
             # ==============================================================================================
-            if not pretrain:
-                gbuffers = renderer.render_batch(views_subset['camera'], deformed_vertices.contiguous(), d_normals, 
-                                        channels=channels_gbuffer, with_antialiasing=True, 
-                                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh) 
-                pred_color_masked, _, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
+            # if not pretrain:
+            gbuffers = renderer.render_batch(views_subset['camera'], deformed_vertices.contiguous(), d_normals, 
+                                    channels=channels_gbuffer, with_antialiasing=True, 
+                                    canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh) 
+            pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
 
-                losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
-                losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
-                
-                losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
-                losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
+            losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
+            losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
+            
+            losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
+            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
             # ============================================= =================================================
             # loss function 
             # ==============================================================================================
@@ -297,7 +313,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices)
 
             ## ============== color + regularization for color ==============================
-
+            losses['cbuffers_regularization'] = cbuffers_regularization(cbuffers)
             ## ======= regularization color ========
             # landmark losses
 
@@ -307,7 +323,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # facs gt weightterm starts from 1e3, reduces to zero over half of the iterations exponentially
             
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['facs'][..., ict_facekit.mediapipe_to_ict], 
-                                                                           views_subset["landmark"], neural_blendshapes.scale, iteration, facs_adaptive, facs_weight=3e3 if pretrain else 0)
+                                                                           views_subset["landmark"], neural_blendshapes.scale, iteration, facs_adaptive, facs_weight=5e3 if pretrain else 0)
                 
 
             loss = torch.tensor(0., device=device) 
@@ -393,8 +409,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             loss.backward()
             
             torch.cuda.synchronize()
-            torch.nn.utils.clip_grad_norm_(shader.parameters(), 10.0)
-            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 10.0)
+            torch.nn.utils.clip_grad_norm_(shader.parameters(), 5.0)
+            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 5.0)
 
             ### increase the gradients of positional encoding following tinycudnn
             if not pretrain:
@@ -546,9 +562,4 @@ if __name__ == '__main__':
             print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
             print("--"*50)
             raise e
-            time.sleep(5)
-
-        except Exception as e:
-            print(e)
-            print('Error: Unexpected error occurred. Aborting the training.')
-            raise e
+            time.

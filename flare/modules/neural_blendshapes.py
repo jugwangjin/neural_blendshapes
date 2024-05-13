@@ -10,8 +10,8 @@ import pytorch3d.transforms as pt3d
 def initialize_weights(m, gain=0.1):
     
     for name, param in m.named_parameters():
-        if 'weight' in name:
-            nn.init.xavier_uniform_(param.data, gain=gain)
+        # if 'weight' in name:
+            # nn.init.xavier_uniform_(param.data, gain=gain)
         if 'bias' in name:
             param.data.zero_()
 
@@ -30,25 +30,21 @@ class NeuralBlendshapes(nn.Module):
                                     nn.SiLU(),
                                     nn.Linear(256, 128),
                                     nn.SiLU(),
-                                    nn.Linear(128, 128),
+                                    nn.Linear(128, 64),
                                     nn.SiLU(),
-                                    nn.Linear(128, 128),
-                                    nn.SiLU(),
-                                    nn.Linear(128, 3)
+                                    nn.Linear(64, 3)
                                     )
         
-        self.only_coords_encoder, dim = get_embedder(3, input_dims=3)
+        self.only_coords_encoder, dim = get_embedder(2, input_dims=3)
         
         self.constant_deformer = nn.Sequential(
                     nn.Linear(dim, 64),
                     nn.SiLU(),
-                    nn.Linear(64,64),
-                    nn.SiLU(),
                     nn.Linear(64,32),
                     nn.SiLU(),
-                    nn.Linear(32,32),
+                    nn.Linear(32,16),
                     nn.SiLU(),
-                    nn.Linear(32,4)
+                    nn.Linear(16,4)
         )
         
         # self.pose_weight = nn.Sequential(
@@ -70,8 +66,8 @@ class NeuralBlendshapes(nn.Module):
         # initialize_weights(self.pose_weight, gain=0.1)
 
         # set bias of last nn.linear of pose_weight to 2
-        # self.pose_weight[-2].bias.data = torch.tensor([2.])
-        self.constant_deformer[-1].bias.data[3] = 2.
+        # self.pose_weight[-2].bias.data = torch.tensor([3.])
+        self.constant_deformer[-1].bias.data[3] = 3.
 
 
 
@@ -105,7 +101,7 @@ class NeuralBlendshapes(nn.Module):
         bsize = features.shape[0]
 
         constant_deformation = self.constant_deformer(encoded_only_vertices)
-        template_deformation = constant_deformation[..., :3][None]
+        template_deformation = constant_deformation[..., :3]
         
         pose_weight = torch.nn.functional.sigmoid(constant_deformation[..., 3:])[None]
 
@@ -119,7 +115,7 @@ class NeuralBlendshapes(nn.Module):
 
         expression_deformation = self.expression_deformer(deformer_input)
 
-        expression_vertices = vertices[None][..., :3] + expression_deformation + template_deformation
+        expression_vertices = vertices[None][..., :3] + expression_deformation + template_deformation[None]
 
         # pose_weight = torch.nn.functional.sigmoid(self.pose_weight)[None]
         

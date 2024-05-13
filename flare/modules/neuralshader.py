@@ -74,10 +74,11 @@ class NeuralShader(torch.nn.Module):
         # ==============================================================================================
         # create MLP
         # ==============================================================================================
-        self.material_mlp_ch = disentangle_network_params['material_mlp_ch']
-        self.material_mlp = FC(self.inp_size+20+20, self.material_mlp_ch, disentangle_network_params["material_mlp_dims"], activation, last_activation).to(device) #sigmoid
+        # self.material_mlp_ch = disentangle_network_params['material_mlp_ch']
+        self.material_mlp_ch = 4 # diffuse 3 and roughness 1
+        self.material_mlp = FC(self.inp_size, self.material_mlp_ch, disentangle_network_params["material_mlp_dims"], activation, last_activation).to(device) #sigmoid
         
-        # self.light_mlp = FC(38, 3, disentangle_network_params["light_mlp_dims"], activation=activation, last_activation=None, bias=True).to(device) 
+        self.light_mlp = FC(20, 3, disentangle_network_params["light_mlp_dims"], activation=activation, last_activation=None, bias=True).to(device) 
         self.dir_enc_func = generate_ide_fn(deg_view=3, device=self.device)
         # self.dir_enc_func_normals = generate_ide_fn(deg_view=4, device=self.device)
         
@@ -112,9 +113,20 @@ class NeuralShader(torch.nn.Module):
         reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
         view_dir = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
 
-        mlp_input = torch.cat([pe_input.view(-1, self.inp_size).to(torch.float32), self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1)), view_dir], dim=1)
-        color = self.material_mlp(mlp_input) 
-        return color, None, None
+        material = self.material_mlp(pe_input.view(-1, self.inp_size).to(torch.float32)) 
+
+        diffuse = material[..., :3]
+        roughness = material[..., 3:]
+        
+        light = self.light_mlp(view_dir.view(-1, 20))
+
+        specular = light * roughness
+
+        color = diffuse + specular
+
+        # mlp_input = torch.cat([pe_input.view(-1, self.inp_size).to(torch.float32), self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1)), view_dir], dim=1)
+        # color = self.material_mlp(mlp_input) 
+        return color, material, light
 
 
     # ==============================================================================================
@@ -135,7 +147,7 @@ class NeuralShader(torch.nn.Module):
             skin_mask_bool = None
 
         ### compute the final color, and c-buffers 
-        pred_color, _, _ = self.forward(positions, gbuffer, view_direction, mesh, light=lgt,
+        pred_color, material, light = self.forward(positions, gbuffer, view_direction, mesh, light=lgt,
                                             deformed_position=gbuffer["position"], skin_mask=skin_mask_bool)
         pred_color = pred_color.view(positions.shape) 
 
@@ -148,6 +160,8 @@ class NeuralShader(torch.nn.Module):
         pred_color_masked = dr.antialias(pred_color_masked.contiguous(), gbuffer["rast"], gbuffer["deformed_verts_clip_space"], mesh.indices.int())
         
         cbuffers = {}
+        cbuffers['material'] = material
+        cbuffers['light'] = light
 
         return pred_color_masked[..., :3], cbuffers, pred_color_masked[..., -1:]
 
