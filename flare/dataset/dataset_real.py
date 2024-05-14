@@ -99,6 +99,8 @@ class DatasetLoader(Dataset):
                 self.all_flame_expression.append(self._parse_expression(i))
             self.loaded = {}
 
+        self._get_facs_range()
+
     def get_camera_mat(self):
         '''
         The lab captured data for some subjects has a slightly shifted t. Here, for each video, we get t and R. 
@@ -222,6 +224,8 @@ class DatasetLoader(Dataset):
                 self.loaded[local_itr] = self._parse_frame_single(local_itr)
             img, mask, skin_mask, flame_expression, facs, flame_pose, camera, frame_name, landmark, normal = self._parse_frame_single(itr)
 
+        # facs = (facs / self.facs_range).clamp(0, 1)
+
         return {
             'img' : img,
             'mask' : mask,
@@ -235,6 +239,18 @@ class DatasetLoader(Dataset):
             'landmark': landmark,
             'normal': normal
         }
+
+
+    def _get_facs_range(self):
+        len_img = self.len_img
+        max_facs = torch.zeros(52) + 1e-3
+        for idx in range(len_img):
+            json_dict = self.all_img_path[idx % self.len_img]
+            facs = torch.tensor(json_dict["facs"], dtype=torch.float32)
+
+            max_facs = torch.max(max_facs, facs)
+        
+        self.facs_range = max_facs
 
 
     def _parse_frame_single(self, idx):

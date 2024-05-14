@@ -35,7 +35,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     deformed_vertices = return_dict['full_expression_deformation'] + ict_facekit.canonical
 
-    deformed_vertices_w_template = deformed_vertices + return_dict['full_template_deformation']
+    deformed_vertices_w_template = return_dict['full_expression_mesh']
 
     ict_ = ict.detach().clone()
     if fullhead_template:

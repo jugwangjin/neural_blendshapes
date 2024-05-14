@@ -129,8 +129,8 @@ def main(args):
 
     ict_num_expression = ict_model._num_expression_shapes
     ict_num_identity = ict_model._num_identity_shapes
-    ict_expression_shape_modes = ict_model._expression_shape_modes[:, 24591]
-    ict_identity_shape_modes = ict_model._identity_shape_modes[:, 24591]
+    ict_expression_shape_modes = ict_model._expression_shape_modes[:, :24591]
+    ict_identity_shape_modes = ict_model._identity_shape_modes[:, :24591]
 
     landmark_indices = [1225, 1888, 1052, 367, 1719, 1722, 2199, 1447, 966, 3661, 
                                  4390, 3927, 3924, 2608, 3272, 4088, 3443, 268, 493, 1914, 
@@ -147,7 +147,7 @@ def main(args):
     vertices = vertices[:24591]
     vertex_uvs = vertex_uvs[:24591]
 
-    parts_split = [9409, 14062, 17039, 21451, 24591]
+    parts_split = [9409, 14062, 17039, 21451, 23021, 24591]
     vertex_parts = [0] * len(vertices)
     
     for i, part in enumerate(parts_split):
