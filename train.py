@@ -278,7 +278,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # first, permute the input images to be in the correct format
             input_image = views_subset["img"].permute(0, 3, 1, 2).to(device)
 
-            return_dict = neural_blendshapes(input_image, views_subset["landmark"])
+            # return_dict = neural_blendshapes(input_image, views_subset["landmark"])
+            return_dict = neural_blendshapes(input_image, views_subset)
 
             features = return_dict['features']
 
@@ -322,14 +323,27 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # feature regularization
             # facs gt weightterm starts from 1e3, reduces to zero over half of the iterations exponentially
             
-            losses['feature_regularization'] = feature_regularization_loss(features, views_subset['facs'][..., ict_facekit.mediapipe_to_ict], 
-                                                                           views_subset["landmark"], neural_blendshapes.scale, iteration, facs_adaptive, facs_weight=5e3 if pretrain else 0)
+            losses['feature_regularization'] = feature_regularization_loss(features, views_subset["mp_blendshape"][..., ict_facekit.mediapipe_to_ict], 
+                                                                           views_subset["landmark"], neural_blendshapes.scale, iteration, facs_adaptive, facs_weight=1e3 if pretrain else 0)
                 
+            
+            with torch.no_grad():
+                shading_decay = torch.exp(-5 * (losses['landmark'] + losses['closure'] + losses['mask']))
+                synthetic_decay = torch.exp(-5 * (losses['ict'] + losses['random_ict'] + losses['landmark'] + losses['closure'] + losses['mask']))
+            # photometric losses decay by overall geometric loss
+            # if the geometric loss is 0, the photometric losses are not decayed
+            # exponentially decay the photometric losses by the overall geometric loss
+            losses['shading'] = losses['shading'] * shading_decay
+            losses['perceptual_loss'] = losses['perceptual_loss'] * shading_decay
+
+            # synthetic loss
+            losses['synthetic'] = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, args.batch_size, device) * synthetic_decay
+
 
             loss = torch.tensor(0., device=device) 
-            
             for k, v in losses.items():
-                loss += v * loss_weights[k]
+                loss += v.mean() * loss_weights[k]
+            
             
             acc_losses.append(losses)
             acc_total_loss += loss
@@ -393,16 +407,17 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             if iteration % 100 == 1:
                 print("=="*50)
                 for k, v in losses.items():
+                    v = v.mean()
                     # if k in losses_to_print:
-                    if v > 0:
-                        print(f"{k}: {v.item() * loss_weights[k]}")
+                    # if v > 0:
+                    print(f"{k}: {v.item() * loss_weights[k]}")
                 print("=="*50)
 
             # ==============================================================================================
             # Optimizer step
             # ==============================================================================================
-            if not pretrain:
-                optimizer_shader.zero_grad()
+            # if not pretrain:
+            optimizer_shader.zero_grad()
         
             neural_blendshapes.zero_grad()
 
@@ -413,12 +428,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 5.0)
 
             ### increase the gradients of positional encoding following tinycudnn
-            if not pretrain:
+            # if not pretrain:
         
-                if args.grad_scale and args.fourier_features == "hashgrid":
-                    shader.fourier_feature_transform.params.grad /= 8.0
+            if args.grad_scale and args.fourier_features == "hashgrid":
+                shader.fourier_feature_transform.params.grad /= 8.0
 
-                optimizer_shader.step()
+            optimizer_shader.step()
             # clip gradients
 
             optimizer_neural_blendshapes.step()
@@ -436,14 +451,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             if (args.visualization_frequency > 0) and (iteration == 1 or iteration % args.visualization_frequency == 0):
             
                 with torch.no_grad():
-                    debug_rgb_pred, debug_gbuffer, debug_cbuffers = run(args, mesh, debug_views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt)
+                    return_dict_ = neural_blendshapes(debug_views["img"].to(device), debug_views)
 
 
 
                     ## ============== visualize ==============================
                     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
 
-                    return_dict_ = neural_blendshapes(debug_views["img"].to(device), debug_views["landmark"].to(device))
+                    # return_dict_ = neural_blendshapes(debug_views["img"].to(device), debug_views["landmark"].to(device))
+                    return_dict_ = neural_blendshapes(debug_views["img"].to(device), debug_views["mp_blendshape"][:, ict_facekit.mediapipe_to_ict].to(device), debug_views["landmark"].to(device))
                     
                     jaw_index = ict_facekit.expression_names.tolist().index('jawOpen')
                     eyeblink_L_index = ict_facekit.expression_names.tolist().index('eyeBlink_L')
@@ -453,9 +469,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     print('eyeblink_L', facs[:, eyeblink_L_index])
                     print('eyeblink_R', facs[:, eyeblink_R_index])
 
-                    print('gt, jaw_index', debug_views['facs'][:, ict_facekit.mediapipe_to_ict][:, jaw_index])
-                    print('gt, eyeblink_L_index', debug_views['facs'][:, ict_facekit.mediapipe_to_ict][:, eyeblink_L_index])
-                    print('gt, eyeblink_R_index', debug_views['facs'][:, ict_facekit.mediapipe_to_ict][:, eyeblink_R_index])
+                    print('gt, jaw_index', debug_views["mp_blendshape"][:, ict_facekit.mediapipe_to_ict][:, jaw_index])
+                    print('gt, eyeblink_L_index', debug_views["mp_blendshape"][:, ict_facekit.mediapipe_to_ict][:, eyeblink_L_index])
+                    print('gt, eyeblink_R_index', debug_views["mp_blendshape"][:, ict_facekit.mediapipe_to_ict][:, eyeblink_R_index])
 
                     ict = ict_facekit(expression_weights = return_dict_['features'][:, :53], to_canonical = True)
                     deformed_verts = neural_blendshapes.apply_deformation(ict, return_dict_['features'])
@@ -538,7 +554,8 @@ if __name__ == '__main__':
     print("loading train views...")
     dataset_train    = DatasetLoader(args, train_dir=args.train_dir, sample_ratio=args.sample_idx_ratio, pre_load=False)
     dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=24, pre_load=False)
-    dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, collate_fn=dataset_train.collate, shuffle=True, drop_last=True)
+    dataset_sampler = torch.utils.data.WeightedRandomSampler(dataset_train.importance, len(dataset_train), replacement=True)
+    dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, collate_fn=dataset_train.collate, drop_last=True, sampler=dataset_sampler)
     view_indices = np.array(args.visualization_views).astype(int)
     d_l = [dataset_val.__getitem__(idx) for idx in view_indices[2:]]
     d_l.append(dataset_train.__getitem__(view_indices[0]))

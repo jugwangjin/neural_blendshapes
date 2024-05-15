@@ -37,37 +37,31 @@ class NeuralBlendshapes(nn.Module):
         
         self.only_coords_encoder, dim = get_embedder(2, input_dims=3)
         
-        self.constant_deformer = nn.Sequential(
+   
+        self.template_deformer = nn.Sequential(
                     nn.Linear(dim, 64),
                     nn.SiLU(),
-                    nn.Linear(64,32),
+                    nn.Linear(64,64),
                     nn.SiLU(),
-                    nn.Linear(32,16),
+                    nn.Linear(64,64),
                     nn.SiLU(),
-                    nn.Linear(16,4)
+                    nn.Linear(64,64),
+                    nn.SiLU(),
+                    nn.Linear(64,3)
         )
         
-        # self.pose_weight = nn.Sequential(
-        #             nn.Linear(dim+6, 64),
-        #             nn.SiLU(),
-        #             nn.Linear(64,32),
-        #             nn.SiLU(),
-        #             nn.Linear(32,32),
-        #             nn.SiLU(),
-        #             nn.Linear(32,1),
-        #             nn.Sigmoid(),
-        # )
-
+        self.pose_weight = nn.Sequential(
+                    nn.Linear(dim, 32),
+                    nn.SiLU(),
+                    nn.Linear(32,32),
+                    nn.SiLU(),
+                    nn.Linear(32,1),
+                    nn.Sigmoid()
+        )
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
         self.scale = torch.nn.Parameter(torch.tensor([1.]))
 
-        initialize_weights(self.expression_deformer, gain=0.1)
-        initialize_weights(self.constant_deformer, gain=0.1)
-        # initialize_weights(self.pose_weight, gain=0.1)
-
-        # set bias of last nn.linear of pose_weight to 2
-        # self.pose_weight[-2].bias.data = torch.tensor([3.])
-        self.constant_deformer[-1].bias.data[3] = 3.
+        self.pose_weight[-2].bias.data[0] = 1.
 
 
 
@@ -77,60 +71,32 @@ class NeuralBlendshapes(nn.Module):
         self.register_buffer('encoded_vertices', self.coords_encoder(self.template))
         self.register_buffer('encoded_only_vertices', self.only_coords_encoder(template))
 
-        # self.pose_weight = torch.nn.Parameter((torch.ones(template.shape[0], 1)*5))
-        # self.template_deformation = torhc.nn.Parameter((torch.zeros(template.shape[0], 3)))
 
-
-    def forward(self, image=None, lmks=None, image_input=True, features=None, vertices=None, coords_min=None, coords_max=None):
+    def forward(self, image=None, views=None, features=None, image_input=True):
         if image_input:
             # print(image.shape)
             if image.shape[1] != 3 and image.shape[3] == 3:
                 image = image.permute(0, 3, 1, 2)
-            # print(image.shape)
-            features = self.image_encoder(image, lmks)
-        # else:
-        # print(features.shape, estim_lmks.shape)
-        if vertices is None:
-            vertices = self.template
-            encoded_vertices = self.encoded_vertices
-            encoded_only_vertices = self.encoded_only_vertices
-        else:
-            encoded_vertices = self.coords_encoder(vertices)
-            encoded_only_vertices = self.only_coords_encoder(vertices[..., :3])
-
+            features = self.encoder(image, views)
+            
         bsize = features.shape[0]
 
-        constant_deformation = self.constant_deformer(encoded_only_vertices)
-        template_deformation = constant_deformation[..., :3]
-        
-        pose_weight = torch.nn.functional.sigmoid(constant_deformation[..., 3:])[None]
-
+        template_deformation = torch.zeros_like(self.template)
+        template_deformation[self.template_deform_indices] = self.template_deformer(self.encoded_only_vertices[self.template_deform_indices]) * 0.1
+        pose_weight = self.pose_weight(self.encoded_only_vertices)
 
         # template_deformation = self.template_deformation
 
-        deformer_input = torch.cat([encoded_vertices[None].repeat(bsize, 1, 1), \
-                                    features[:, None, :53].repeat(1, encoded_vertices.shape[0], 1)], dim=2)
+        deformer_input = torch.cat([self.encoded_vertices[None].repeat(bsize, 1, 1), \
+                                    features[:, None, :53].repeat(1, self.encoded_vertices.shape[0], 1)], dim=2)
 
         B, V, _ = deformer_input.shape
 
-        expression_deformation = self.expression_deformer(deformer_input)
+        expression_deformation = self.expression_deformer(deformer_input) * 0.1
 
-        expression_vertices = vertices[None][..., :3] + expression_deformation + template_deformation[None]
+        expression_vertices = self.template[None][..., :3] + expression_deformation + template_deformation[None]
 
-        # pose_weight = torch.nn.functional.sigmoid(self.pose_weight)[None]
-        
-        # self.pose_weight(torch.cat([encoded_only_vertices[None].repeat(bsize, 1, 1), \
-        #                                         features[:, None, 53:59].repeat(1, V, 1)], dim=2)) # shape of B V 1
-        
         deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
-
-        # rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle[:, None].repeat(1, V, 1) * pose_weight, convention = 'XYZ')
-
-        # local_coordinate_vertices = expression_vertices - self.transform_origin[None, None]
-
-        # local_coordinate_vertices = local_coordinate_vertices
-
-        # deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + self.transform_origin[None, None]
 
         return_dict = {} 
         return_dict['features'] = features

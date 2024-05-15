@@ -18,6 +18,22 @@ import numpy as np
 import cv2
 import skimage
 
+import mediapipe as mp
+
+def parse_mediapipe_output(face_landmarker_result):
+    if len(face_landmarker_result.face_landmarks) == 0:
+        return None, None, None
+    landmarks = face_landmarker_result.face_landmarks[0]
+    lmks = torch.from_numpy(np.array([[landmarks[i].x, landmarks[i].y, landmarks[i].z] for i in range(len(landmarks))]).astype(np.float32))
+
+    blendshapes = face_landmarker_result.face_blendshapes[0]
+    # print(blendshapes[0])
+    bshape = torch.from_numpy(np.array([blendshapes[i].score for i in range(len(blendshapes))]).astype(np.float32))
+    
+    transform_matrix = torch.from_numpy(face_landmarker_result.facial_transformation_matrixes[0].astype(np.float32))
+
+    return lmks, bshape, transform_matrix
+    
 ###############################################################################
 # Helpers/utils
 ###############################################################################

@@ -5,34 +5,21 @@ def feature_regularization_loss(feature, gt_facs,  gt_lmks, model_scale, iterati
     translation = feature[..., 56:59]
     scale = model_scale
     
-    # facs: shape of B, 53
-    # gt facs: shape of B, 53
-    # I would like to extract only signs of gt facs 
     bsize = facs.size(0)
     if bsize > 1:
-        gt_facs_sign = -10 * (gt_facs[None] - gt_facs[:, None]) # shape of B, B, 53
-        # gt_facs_sign = -torch.sign(gt_facs_sign) # shape of B, B, 53
-
-        facs_diff = facs[None] - facs[:, None] # shape of B, B, 53
+        gt_facs_sign = -(gt_facs[None] - gt_facs[:, None]) # shape of B, B, 53
+        facs_diff = (facs[None] - facs[:, None]) # shape of B, B, 53
     
-        facs_loss = torch.mean(facs_diff * gt_facs_sign)
+        facs_loss = ((facs_diff * gt_facs_sign) + 1).reshape(bsize, -1).mean(dim=-1)
     else:
         facs_loss = torch.tensor(0)
     
+    facs_regularization = facs_loss * 1e4 + (torch.pow(facs + 1e-2, 0.75)).reshape(bsize, -1).mean(dim=-1) * 1e-2
 
-    # facs regularization is to be pseudo L0 Norm
-    # facs_regularization = torch.mean(torch.pow(facs+1e-1, 0.75)) * 1e-4
-    facs_regularization = facs_loss * 5e3 + torch.mean(torch.pow(facs+1e-1, 0.75)) * 1e-2
-
-    # latent regularization: rotation, translation to be zero, scale to be 1
-    latent_regularization = torch.mean(torch.pow(rotation, 2)) * 1e-1 +  torch.mean(torch.pow(translation, 2)) + torch.mean(torch.pow(scale - 1, 2))
-
-    # lmk_regularization = torch.mean(torch.pow(estim_lmks - gt_lmks[..., :3].reshape(-1, 68*3), 2)) * 1e2
+    latent_regularization = (torch.pow(rotation, 2) * 1e-1 +  torch.pow(translation, 2) + torch.pow(scale - 1, 2)).reshape(bsize, -1).mean(dim=-1) 
 
     loss = facs_regularization + latent_regularization 
     
     if facs_weight > 0:
-        return loss + torch.mean(torch.abs(facs - gt_facs)) * facs_weight
-        # return loss + torch.mean(facs_adaptive.lossfun((facs - gt_facs)**2)) * facs_weight
-    # else:
+        return loss + (torch.abs(facs - gt_facs)).reshape(bsize, -1).mean(dim=-1) * facs_weight
     return loss

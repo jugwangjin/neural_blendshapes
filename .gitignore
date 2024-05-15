@@ -5,6 +5,10 @@ debug
 wandb
 out
 
+# 
+ICT_FaceKit
+ICT-FaceKit
+
 # large files
 assets
 flame

@@ -21,9 +21,9 @@ class ResnetEncoder(nn.Module):
     def __init__(self, outsize):
         super(ResnetEncoder, self).__init__()
         try:
-            self.encoder = torchvision.models.resnet34(weights='DEFAULT')
+            self.encoder = torchvision.models.regnet_x_1_6gf(weights='DEFAULT')
         except:
-            self.encoder = torchvision.models.resnet34(pretrained=True)
+            self.encoder = torchvision.models.regnet_x_1_6gf(pretrained=True)
 
         self.outsize = outsize
 
@@ -32,58 +32,44 @@ class ResnetEncoder(nn.Module):
         feature_size = self.encoder[-1].in_features
         self.encoder = self.encoder[:-1]
 
-        self.feature_size = feature_size
-        
-        self.layers = nn.Sequential(
-            nn.Linear(feature_size + 68*3, min(feature_size, 512)),
+        # can I append a layer to the encoder?
+        self.encoder = nn.Sequential(
+            self.encoder,
+            nn.Flatten(),
+            nn.Linear(feature_size, 128)
+        )
+
+        self.tail = nn.Sequential(
+            nn.Linear(128 + 478*3 + 52 + 16, 512),
             nn.SiLU(),
-            nn.Linear(min(feature_size, 512), min(feature_size, 512)),
+            nn.Linear(512, 512),
             nn.SiLU(),
-            nn.Linear(min(feature_size, 512), min(feature_size, 512)),
-            nn.SiLU(),
-            nn.Linear(min(feature_size, 512), min(feature_size, 512)),
-            nn.SiLU(),
-            nn.Linear(min(feature_size, 512), outsize),
+            nn.Linear(512, 53 + 6),
         )
 
         self.resize = nn.Upsample(size=(224, 224), mode='bilinear')
         self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer('std', torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
-        initialize_weights(self.layers, gain=0.01)
-
-        # self.layers[-1].bias.data[:53] = torch.tensor([-2.]*53)
+        initialize_weights(self.tail, gain=0.01)
 
 
-    def forward(self, image, lmks):
-        # print(inputs.shape)
-        # with torch.no_grad():
+    def forward(self, image, views):
         inputs = self.resize(image)
-        # normalize inputs,  mean=[0.485, 0.456, 0.406] and std=[0.229, 0.224, 0.225].
         inputs = (inputs - self.mean) / self.std
          
         features = self.encoder(inputs)
-        features = torch.cat([features.view(-1, self.feature_size), lmks[..., :3].reshape(lmks.size(0), -1)], dim=-1)
-        # features = torch.cat([features, lmks[..., :3].reshape(lmks.size(0), -1)], dim=-1)
-        features = self.layers(features)
 
+        landmark = views['mp_landmark'].reshape(-1, 1434) # 478*3
+        blendshape = views['mp_blendshape'].reshape(-1, 52)
+        transform_matrix = views['mp_transform_matrix'].reshape(-1, 16)
 
-        # we will use first 52 elements as FACS features
-        features[..., :53] = torch.nn.functional.sigmoid(features[..., :53])
-        features[..., 53:56] = torch.nn.functional.tanh(features[..., 53:56])
+        features = torch.cat([features, landmark, blendshape, transform_matrix], dim=-1)
+        features = self.tail(features)
 
+        features[..., :53] = torch.nn.functional.tanh(features[..., :53]) / 2. + 0.5
+        
         features[..., 58] = 0
-
-        # sin_and_cos = features[..., 53:56]
-        # sin = torch.sin(sin_and_cos)
-        # cos = torch.cos(sin_and_cos)
-        # euler_angles = torch.atan2(sin, cos)
-
-        # translation = features[..., 56:59]
-        # translation[..., -1] = 0
-
-        # updated_features = torch.cat([features[..., :53], euler_angles, translation], dim=-1)
-
 
         return features
 
