@@ -77,6 +77,10 @@ def main(args):
     # convert it to triangle mesh
     faces, triangle_uv = convert_quad_mesh_to_triangle_mesh(faces, uv_quads)
 
+    # print(np.min(triangle_uv, axis=0), np.max(triangle_uv, axis=0))
+
+    # print(np.unique(faces), np.unique(faces).shape, vertices.shape)
+
     # duplicate vertices on uv seams
     # traverse all triangle uv coordinates
     # vmapping is needed to keep the segmentation indices. so reinventing a wheel with a single extra output
@@ -84,13 +88,14 @@ def main(args):
     new_uvs = []
     vmapping = []
     new_faces = []
-    vertex_uvs = np.zeros((len(vertices), 2))
+    vertex_uvs = np.zeros((24591, 2)) - 1
 
     for n, face in tqdm.tqdm(enumerate(faces)):
         new_face = []
         for f in range(3):
             vertex_idx = face[f]
-            vertex_uvs[vertex_idx] = triangle_uv[n, f]
+            if vertex_uvs[vertex_idx][0] < 0:
+                vertex_uvs[vertex_idx] = triangle_uv[n, f]
             if vertex_idx not in vmapping:
                 vmapping.append(vertex_idx)
                 new_vertices.append(vertices[vertex_idx])
@@ -109,6 +114,8 @@ def main(args):
 
         new_faces.append(np.array(new_face))
 
+    print(np.all(vertex_uvs >= 0))
+
     new_vertices = np.vstack(new_vertices)
     new_uvs = np.vstack(new_uvs)
     vmapping = np.array(vmapping)
@@ -116,8 +123,12 @@ def main(args):
     
     # subtract all integer parts to keep only decimal parts in new_uvs and vertex_uvs
     new_uvs -= np.floor(new_uvs)
+    # vertex_uvs -= np.floor(vertex_uvs)
+
     vertex_uvs -= np.floor(vertex_uvs)
-    
+    # print(np.min(vertex_uvs[21451:], axis=0), np.max(vertex_uvs[21451:], axis=0))
+    # vertex_uvs[21451:, 0] /= 2.
+    # vertex_uvs[21451:]
 
 
     # debug
@@ -129,8 +140,8 @@ def main(args):
 
     ict_num_expression = ict_model._num_expression_shapes
     ict_num_identity = ict_model._num_identity_shapes
-    ict_expression_shape_modes = ict_model._expression_shape_modes[:, 24591]
-    ict_identity_shape_modes = ict_model._identity_shape_modes[:, 24591]
+    ict_expression_shape_modes = ict_model._expression_shape_modes[:, :24591]
+    ict_identity_shape_modes = ict_model._identity_shape_modes[:, :24591]
 
     landmark_indices = [1225, 1888, 1052, 367, 1719, 1722, 2199, 1447, 966, 3661, 
                                  4390, 3927, 3924, 2608, 3272, 4088, 3443, 268, 493, 1914, 
@@ -147,7 +158,7 @@ def main(args):
     vertices = vertices[:24591]
     vertex_uvs = vertex_uvs[:24591]
 
-    parts_split = [9409, 14062, 17039, 21451, 24591]
+    parts_split = [9409, 14062, 17039, 21451, 23021, 24591]
     vertex_parts = [0] * len(vertices)
     
     for i, part in enumerate(parts_split):

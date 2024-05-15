@@ -56,67 +56,99 @@ class FACS2Deformation(nn.Module):
         facs = facs[:, :, None, None].repeat(1, 1, self.start_size, self.start_size)
         return self.layers(torch.cat([facs, self.noise_map.repeat(B, 1, 1, 1)], dim=1))
 
+class FACS2EyeRotation(nn.Module):
+    def __init__(self, num_layers=3, num_hidden=32,):
+        super().__init__()
+        self.num_layers = num_layers
+        self.num_hidden = num_hidden
+
+        self.layers = nn.ModuleList()
+        self.layers.append(nn.Linear(53, num_hidden))
+        self.layers.append(nn.SiLU())
+        for i in range(num_layers-2):
+            self.layers.append(nn.Linear(num_hidden, num_hidden))
+            self.layers.append(nn.SiLU())
+        self.layers.append(nn.Linear(num_hidden, 3))
+    
+    def forward(self, facs):
+        for layer in self.layers:
+            facs = layer(facs)
+        return facs
 
 class NeuralBlendshapes(nn.Module):
     def __init__(self, vertex_parts):
         super().__init__()
-        self.image_encoder = ResnetEncoder(62)
+        self.encoder = ResnetEncoder(53+6)
 
-        self.head_parts = ['face', 'head', 'gums', 'teeth', 'left_eyeball', 'right_eyeball']
+        self.head_parts = ['face', 'head', 'gums', 'teeth']
+        self.eyeball_parts = ['left_eyeball', 'right_eyeball']
         
-        self.head_parts_indices = {'face': [], 'head': [], 'gums': [], 'teeth': [], 'left_eyeball': [], 'right_eyeball': []}
-        
+        self.head_parts_indices = {'face': [], 'head': [], 'gums': [], 'teeth': []}
+        self.eyeball_parts_indices = {'left_eyeball': [], 'right_eyeball': []}
+
+        self.template_deform_indices = self.head_parts_indices['face'] + self.head_parts_indices['head']
+
         for i, v in enumerate(vertex_parts):
-            self.head_parts_indices[self.head_parts[v]].append(i)
+            if v < 4:
+                self.head_parts_indices[self.head_parts[v]].append(i)
+            else:
+                self.eyeball_parts_indices[self.eyeball_parts[v-4]].append(i)
 
         parts_deformer_spec = {
             'face': {'output_size': 512, 'feature_size': 256, 'start_size': 32},
             'head': {'output_size': 256, 'feature_size': 128, 'start_size': 32},
             'gums': {'output_size': 128, 'feature_size': 64, 'start_size': 32},
             'teeth': {'output_size': 128, 'feature_size': 64, 'start_size': 32},
-            'left_eyeball': {'output_size': 64, 'feature_size': 64, 'start_size': 32},
-            'right_eyeball': {'output_size': 64, 'feature_size': 64, 'start_size': 32},
         }
 
         self.part_deformers = nn.ModuleDict()
         for part in self.head_parts:
-            self.part_deformers[part] = FACS2Deformation(**parts_deformer_spec[part])
+            if part in parts_deformer_spec:
+                self.part_deformers[part] = FACS2Deformation(**parts_deformer_spec[part])
+        [(print(part, len(self.head_parts_indices[part]))) for part in self.head_parts]
 
-        print('Face:', len(self.face_indices))
-        print('Head:', len(self.head_indices))
-        print('Gums:', len(self.gums_indices))
-        print('Teeth:', len(self.teeth_indices))
-        print('Left Eyeball:', len(self.left_eyeball_indices))
-        print('Right Eyeball:', len(self.right_eyeball_indices))
+        # for eyeball, only estimate rotation and learn the origin of rotation.
+        self.eyeball_rotation_origins = {}
+        self.eyeball_rotation_estimator = nn.ModuleDict()
+        for part in self.eyeball_parts:
+            self.eyeball_rotation_origins[part] = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
+            self.eyeball_rotation_estimator[part] = FACS2EyeRotation()
 
+        self.only_coords_encoder, dim = get_embedder(3, input_dims=3)
         
-        self.only_coords_encoder, dim = get_embedder(2, input_dims=3)
-        
-        self.constant_deformer = nn.Sequential(
+        self.template_deformer = nn.Sequential(
                     nn.Linear(dim, 64),
                     nn.SiLU(),
-                    nn.Linear(64,32),
+                    nn.Linear(64,64),
                     nn.SiLU(),
-                    nn.Linear(32,16),
+                    nn.Linear(64,64),
                     nn.SiLU(),
-                    nn.Linear(16,4)
+                    nn.Linear(64,64),
+                    nn.SiLU(),
+                    nn.Linear(64,3)
+        )
+        
+        self.pose_weight = nn.Sequential(
+                    nn.Linear(dim, 32),
+                    nn.SiLU(),
+                    nn.Linear(32,32),
+                    nn.SiLU(),
+                    nn.Linear(32,1),
+                    nn.Sigmoid()
         )
 
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
         self.scale = torch.nn.Parameter(torch.tensor([1.]))
 
-        self.constant_deformer[-1].bias.data[3] = 3.
+        self.pose_weight[-2].bias.data[0] = 1.
 
 
-    def set_template(self, template, uv_template, vertex_parts=None, full_shape=None, head_indices=None, eyeball_indices=None):
-        self.register_buffer('template', torch.cat([template, uv_template[0]], dim=1))     
-        self.register_buffer('uv_template', uv_template[0]) #  
+    def set_template(self, template, uv_template):
+        self.register_buffer('template', template)     
         self.register_buffer('uv_template_for_deformer', (uv_template[0, :, :2] * 2 - 1)[None, None]) #  -1 to 1, shape of 1, 1, V, 2
-        # self.register_buffer('encoded_vertices', self.coords_encoder(self.template))
         self.register_buffer('encoded_only_vertices', self.only_coords_encoder(template))
-
-        # self.pose_weight = torch.nn.Parameter((torch.ones(template.shape[0], 1)*5))
-        # self.template_deformation = torhc.nn.Parameter((torch.zeros(template.shape[0], 3)))
+        for part in self.eyeball_parts:
+            self.eyeball_rotation_origins[part].data = template[self.eyeball_parts_indices[part]].mean(dim=0)
 
 
     def deform_expression(self, facs):
@@ -125,49 +157,38 @@ class NeuralBlendshapes(nn.Module):
         part_deformations = {}
         for part in self.head_parts:
             part_deformations[part] = self.part_deformers[part](facs)
-            expression_deformation[:, self.head_parts_indices[part]] = torch.nn.functional.grid_sample(part_deformations[part], self.uv_template_for_deformer[:, :, self.head_parts_indices[part]].repeat(B, 1, 1, 1), align_corners=False, mode='bilinear')[:, :, 0].permute(0, 2, 1)
+            expression_deformation[:, self.head_parts_indices[part]] = torch.nn.functional.grid_sample(part_deformations[part], self.uv_template_for_deformer[:, :, self.head_parts_indices[part]].repeat(B, 1, 1, 1), align_corners=False, mode='bilinear')[:, :, 0].permute(0, 2, 1) * 0.1
 
-
-
+        for part in self.eyeball_parts:
+            euler_angles = self.eyeball_rotation_estimator[part](facs) # shape of B, 3
+            rotation_matrix = pt3d.euler_angles_to_matrix(euler_angles, convention = 'XYZ') # shape of B, 3, 3
+            local_eye_vertices = self.template[self.eyeball_parts_indices[part]] - self.eyeball_rotation_origins[part][None] # shape of V, 3
+            deformed_eye_vertices = torch.einsum('vd, bdj -> bvj', local_eye_vertices, rotation_matrix) # shape of B, V, 3
+            expression_deformation[:, self.eyeball_parts_indices[part]] = deformed_eye_vertices - local_eye_vertices[None]
 
         return expression_deformation, part_deformations
 
-    def forward(self, image=None, lmks=None, image_input=True, features=None, vertices=None, coords_min=None, coords_max=None):
+
+    def forward(self, image=None, views=None, features=None, image_input=True):
+        # it can deal with any topology, but it requires same UV parameterization ~ and the indices for each verex. 
+        # since it is not feasible currently, fix the vertices
         if image_input:
-            # print(image.shape)
             if image.shape[1] != 3 and image.shape[3] == 3:
-                image = image.permute(0, 3, 1, 2)
-            # print(image.shape)
-            features = self.image_encoder(image, lmks)
-        # else:
-        # print(features.shape, estim_lmks.shape)
-        if vertices is None:
-            vertices = self.template
-            # encoded_vertices = self.encoded_vertices
-            encoded_only_vertices = self.encoded_only_vertices
-        else:
-            # encoded_vertices = self.coords_encoder(vertices)
-            encoded_only_vertices = self.only_coords_encoder(vertices[..., :3])
-
-        bsize = features.shape[0]
-
-        constant_deformation = self.constant_deformer(encoded_only_vertices)
-        template_deformation = constant_deformation[..., :3]
+                image = image.permute(0, 3, 1, 2)  
+            features = self.encoder(image, views)
         
-        pose_weight = torch.nn.functional.sigmoid(constant_deformation[..., 3:])[None]
+        template_deformation = torch.zeros_like(self.template)
+        template_deformation[self.template_deform_indices] = self.template_deformer(self.encoded_only_vertices[self.template_deform_indices]) * 0.1
+        pose_weight = self.pose_weight(self.encoded_only_vertices)
 
-        
         expression_deformation, deformation_maps = self.deform_expression(features[..., :53])
 
-
-        # expression_vertices = expression_deformation + template_deformation[None]
-        expression_vertices = vertices[None][..., :3] + expression_deformation + template_deformation[None]
+        expression_vertices = self.template[None] + expression_deformation + template_deformation[None]
 
         deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
 
         return_dict = {} 
         return_dict['features'] = features
-
         return_dict['full_template_deformation'] = template_deformation
         return_dict['full_expression_deformation'] = expression_deformation
         return_dict['full_expression_mesh'] = expression_vertices
@@ -179,7 +200,6 @@ class NeuralBlendshapes(nn.Module):
         
 
     def apply_deformation(self, vertices, features, weights=None):
-        
         euler_angle = features[..., 53:56]
         translation = features[..., 56:59]
         scale = self.scale
@@ -188,15 +208,7 @@ class NeuralBlendshapes(nn.Module):
             weights = torch.ones_like(vertices[..., :1])
 
         B, V, _ = vertices.shape
-        # print(features.shape, euler_angle.shape)
-        # rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle, convention = 'XYZ')
-        # print(rotation_matrix[0])
-        # print(rotation_matrix[1])
-
         rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle[:, None].repeat(1, V, 1) * weights, convention = 'XYZ')
-
-        
-
         local_coordinate_vertices = (vertices  - self.transform_origin[None, None]) * scale
         deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] * weights + self.transform_origin[None, None] 
 

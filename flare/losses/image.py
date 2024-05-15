@@ -26,7 +26,8 @@ def image_loss_fn(img, target):
     img    = _tonemap_srgb(torch.log(torch.clamp(img, min=0, max=65535) + 1))
     target = _tonemap_srgb(torch.log(torch.clamp(target, min=0, max=65535) + 1))
 
-    out = torch.nn.functional.l1_loss(img, target)
+    out = (img - target).abs().reshape(img.shape[0], -1).mean(dim=-1)
+    # out = torch.nn.functional.l1_loss(img, target)
     if torch.is_anomaly_enabled():
         assert torch.all(torch.isfinite(out)), "Output of image_loss contains inf or NaN"
     return out, img, target
@@ -40,11 +41,12 @@ def mask_loss(masks, gbuffers, loss_function = torch.nn.MSELoss()):
         gbuffers (List[Dict[str, torch.Tensor]]): G-buffers for each view with the 'mask' channel
         loss_function (Callable): Function for comparing the masks or generally a set of pixels
     """
-
-    loss = 0.0
+    
+    return (masks - gbuffers).pow(2).reshape(gbuffers.shape[0], -1).mean(dim=-1)
+    loss = []
     for gt_mask, gbuffer_mask in zip(masks, gbuffers):
-        loss += loss_function(gt_mask, gbuffer_mask)
-    return loss / len(masks)
+        loss.append(loss_function(gt_mask, gbuffer_mask))
+    return torch.cat(loss)
 
 
 def shading_loss_batch(pred_color_masked, views, batch_size):
@@ -53,4 +55,4 @@ def shading_loss_batch(pred_color_masked, views, batch_size):
 
     color_loss, tonemap_pred, tonemap_target = image_loss_fn(pred_color_masked[..., :3] * views["mask"], views["img"] * views["mask"])
 
-    return color_loss / batch_size, pred_color_masked[..., :3], [tonemap_pred, tonemap_target]
+    return color_loss, pred_color_masked[..., :3], [tonemap_pred, tonemap_target]

@@ -245,10 +245,12 @@ class NeuralShader(torch.nn.Module):
         gbuffer["normal"] =  dr.antialias(normal.contiguous(), gbuffer["rast"], gbuffer["deformed_verts_clip_space"], mesh.indices.int())
         return gbuffer["normal"]
     
-    def apply_pe(self, position):
+    def apply_pe(self, position, normalize=False):
         ## normalize PE input 
-        position = (position.view(-1, 3) - self.aabb[0][None, ...]) / (self.aabb[1][None, ...] - self.aabb[0][None, ...])
-        position = torch.clamp(position, min=0, max=1)
+        position = position.view(-1, 3)
+        if normalize:
+            position = (position - self.aabb[0][None, ...]) / (self.aabb[1][None, ...] - self.aabb[0][None, ...])
+            position = torch.clamp(position, min=0, max=1)
         pe_input = self.fourier_feature_transform(position.contiguous()).to(torch.float32)
         return pe_input
 

@@ -46,7 +46,7 @@ import open3d as o3d
 # evaluation
 # ==============================================================================================    
 def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt):
-    return_dict = neural_blendshapes(views["img"].to(device), views["landmark"].to(device))
+    return_dict = neural_blendshapes(views["img"].to(device), views)
 
     deformed_vertices = return_dict['full_deformed_mesh']
     
@@ -65,7 +65,7 @@ def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, de
 # relight: run
 # ==============================================================================================  
 def run_relight(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt_list, images_save_path):
-    return_dict = neural_blendshapes(views["img"].to(device), views['landmark'])
+    return_dict = neural_blendshapes(views["img"].to(device), views)
 
     deformed_vertices = return_dict['full_deformed_mesh']
 
@@ -155,7 +155,9 @@ if __name__ == '__main__':
     head_template = ict_canonical_mesh.vertices[ict_facekit.head_indices].to(device)
     eye_template = ict_canonical_mesh.vertices[ict_facekit.eyeball_indices].to(device)
 
-    neural_blendshapes.set_template((head_template, eye_template))
+    neural_blendshapes.set_template(ict_canonical_mesh.vertices,
+                                    ict_facekit.uv_neutral_mesh)
+    # neural_blendshapes.set_template((head_template, eye_template))
 
     load_shader = Path(experiment_dir / "stage_2" / "network_weights" / f"shader_latest.pt")
     assert os.path.exists(load_shader)

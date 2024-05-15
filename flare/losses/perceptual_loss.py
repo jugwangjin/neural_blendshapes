@@ -2,6 +2,9 @@
 import torch
 import torchvision
 
+def batchwise_l1_loss(x, y):
+    return torch.mean((x-y).reshape(x.shape[0], -1).abs(), dim=-1)
+
 class VGGPerceptualLoss(torch.nn.Module):
     def __init__(self, resize=True):
         super(VGGPerceptualLoss, self).__init__()
@@ -36,13 +39,15 @@ class VGGPerceptualLoss(torch.nn.Module):
             x = block(x)
             y = block(y)
             if i in feature_layers:
-                loss += torch.nn.functional.l1_loss(x, y)
+                loss += (x-y).abs().reshape(x.shape[0], -1).mean(dim=-1)
+                # loss += torch.nn.functional.l1_loss(x, y)
             if i in style_layers:
                 act_x = x.reshape(x.shape[0], x.shape[1], -1)
                 act_y = y.reshape(y.shape[0], y.shape[1], -1)
                 gram_x = act_x @ act_x.permute(0, 2, 1)
                 gram_y = act_y @ act_y.permute(0, 2, 1)
-                loss += torch.nn.functional.l1_loss(gram_x, gram_y)
+                loss += (gram_x - gram_y).abs().reshape(x.shape[0], -1).mean(dim=-1)
+                # loss += torch.nn.functional.l1_loss(gram_x, gram_y)
         
         loss *= min(1.0, 600/(iteration+1)) # decay
         return loss

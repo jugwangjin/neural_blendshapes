@@ -34,16 +34,9 @@ def laplacian_loss(mesh: Mesh, canonical_vertices):
     mesh_laplacian = L.mm(V).norm(dim=-1)
     canonical_laplacian = L.mm(canonical_vertices).norm(dim=-1)
 
-    # print(mesh_laplacian.shape)
-    # exit()
-
-    loss = torch.mean((mesh_laplacian - canonical_laplacian).norm(dim=1)**2)
+    loss = torch.pow(mesh_laplacian - canonical_laplacian, 2)
     return loss.mean()
 
-    loss = L.mm(V)
-    loss = loss.norm(dim=1)**2
-    
-    return loss.mean()
 
 
 def normal_consistency_loss(mesh: Mesh):
