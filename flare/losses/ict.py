@@ -46,6 +46,13 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
             weights = torch.tensor([1/i for i in range(1, 53)])
             random_integer = torch.multinomial(weights, 1).item() + 1
             random_indices = torch.randint(0, 53, (random_integer,))
+            # for 10 and 11, randomly append it to random_indices
+            if torch.rand(1) > 0.5:
+                random_indices = torch.cat([random_indices, torch.tensor([10])])
+            if torch.rand(1) > 0.5:
+                random_indices = torch.cat([random_indices, torch.tensor([11])])
+            random_indices = random_indices.unique()
+
             # sample 0 to 1 for each indices
             random_facs[b, random_indices] = torch.rand_like(random_facs[b, random_indices])
         random_pose = torch.rand_like(random_facs) * torch.pi - HALF_PI
@@ -72,7 +79,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     # ict jaw line landmark positions does not match with common 68 landmarks
     ict_landmark_loss = (torch.abs(detected_landmarks[:, 17:, :2] - ict_landmarks_clip_space[:, 17:, :2]) * detected_landmarks[:, 17:, -1:]).reshape(detected_landmarks.shape[0], -1).mean(dim=-1)
 
-    eye_closure_loss = closure_loss_block(detected_landmarks, ict_landmarks_clip_space, EYELID_PAIRS) * 2
+    eye_closure_loss = closure_loss_block(detected_landmarks, ict_landmarks_clip_space, EYELID_PAIRS) * 8
     lip_closure_loss = closure_loss_block(detected_landmarks, ict_landmarks_clip_space, LIP_PAIRS)
 
     closure_loss = eye_closure_loss + lip_closure_loss

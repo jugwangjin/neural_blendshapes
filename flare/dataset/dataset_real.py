@@ -175,22 +175,29 @@ class DatasetLoader(Dataset):
 
 
     def _compute_importance(self):
+        print('computing importance')
         len_img = self.len_img
-        importance = [0] * len_img
-        for idx in range(len_img):
+        all_facs = []
+        for idx in tqdm(range(len_img), desc='reading facs'):
             json_dict = self.all_img_path[idx % self.len_img]
             facs = torch.tensor(json_dict["facs"], dtype=torch.float32)
+            all_facs.append(facs)
 
-            importance[idx] = float(torch.sum(facs).cpu().data.numpy())
+        all_facs = torch.stack(all_facs)
+        mean_facs = torch.mean(all_facs, dim=0, keepdim=True)
+        var_facs = torch.var(all_facs, dim=0, keepdim=True) # to avoid zero prob.
 
-            # max_facs = torch.max(max_facs, facs)
-        importance = torch.log(torch.tensor(importance) + 1.5)
-        importance = importance / torch.max(importance)
-        importance = list(importance.cpu().data.numpy())
+        importance = torch.sum((all_facs - mean_facs)  ** 2 / var_facs, dim=-1) 
+        importance = importance / (torch.amax(importance) / 2.)
+        self.importance = list(importance.clamp(0.05, 1).cpu().data.numpy())
 
-        self.importance = importance
-       
-
+        # importance = torch.zeros(len_img)
+        # for idx in tqdm(range(len_img), desc='computing importance'):
+        #     json_dict = self.all_img_path[idx % self.len_img]
+        #     facs = torch.tensor(json_dict["facs"], dtype=torch.float32)
+        #     importance[idx] = torch.sum((facs - mean_facs) ** 2 / var_facs) + 1e-1
+        # importance = importance / torch.amax(importance) 
+        # self.importance = list(importance.cpu().data.numpy())
 
     def _parse_frame_single(self, idx):
         json_dict = self.all_img_path[idx % self.len_img]

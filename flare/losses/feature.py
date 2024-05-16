@@ -14,7 +14,7 @@ def feature_regularization_loss(feature, gt_facs,  gt_lmks, model_scale, iterati
     else:
         facs_loss = torch.tensor(0)
     
-    facs_regularization = facs_loss * 1e4 + (torch.pow(facs + 1e-2, 0.75)).reshape(bsize, -1).mean(dim=-1) * 1e-2
+    facs_regularization = facs_loss * 1e3 + (torch.pow(facs + 1e-2, 0.75)).reshape(bsize, -1).mean(dim=-1) 
 
     latent_regularization = (torch.pow(rotation, 2) * 1e-1 +  torch.pow(translation, 2) + torch.pow(scale - 1, 2)).reshape(bsize, -1).mean(dim=-1) 
 

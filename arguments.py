@@ -58,6 +58,7 @@ def config_parser():
     parser.add_argument('--weight_normal_laplacian', type=float, default=1, help="Weight of the laplacian term")
     parser.add_argument('--weight_landmark', type=float, default=1, help="Weight of the landmark term")
     parser.add_argument('--weight_closure', type=float, default=1, help="Weight of the closure term")
+    parser.add_argument('--weight_ict_closure', type=float, default=1, help="Weight of the closure term")
     parser.add_argument('--weight_ict', type=float, default=1, help="Weight of the ict term")
     parser.add_argument('--weight_random_ict', type=float, default=1, help="Weight of the ict term")
     parser.add_argument('--weight_ict_identity', type=float, default=1e-4, help="Weight of the flame term")

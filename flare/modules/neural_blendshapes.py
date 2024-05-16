@@ -86,7 +86,7 @@ class NeuralBlendshapes(nn.Module):
         self.head_parts_indices = {'face': [], 'head': [], 'gums': [], 'teeth': []}
         self.eyeball_parts_indices = {'left_eyeball': [], 'right_eyeball': []}
 
-        self.template_deform_indices = self.head_parts_indices['face'] + self.head_parts_indices['head']
+        self.head_index = len(self.head_parts_indices['face'] + self.head_parts_indices['head'])
 
         for i, v in enumerate(vertex_parts):
             if v < 4:
@@ -96,11 +96,12 @@ class NeuralBlendshapes(nn.Module):
 
         parts_deformer_spec = {
             'face': {'output_size': 512, 'feature_size': 256, 'start_size': 32},
-            'head': {'output_size': 256, 'feature_size': 128, 'start_size': 32},
-            'gums': {'output_size': 128, 'feature_size': 64, 'start_size': 32},
-            'teeth': {'output_size': 128, 'feature_size': 64, 'start_size': 32},
+            'head': {'output_size': 128, 'feature_size': 32, 'start_size': 32},
+            'gums': {'output_size': 128, 'feature_size': 32, 'start_size': 32},
+            'teeth': {'output_size': 128, 'feature_size': 32, 'start_size': 32},
         }
 
+        self.head_parts = list(set(self.head_parts) - set(['head']))
         self.part_deformers = nn.ModuleDict()
         for part in self.head_parts:
             if part in parts_deformer_spec:
@@ -146,12 +147,12 @@ class NeuralBlendshapes(nn.Module):
     def set_template(self, template, uv_template):
         self.register_buffer('template', template)     
         self.register_buffer('uv_template_for_deformer', (uv_template[0, :, :2] * 2 - 1)[None, None]) #  -1 to 1, shape of 1, 1, V, 2
-        self.register_buffer('encoded_only_vertices', self.only_coords_encoder(template))
+        self.register_buffer('encoded_only_vertices', self.only_coords_encoder(template * 3))
         for part in self.eyeball_parts:
             self.eyeball_rotation_origins[part].data = template[self.eyeball_parts_indices[part]].mean(dim=0)
 
 
-    def deform_expression(self, facs):
+    def deform_expression(self, facs, template_deformation):
         B = facs.shape[0]
         expression_deformation = torch.zeros(B, self.template.shape[0], 3, device=facs.device)
         part_deformations = {}
@@ -162,7 +163,7 @@ class NeuralBlendshapes(nn.Module):
         for part in self.eyeball_parts:
             euler_angles = self.eyeball_rotation_estimator[part](facs) # shape of B, 3
             rotation_matrix = pt3d.euler_angles_to_matrix(euler_angles, convention = 'XYZ') # shape of B, 3, 3
-            local_eye_vertices = self.template[self.eyeball_parts_indices[part]] - self.eyeball_rotation_origins[part][None] # shape of V, 3
+            local_eye_vertices = self.template[self.eyeball_parts_indices[part]] + template_deformation[self.eyeball_parts_indices[part]] - self.eyeball_rotation_origins[part][None] # shape of V, 3
             deformed_eye_vertices = torch.einsum('vd, bdj -> bvj', local_eye_vertices, rotation_matrix) # shape of B, V, 3
             expression_deformation[:, self.eyeball_parts_indices[part]] = deformed_eye_vertices - local_eye_vertices[None]
 
@@ -177,13 +178,13 @@ class NeuralBlendshapes(nn.Module):
                 image = image.permute(0, 3, 1, 2)  
             features = self.encoder(image, views)
         
-        template_deformation = torch.zeros_like(self.template)
-        template_deformation[self.template_deform_indices] = self.template_deformer(self.encoded_only_vertices[self.template_deform_indices]) * 0.1
+        template_deformation = torch.zeros_like(self.template[..., :3])
+        template_deformation = self.template_deformer(self.encoded_only_vertices)
         pose_weight = self.pose_weight(self.encoded_only_vertices)
 
-        expression_deformation, deformation_maps = self.deform_expression(features[..., :53])
+        expression_deformation, deformation_maps = self.deform_expression(features[..., :53], template_deformation)
 
-        expression_vertices = self.template[None] + expression_deformation + template_deformation[None]
+        expression_vertices = self.template[None][..., :3] + expression_deformation + template_deformation[None]
 
         deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
 
