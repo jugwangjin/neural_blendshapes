@@ -210,7 +210,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             return_dict = neural_blendshapes(image_input=False, features=features)
             losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive)
 
-            loss = loss + losses['ict'] + losses['random_ict'] + losses['ict_landmark'] + losses['ict_landmark_closure']
+            loss = (loss + losses['ict'] + losses['random_ict'] + losses['ict_landmark'] + losses['ict_landmark_closure']) * 4
 
             optimizer_neural_blendshapes.zero_grad()
             loss.mean().backward() 
@@ -264,7 +264,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
             losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
-            losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices)
+            losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices, neural_blendshapes.face_index)
 
             # losses['deformation_map_regularization'] = torch.zeros(deformed_vertices.shape[0], device=device)
             # for map in return_dict['deformation_maps']:

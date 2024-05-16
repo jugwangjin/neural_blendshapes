@@ -86,7 +86,7 @@ class NeuralBlendshapes(nn.Module):
         self.head_parts_indices = {'face': [], 'head': [], 'gums': [], 'teeth': []}
         self.eyeball_parts_indices = {'left_eyeball': [], 'right_eyeball': []}
 
-        self.head_index = len(self.head_parts_indices['face'] + self.head_parts_indices['head'])
+        self.face_index = len(self.head_parts_indices['face'])
 
         for i, v in enumerate(vertex_parts):
             if v < 4:

@@ -21,7 +21,7 @@ def laplacian_loss(mesh: Mesh):
     return loss.mean()
 
 
-def laplacian_loss(mesh: Mesh, canonical_vertices):
+def laplacian_loss(mesh: Mesh, canonical_vertices, face_index):
     """ Compute the Laplacian term as the mean squared Euclidean norm of the differential coordinates.
 
     Args:
@@ -38,13 +38,12 @@ def laplacian_loss(mesh: Mesh, canonical_vertices):
     # exit()
 
     loss = torch.abs(mesh_laplacian - canonical_laplacian)
+    loss[..., :face_index] *= 10
     return loss.mean()
-
     loss = L.mm(V)
     loss = loss.norm(dim=1)**2
     
     return loss.mean()
-
 
 def normal_consistency_loss(mesh: Mesh):
     """ Compute the normal consistency term as the cosine similarity between neighboring face normals.
