@@ -18,6 +18,11 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
             weights = torch.tensor([1/i for i in range(1, 53)])
             random_integer = torch.multinomial(weights, 1).item() + 1
             random_indices = torch.randint(0, 53, (random_integer,))
+            if torch.rand(1) > 0.5:
+                random_indices = torch.cat([random_indices, torch.tensor([10])])
+            if torch.rand(1) > 0.5:
+                random_indices = torch.cat([random_indices, torch.tensor([11])])
+            random_indices = random_indices.unique()
             # sample 0 to 1 for each indices
             random_facs[b, random_indices] = torch.rand_like(random_facs[b, random_indices])
         random_pose = torch.rand_like(random_facs) * torch.pi - HALF_PI

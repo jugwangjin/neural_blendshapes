@@ -18,13 +18,15 @@ def initialize_weights(m, gain=0.1):
 class NeuralBlendshapes(nn.Module):
     def __init__(self):
         super().__init__()
-        self.image_encoder = ResnetEncoder(62)
+        self.encoder = ResnetEncoder(53+6)
 
         self.coords_encoder, dim = get_embedder(6, input_dims=6)
 
 
         self.expression_deformer = nn.Sequential(
                                     nn.Linear(dim+53, 256),
+                                    nn.SiLU(),
+                                    nn.Linear(256, 256),
                                     nn.SiLU(),
                                     nn.Linear(256, 256),
                                     nn.SiLU(),
@@ -67,9 +69,9 @@ class NeuralBlendshapes(nn.Module):
 
 
     def set_template(self, template, uv_template, vertex_parts=None, full_shape=None, head_indices=None, eyeball_indices=None):
-        self.register_buffer('template', torch.cat([template, uv_template[0]], dim=1))     
-        self.register_buffer('encoded_vertices', self.coords_encoder(self.template))
-        self.register_buffer('encoded_only_vertices', self.only_coords_encoder(template))
+        self.register_buffer('template', torch.cat([template, uv_template[0] - 0.5], dim=1))     
+        self.register_buffer('encoded_vertices', self.coords_encoder(self.template*3))
+        self.register_buffer('encoded_only_vertices', self.only_coords_encoder(template*3))
 
 
     def forward(self, image=None, views=None, features=None, image_input=True):
@@ -81,8 +83,8 @@ class NeuralBlendshapes(nn.Module):
             
         bsize = features.shape[0]
 
-        template_deformation = torch.zeros_like(self.template)
-        template_deformation[self.template_deform_indices] = self.template_deformer(self.encoded_only_vertices[self.template_deform_indices]) * 0.1
+        template_deformation = torch.zeros_like(self.template[..., :3])
+        template_deformation = self.template_deformer(self.encoded_only_vertices)
         pose_weight = self.pose_weight(self.encoded_only_vertices)
 
         # template_deformation = self.template_deformation
