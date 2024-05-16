@@ -37,7 +37,7 @@ def laplacian_loss(mesh: Mesh, canonical_vertices, face_index):
     # print(mesh_laplacian.shape)
     # exit()
 
-    loss = torch.abs(mesh_laplacian - canonical_laplacian)
+    loss = torch.pow(mesh_laplacian - canonical_laplacian, 2)
     loss[..., :face_index] *= 10
     return loss.mean()
     loss = L.mm(V)

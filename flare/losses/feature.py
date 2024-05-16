@@ -10,16 +10,16 @@ def feature_regularization_loss(feature, gt_facs,  gt_lmks, model_scale, iterati
         gt_facs_sign = -(gt_facs[None] - gt_facs[:, None]) # shape of B, B, 53
         facs_diff = (facs[None] - facs[:, None]) # shape of B, B, 53
     
-        facs_loss = ((facs_diff * gt_facs_sign) + 1).reshape(bsize, -1).mean(dim=-1)
+        facs_loss = ((facs_diff * gt_facs_sign) + (gt_facs[None] - gt_facs[:, None]).abs()).pow(2).reshape(bsize, -1).mean(dim=-1)
     else:
         facs_loss = torch.tensor(0)
     
-    facs_regularization = facs_loss * 1e3 + (torch.pow(facs + 1e-2, 0.75)).reshape(bsize, -1).mean(dim=-1) 
+    facs_regularization = facs_loss * 1e2 + (torch.sqrt(facs + 1e-1)).reshape(bsize, -1).mean(dim=-1)  * 1e-2
 
     latent_regularization = (torch.pow(rotation, 2) * 1e-1 +  torch.pow(translation, 2) + torch.pow(scale - 1, 2)).reshape(bsize, -1).mean(dim=-1) 
 
     loss = facs_regularization + latent_regularization 
     
     if facs_weight > 0:
-        return loss + (torch.abs(facs - gt_facs)).reshape(bsize, -1).mean(dim=-1) * facs_weight
+        return loss + (torch.pow(facs - gt_facs, 2)).reshape(bsize, -1).mean(dim=-1) * facs_weight
     return loss

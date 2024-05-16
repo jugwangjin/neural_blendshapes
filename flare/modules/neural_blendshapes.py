@@ -30,21 +30,25 @@ class FACS2Deformation(nn.Module):
 
         self.bilienar_upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
 
-        noise_map_dim = 32
+        noise_map_dim = 128
         self.noise_map = torch.nn.Parameter(torch.randn(1, noise_map_dim, start_size, start_size) * 0.1)
+        
+        assert output_size % start_size == 0, 'output_size should be divisible by start_size'
 
         layers = []
         layers.append(nn.Conv2d(53 + noise_map_dim, feature_size, 3, 1, padding=1))
         while size < output_size:
-            layers.append(nn.Conv2d(feature_size, min(16, feature_size), 3, 1, padding=1))
+            layers.append(nn.Conv2d(feature_size, feature_size, 3, 1, padding=1))
             layers.append(nn.SiLU())
-            layers.append(nn.Conv2d(min(16, feature_size), min(16, feature_size), 3, 1, padding=1))
+            layers.append(nn.Conv2d(feature_size, feature_size, 3, 1, padding=1))
             layers.append(nn.SiLU())
             layers.append(self.bilienar_upsample)
-            feature_size = min(16, feature_size)
+            feature_size = feature_size
             size *= 2
         
-        layers.append(nn.Conv2d(min(16, feature_size), 3, 1, 1))
+        layers.append(nn.Conv2d(feature_size, feature_size, 1, 1))
+        layers.append(nn.SiLU())
+        layers.append(nn.Conv2d(feature_size, 3, 1, 1))
 
         self.layers = nn.Sequential(*layers)
 
@@ -57,7 +61,7 @@ class FACS2Deformation(nn.Module):
         return self.layers(torch.cat([facs, self.noise_map.repeat(B, 1, 1, 1)], dim=1))
 
 class FACS2EyeRotation(nn.Module):
-    def __init__(self, num_layers=3, num_hidden=32,):
+    def __init__(self, num_layers=1, num_hidden=16,):
         super().__init__()
         self.num_layers = num_layers
         self.num_hidden = num_hidden
@@ -95,10 +99,10 @@ class NeuralBlendshapes(nn.Module):
                 self.eyeball_parts_indices[self.eyeball_parts[v-4]].append(i)
 
         parts_deformer_spec = {
-            'face': {'output_size': 512, 'feature_size': 256, 'start_size': 32},
-            'head': {'output_size': 128, 'feature_size': 32, 'start_size': 32},
-            'gums': {'output_size': 128, 'feature_size': 32, 'start_size': 32},
-            'teeth': {'output_size': 128, 'feature_size': 32, 'start_size': 32},
+            'face': {'output_size': 1024, 'feature_size': 64, 'start_size': 256},
+            'head': {'output_size': 256, 'feature_size': 64, 'start_size': 64},
+            'gums': {'output_size': 256, 'feature_size': 64, 'start_size': 64},
+            'teeth': {'output_size': 256, 'feature_size': 64, 'start_size': 64},
         }
 
         self.head_parts = list(set(self.head_parts) - set(['head']))

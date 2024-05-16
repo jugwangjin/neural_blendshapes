@@ -150,7 +150,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "feature_regularization": args.weight_feature_regularization,
         # "deformation_map_regularization": 1e-5,
         "cbuffers_regularization": args.weight_cbuffers_regularization,
-        "synthetic": args.weight_synthetic,
+        # "synthetic": args.weight_synthetic,
     }
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
     print(loss_weights)
@@ -169,7 +169,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # ==============================================================================================
 
 
-    epochs = ((args.iterations // 4) // len(dataloader_train)) + 1
+    epochs = ((args.iterations // 5) // len(dataloader_train)) + 1
     iteration = 0
     
     progress_bar = tqdm(range(epochs))
@@ -182,7 +182,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                             # device='cuda' if torch.cuda.is_available() else 'cpu')
 
     print('initializing encoder')    
-    encoder_initialize_optim = torch.optim.Adam(neural_blendshapes.encoder.parameters(), lr=args.lr_encoder)
 
     import wandb
     if 'debug' not in run_name:
@@ -210,14 +209,29 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             return_dict = neural_blendshapes(image_input=False, features=features)
             losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive)
 
-            loss = (loss + losses['ict'] + losses['random_ict'] + losses['ict_landmark'] + losses['ict_landmark_closure']) * 4
+            losses['ict'] *= loss_weights['ict']
+            losses['random_ict'] *= loss_weights['random_ict']
+            losses['ict_landmark'] *= loss_weights['ict_landmark']
+            losses['ict_landmark_closure'] *= loss_weights['ict_landmark_closure']
+
+            loss = loss + (losses['ict'] + losses['random_ict'] + losses['ict_landmark_closure'] + losses['ict_landmark']).mean()
 
             optimizer_neural_blendshapes.zero_grad()
-            loss.mean().backward() 
+            loss.backward() 
             optimizer_neural_blendshapes.step()
 
-            progress_bar.set_postfix({'loss': loss.mean().detach().cpu().item()})
+            progress_bar.set_postfix({'loss': loss.mean().detach().cpu().item(), 'ict': losses['ict'].mean().detach().cpu().item(), \
+                                      'r_ict': losses['random_ict'].mean().detach().cpu().item(), 'l': \
+                                        losses['ict_landmark'].mean().detach().cpu().item(), 'l_closure': losses['ict_landmark_closure'].mean().detach().cpu().item()})
 
+    # del features, landmark, blendshape, transform_matrix
+    # del input_image
+    # del views_subset
+    # del loss
+    # del return_dict
+    # del losses
+
+    losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
 
     epochs = (args.iterations // len(dataloader_train)) + 1
     iteration = 0
@@ -276,21 +290,22 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive, fullhead_template=pretrain)
             
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict], 
-                                                                           views_subset["landmark"], neural_blendshapes.scale, iteration, facs_adaptive, facs_weight=1e3 if pretrain else 0)
+                                                                           views_subset["landmark"], neural_blendshapes.scale, iteration, facs_adaptive, facs_weight=0)
             # losses['feature_regularization'] += torch.mean(torch.pow(10 * return_dict['full_template_deformation'][neural_blendshapes.head_index:], 2))
             
             with torch.no_grad():
-                shading_decay = torch.exp(-(losses['landmark'] + losses['closure'] + losses['mask']))
-                synthetic_decay = torch.exp(-(losses['ict'] + losses['random_ict'] + losses['landmark'] + losses['closure'] + losses['mask']))
+                shading_decay = torch.exp(-(losses['landmark'] + losses['closure'] + losses['mask'])).detach()
             # photometric losses decay by overall geometric loss
             # if the geometric loss is 0, the photometric losses are not decayed
             # exponentially decay the photometric losses by the overall geometric loss
             losses['shading'] = losses['shading'] * shading_decay
             losses['perceptual_loss'] = losses['perceptual_loss'] * shading_decay
+            torch.cuda.empty_cache()
 
             # synthetic loss
-            losses['synthetic'] = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, args.batch_size, device) 
+            # losses['synthetic'] = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, 1, device) 
 
+            torch.cuda.empty_cache()
 
 
             loss = torch.tensor(0., device=device) 
