@@ -30,8 +30,8 @@ class FACS2Deformation(nn.Module):
 
         self.bilienar_upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
 
-        noise_map_dim = 128
-        self.noise_map = torch.nn.Parameter(torch.randn(1, noise_map_dim, start_size, start_size) * 0.1)
+        noise_map_dim = 32
+        self.noise_map = torch.nn.Parameter(torch.randn(1, noise_map_dim, start_size, start_size))
         
         assert output_size % start_size == 0, 'output_size should be divisible by start_size'
 
@@ -99,10 +99,10 @@ class NeuralBlendshapes(nn.Module):
                 self.eyeball_parts_indices[self.eyeball_parts[v-4]].append(i)
 
         parts_deformer_spec = {
-            'face': {'output_size': 1024, 'feature_size': 64, 'start_size': 256},
-            'head': {'output_size': 256, 'feature_size': 64, 'start_size': 64},
-            'gums': {'output_size': 256, 'feature_size': 64, 'start_size': 64},
-            'teeth': {'output_size': 256, 'feature_size': 64, 'start_size': 64},
+            'face': {'output_size': 1024, 'feature_size': 32, 'start_size': 512},
+            'head': {'output_size': 256, 'feature_size': 32, 'start_size': 128},
+            'gums': {'output_size': 128, 'feature_size': 32, 'start_size': 64},
+            'teeth': {'output_size': 128, 'feature_size': 32, 'start_size': 64},
         }
 
         self.head_parts = list(set(self.head_parts) - set(['head']))
@@ -162,7 +162,7 @@ class NeuralBlendshapes(nn.Module):
         part_deformations = {}
         for part in self.head_parts:
             part_deformations[part] = self.part_deformers[part](facs)
-            expression_deformation[:, self.head_parts_indices[part]] = torch.nn.functional.grid_sample(part_deformations[part], self.uv_template_for_deformer[:, :, self.head_parts_indices[part]].repeat(B, 1, 1, 1), align_corners=False, mode='bilinear')[:, :, 0].permute(0, 2, 1) * 0.1
+            expression_deformation[:, self.head_parts_indices[part]] = torch.nn.functional.grid_sample(part_deformations[part], self.uv_template_for_deformer[:, :, self.head_parts_indices[part]].repeat(B, 1, 1, 1), align_corners=False, mode='bilinear')[:, :, 0].permute(0, 2, 1)
 
         for part in self.eyeball_parts:
             euler_angles = self.eyeball_rotation_estimator[part](facs) # shape of B, 3

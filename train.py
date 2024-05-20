@@ -148,7 +148,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "ict_landmark_closure": args.weight_ict_closure,
         "random_ict": args.weight_ict,
         "feature_regularization": args.weight_feature_regularization,
-        # "deformation_map_regularization": 1e-5,
+        "deformation_map_regularization": 1e-3,
         "cbuffers_regularization": args.weight_cbuffers_regularization,
         # "synthetic": args.weight_synthetic,
     }
@@ -188,7 +188,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         wandb_name = args.wandb_name if args.wandb_name is not None else run_name
         wandb.init(project="neural_blendshape", name=wandb_name, config=args)
     for epoch in progress_bar:
-        for iter_, views_subset in enumerate(dataloader_train):
+        for iter_, views_subset in tqdm(enumerate(dataloader_train)):
             
             input_image = views_subset["img"].permute(0, 3, 1, 2).to(device)
             landmark = views_subset['mp_landmark'].reshape(-1, 1434) # 478*3
@@ -280,11 +280,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
             losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices, neural_blendshapes.face_index)
 
-            # losses['deformation_map_regularization'] = torch.zeros(deformed_vertices.shape[0], device=device)
-            # for map in return_dict['deformation_maps']:
-            #     deformation_map = return_dict['deformation_maps'][map]
-            #     losses['deformation_map_regularization'] += torch.mean(torch.pow(deformation_map[:, :, :-1, :] - deformation_map[:, :, 1:, :], 2), dim=[1,2,3]) + \
-            #                                                 torch.mean(torch.pow(deformation_map[:, :, :, :-1] - deformation_map[:, :, :, 1:], 2), dim=[1,2,3])
+            losses['deformation_map_regularization'] = torch.zeros(deformed_vertices.shape[0], device=device)
+            for map in return_dict['deformation_maps']:
+                deformation_map = return_dict['deformation_maps'][map]
+                losses['deformation_map_regularization'] += torch.mean(torch.pow(deformation_map[:, :, :-1, :] - deformation_map[:, :, 1:, :], 2), dim=[1,2,3]) + \
+                                                            torch.mean(torch.pow(deformation_map[:, :, :, :-1] - deformation_map[:, :, :, 1:], 2), dim=[1,2,3])
                 
             losses['cbuffers_regularization'] = cbuffers_regularization(cbuffers)
             losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive, fullhead_template=pretrain)

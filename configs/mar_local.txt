@@ -1,4 +1,4 @@
-run_name = conv_mar_v7_synthetic
+run_name = conv_mar_v8_synthetic
 
 input_dir = ../flare_data/marcel
 train_dir = ["MVI_1797", "MVI_1801"]
@@ -29,10 +29,10 @@ weight_laplacian_regularization = 1e-1
 
 weight_normal = 0.25
 weight_normal_laplacian = 1
-weight_landmark = 30
-weight_closure = 30
-weight_ict_closure = 30
-weight_ict_landmark = 30
+weight_landmark = 150
+weight_closure = 150
+weight_ict_closure = 150
+weight_ict_landmark = 150
 weight_ict = 50
 weight_random_ict = 50
 
