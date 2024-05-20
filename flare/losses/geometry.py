@@ -37,13 +37,18 @@ def laplacian_loss(mesh: Mesh, canonical_vertices, face_index):
     # print(mesh_laplacian.shape)
     # exit()
 
-    loss = torch.pow(mesh_laplacian - canonical_laplacian, 2)
-    loss[..., :face_index] *= 10
+    loss = torch.pow(mesh_laplacian - canonical_laplacian, 2) * 1e2
+
+    # add Euclidean norm of the vertex coordinates
+    loss += torch.pow((V - canonical_vertices).norm(dim=-1), 2)
+
+    loss[..., :face_index] *= 1e2
     return loss.mean()
     loss = L.mm(V)
     loss = loss.norm(dim=1)**2
     
     return loss.mean()
+
 
 def normal_consistency_loss(mesh: Mesh):
     """ Compute the normal consistency term as the cosine similarity between neighboring face normals.

@@ -27,10 +27,9 @@ class FACS2Deformation(nn.Module):
         self.start_size = start_size
 
         size = self.start_size
+        self.bilinear_upsample = nn.PixelShuffle(2)
 
-        self.bilienar_upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-
-        noise_map_dim = 32
+        noise_map_dim = feature_size
         self.noise_map = torch.nn.Parameter(torch.randn(1, noise_map_dim, start_size, start_size))
         
         assert output_size % start_size == 0, 'output_size should be divisible by start_size'
@@ -42,11 +41,11 @@ class FACS2Deformation(nn.Module):
             layers.append(nn.SiLU())
             layers.append(nn.Conv2d(feature_size, feature_size, 3, 1, padding=1))
             layers.append(nn.SiLU())
-            layers.append(self.bilienar_upsample)
-            feature_size = feature_size
+            layers.append(self.bilinear_upsample)
+            feature_size = int(feature_size/4)
             size *= 2
         
-        layers.append(nn.Conv2d(feature_size, feature_size, 1, 1))
+        layers.append(nn.Conv2d(feature_size, feature_size, 3, 1, 1))
         layers.append(nn.SiLU())
         layers.append(nn.Conv2d(feature_size, 3, 1, 1))
 
@@ -61,7 +60,7 @@ class FACS2Deformation(nn.Module):
         return self.layers(torch.cat([facs, self.noise_map.repeat(B, 1, 1, 1)], dim=1))
 
 class FACS2EyeRotation(nn.Module):
-    def __init__(self, num_layers=1, num_hidden=16,):
+    def __init__(self, num_layers=3, num_hidden=16,):
         super().__init__()
         self.num_layers = num_layers
         self.num_hidden = num_hidden
@@ -80,9 +79,9 @@ class FACS2EyeRotation(nn.Module):
         return facs
 
 class NeuralBlendshapes(nn.Module):
-    def __init__(self, vertex_parts):
+    def __init__(self, vertex_parts, ict_facekit):
         super().__init__()
-        self.encoder = ResnetEncoder(53+6)
+        self.encoder = ResnetEncoder(53+6, ict_facekit)
 
         self.head_parts = ['face', 'head', 'gums', 'teeth']
         self.eyeball_parts = ['left_eyeball', 'right_eyeball']
@@ -98,14 +97,16 @@ class NeuralBlendshapes(nn.Module):
             else:
                 self.eyeball_parts_indices[self.eyeball_parts[v-4]].append(i)
 
+        self.face_index = 9409     
+
         parts_deformer_spec = {
-            'face': {'output_size': 1024, 'feature_size': 32, 'start_size': 512},
-            'head': {'output_size': 256, 'feature_size': 32, 'start_size': 128},
-            'gums': {'output_size': 128, 'feature_size': 32, 'start_size': 64},
-            'teeth': {'output_size': 128, 'feature_size': 32, 'start_size': 64},
+            'face': {'output_size': 1024, 'feature_size': 256, 'start_size': 256},
+            'head': {'output_size': 512, 'feature_size': 64, 'start_size': 128},
+            'gums': {'output_size': 128, 'feature_size': 64, 'start_size': 32},
+            'teeth': {'output_size': 128, 'feature_size': 64, 'start_size': 32},
         }
 
-        self.head_parts = list(set(self.head_parts) - set(['head']))
+        # self.head_parts = list(set(self.head_parts) - set(['head']))
         self.part_deformers = nn.ModuleDict()
         for part in self.head_parts:
             if part in parts_deformer_spec:
@@ -156,13 +157,14 @@ class NeuralBlendshapes(nn.Module):
             self.eyeball_rotation_origins[part].data = template[self.eyeball_parts_indices[part]].mean(dim=0)
 
 
+
     def deform_expression(self, facs, template_deformation):
         B = facs.shape[0]
         expression_deformation = torch.zeros(B, self.template.shape[0], 3, device=facs.device)
         part_deformations = {}
         for part in self.head_parts:
             part_deformations[part] = self.part_deformers[part](facs)
-            expression_deformation[:, self.head_parts_indices[part]] = torch.nn.functional.grid_sample(part_deformations[part], self.uv_template_for_deformer[:, :, self.head_parts_indices[part]].repeat(B, 1, 1, 1), align_corners=False, mode='bilinear')[:, :, 0].permute(0, 2, 1)
+            expression_deformation[:, self.head_parts_indices[part]] = torch.nn.functional.grid_sample(part_deformations[part], self.uv_template_for_deformer[:, :, self.head_parts_indices[part]].repeat(B, 1, 1, 1), align_corners=False, mode='bilinear')[:, :, 0].permute(0, 2, 1) * 0.1
 
         for part in self.eyeball_parts:
             euler_angles = self.eyeball_rotation_estimator[part](facs) # shape of B, 3
@@ -226,8 +228,8 @@ class NeuralBlendshapes(nn.Module):
         torch.save(data, path)  
 
 
-def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, device='cuda'):
-    neural_blendshapes = NeuralBlendshapes(vertex_parts)
+def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_facekit=None, device='cuda'):
+    neural_blendshapes = NeuralBlendshapes(vertex_parts, ict_facekit)
     neural_blendshapes.to(device)
 
     import os
