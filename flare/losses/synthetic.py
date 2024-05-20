@@ -38,7 +38,7 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
 
         d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
 
-        gbuffers = renderer.render_batch(views_subset['camera'], deformed_vertices.contiguous(), d_normals, 
+        gbuffers = renderer.render_batch(views_subset['camera'][:batch_size], deformed_vertices.contiguous(), d_normals, 
                                 channels=channels_gbuffer, with_antialiasing=True, 
                                 canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh) 
         

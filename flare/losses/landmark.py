@@ -12,7 +12,7 @@ def closure_loss_block(gt, estimated, pairs):
     estimated_closure = estimated[:, pairs[:, 0], :2] - estimated[:, pairs[:, 1], :2]
     confidence = torch.minimum(gt[:, pairs[:, 0], -1:], gt[:, pairs[:, 1], -1:])
     
-    closure_loss = (torch.abs(estimated_closure - gt_closure) * confidence).reshape(gt_closure.shape[0], -1).mean(dim=-1)
+    closure_loss = (torch.pow(estimated_closure - gt_closure, 2) * confidence).reshape(gt_closure.shape[0], -1).mean(dim=-1)
     return closure_loss
 
 def landmark_loss(ict_facekit, gbuffers, views_subset, features, nueral_blendshapes, lmk_adaptive, device):
@@ -37,9 +37,9 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, features, nueral_blendsha
     detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
     detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
 
-    landmark_loss = (torch.abs(detected_landmarks[:, 17:, :2] - landmarks_on_clip_space[:, 17:, :2]) * detected_landmarks[:, 17:, -1:]).reshape(detected_landmarks.shape[0], -1).mean(dim=-1)
+    landmark_loss = (torch.pow(detected_landmarks[:, 17:, :2] - landmarks_on_clip_space[:, 17:, :2], 2) * detected_landmarks[:, 17:, -1:]).reshape(detected_landmarks.shape[0], -1).mean(dim=-1)
 
-    eye_closure_loss = closure_loss_block(detected_landmarks, landmarks_on_clip_space, EYELID_PAIRS) * 8
+    eye_closure_loss = closure_loss_block(detected_landmarks, landmarks_on_clip_space, EYELID_PAIRS) * 32
     lip_closure_loss = closure_loss_block(detected_landmarks, landmarks_on_clip_space, LIP_PAIRS)
 
     closure_loss = eye_closure_loss + lip_closure_loss

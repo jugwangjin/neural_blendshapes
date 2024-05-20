@@ -25,7 +25,7 @@ def align_to_canonical(source, target, landmark_indices):
 def closure_loss_fun(gt_closure, deformed_closure, confidence):
     gt_closure_distance = torch.norm(gt_closure, dim=-1)
     deformed_closure_distance = torch.norm(deformed_closure, dim=-1)
-    return torch.mean(torch.abs(gt_closure_distance - deformed_closure_distance) * confidence)
+    return torch.mean(torch.pow(gt_closure_distance - deformed_closure_distance, 2) * confidence)
 
 
 def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive, fullhead_template=False):
@@ -77,9 +77,9 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
     detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
 
     # ict jaw line landmark positions does not match with common 68 landmarks
-    ict_landmark_loss = (torch.abs(detected_landmarks[:, 17:, :2] - ict_landmarks_clip_space[:, 17:, :2]) * detected_landmarks[:, 17:, -1:]).reshape(detected_landmarks.shape[0], -1).mean(dim=-1)
+    ict_landmark_loss = (torch.pow(detected_landmarks[:, 17:, :2] - ict_landmarks_clip_space[:, 17:, :2], 2) * detected_landmarks[:, 17:, -1:]).reshape(detected_landmarks.shape[0], -1).mean(dim=-1)
 
-    eye_closure_loss = closure_loss_block(detected_landmarks, ict_landmarks_clip_space, EYELID_PAIRS) * 8
+    eye_closure_loss = closure_loss_block(detected_landmarks, ict_landmarks_clip_space, EYELID_PAIRS) * 32
     lip_closure_loss = closure_loss_block(detected_landmarks, ict_landmarks_clip_space, LIP_PAIRS)
 
     closure_loss = eye_closure_loss + lip_closure_loss

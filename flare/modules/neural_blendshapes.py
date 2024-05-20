@@ -20,7 +20,7 @@ class NeuralBlendshapes(nn.Module):
         super().__init__()
         self.encoder = ResnetEncoder(53+6)
 
-        self.coords_encoder, dim = get_embedder(6, input_dims=6)
+        self.coords_encoder, dim = get_embedder(5, input_dims=6)
 
 
         self.expression_deformer = nn.Sequential(
@@ -38,7 +38,8 @@ class NeuralBlendshapes(nn.Module):
                                     )
         
         self.only_coords_encoder, dim = get_embedder(2, input_dims=3)
-        
+
+        self.face_index = 9409     
    
         self.template_deformer = nn.Sequential(
                     nn.Linear(dim, 64),
