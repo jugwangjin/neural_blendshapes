@@ -140,12 +140,20 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
 
 
-    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, device=device) 
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
     neural_blendshapes.set_template(ict_canonical_mesh.vertices,
                                     ict_facekit.uv_neutral_mesh, ict_facekit.vertex_parts)
 
     neural_blendshapes = neural_blendshapes.to(device)
+
+    min_facs = dataset_train.min_facs[ict_facekit.mediapipe_to_ict]
+    max_facs = dataset_train.max_facs[ict_facekit.mediapipe_to_ict]
+    range_facs = max_facs - min_facs
+    # apply min_facs and range_facs to neural_blendshapes.encoder.min_range / max_range, where range_facs > 0.2
+    indices = range_facs > 0.2
+    neural_blendshapes.encoder.min_range.data[indices] = min_facs[indices].to(device)
+    neural_blendshapes.encoder.max_range.data[indices] = range_facs[indices].to(device)
 
     lmk_adaptive = None
     facs_adaptive = None
@@ -248,7 +256,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # T R A I N I N G
     # ==============================================================================================
 
-    epochs = ((args.iterations // 5) // len(dataloader_train)) + 1
+    # epochs = 0
+    epochs = ((args.iterations // 3) // len(dataloader_train)) + 1
     iteration = 0
     
     progress_bar = tqdm(range(epochs))
@@ -262,28 +271,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     print('initializing encoder')    
 
-    import wandb
-    if 'debug' not in run_name:
-        wandb_name = args.wandb_name if args.wandb_name is not None else run_name
-        wandb.init(project="neural_blendshape", name=wandb_name, config=args)
     for epoch in progress_bar:
         for iter_, views_subset in tqdm(enumerate(dataloader_train)):
-            
-            input_image = views_subset["img"].permute(0, 3, 1, 2).to(device)
-            landmark = views_subset['mp_landmark'].reshape(-1, 1434) # 478*3
-            blendshape = views_subset['mp_blendshape'].reshape(-1, 52)
-            transform_matrix = views_subset['mp_transform_matrix'].reshape(-1, 16)
-
-            features = torch.zeros(input_image.size(0), 128, device=device)
-            features = torch.cat([features, landmark, blendshape, transform_matrix], dim=-1)
-            features = neural_blendshapes.encoder.tail(features)
-
-            features[..., :53] = torch.nn.functional.tanh(features[..., :53]) / 2. + 0.5
-            
-            features[..., 58] = 0
-            gt = views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict]
-
-            loss = torch.nn.functional.l1_loss(features[..., :53], gt[..., :53])
+            features = neural_blendshapes.encoder(image=None, views=views_subset)
 
             return_dict = neural_blendshapes(image_input=False, features=features)
             losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive)
@@ -293,17 +283,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['ict_landmark'] *= loss_weights['ict_landmark']
             losses['ict_landmark_closure'] *= loss_weights['ict_landmark_closure']
 
-            loss = loss + (losses['ict'] + losses['random_ict'] + losses['ict_landmark_closure'] + losses['ict_landmark']).mean()
+            loss = (losses['ict'] + losses['random_ict'] + losses['ict_landmark_closure'] + losses['ict_landmark']).mean()
 
             optimizer_neural_blendshapes.zero_grad()
             loss.backward() 
             optimizer_neural_blendshapes.step()
 
-            progress_bar.set_postfix({'loss': loss.mean().detach().cpu().item(), 'ict': losses['ict'].mean().detach().cpu().item(), \
+            progress_bar.set_postfix({'ict': losses['ict'].mean().detach().cpu().item(), \
                                       'r_ict': losses['random_ict'].mean().detach().cpu().item(), 'l': \
                                         losses['ict_landmark'].mean().detach().cpu().item(), 'l_closure': losses['ict_landmark_closure'].mean().detach().cpu().item()})
-
-
     # del features
     # del gt
     # del return_dict
@@ -400,7 +388,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 
             
             with torch.no_grad():
-                shading_decay = torch.exp(-(losses['landmark'] + losses['closure'] + losses['mask'])).detach()
+                shading_decay = torch.exp(-(losses['landmark'] * loss_weights['landmark'] + losses['closure'] * loss_weights['closure'] + losses['mask'] * loss_weights['mask'])).detach()
             # photometric losses decay by overall geometric loss
             # if the geometric loss is 0, the photometric losses are not decayed
             # exponentially decay the photometric losses by the overall geometric loss

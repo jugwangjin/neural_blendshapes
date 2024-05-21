@@ -13,7 +13,7 @@ HALF_PI = torch.pi / 2
 def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe, ict_facekit, canonical_mesh, batch_size, device):
     # sample random feature
     with torch.no_grad():
-        random_facs = torch.zeros(batch_size, neural_blendshapes.encoder.outsize, device=device)
+        random_facs = torch.zeros(batch_size, 53+6, device=device)
         for b in range(batch_size):
             weights = torch.tensor([1/i for i in range(1, 53)])
             random_integer = torch.multinomial(weights, 1).item() + 1
@@ -42,12 +42,18 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
                                 channels=channels_gbuffer, with_antialiasing=True, 
                                 canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh) 
         
-        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, True, lgt)
+        for k in views_subset:
+            views_subset[k] = views_subset[k][:batch_size]
+
+        del random_facs, random_pose, random_indices, return_dict, deformed_vertices, d_normals
+
+        pred_color_masked, _, _ = shader.shade(gbuffers, views_subset, mesh, True, lgt)
         
         uint_imgs = convert_uint(pred_color_masked) # B, C, H, W
 
         encoder_input = dataset_util.srgb_to_rgb(torch.from_numpy(uint_imgs)/255.).permute(0, 3, 1, 2).to(device)
         
+        del gbuffers, pred_color_masked, mesh
 
     losses = []
     for i in range(batch_size):

@@ -191,6 +191,9 @@ class DatasetLoader(Dataset):
         importance = importance / (torch.amax(importance) / 1.5)
         self.importance = list(importance.clamp(0.05, 1).cpu().data.numpy())
 
+        self.min_facs = torch.amin(all_facs, dim=0)
+        self.max_facs = torch.amax(all_facs, dim=0)
+
         # importance = torch.zeros(len_img)
         # for idx in tqdm(range(len_img), desc='computing importance'):
         #     json_dict = self.all_img_path[idx % self.len_img]

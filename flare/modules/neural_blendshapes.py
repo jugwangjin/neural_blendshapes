@@ -16,9 +16,11 @@ def initialize_weights(m, gain=0.1):
             param.data.zero_()
 
 class NeuralBlendshapes(nn.Module):
-    def __init__(self):
+    def __init__(self, ict_facekit):
         super().__init__()
-        self.encoder = ResnetEncoder(53+6)
+        self.encoder = ResnetEncoder(53+6, ict_facekit)
+
+        self.ict_facekit=ict_facekit
 
         self.coords_encoder, dim = get_embedder(5, input_dims=6)
 
@@ -40,6 +42,8 @@ class NeuralBlendshapes(nn.Module):
         self.only_coords_encoder, dim = get_embedder(2, input_dims=3)
 
         self.face_index = 9409     
+
+        self.eyeball_index = 21451
    
         self.template_deformer = nn.Sequential(
                     nn.Linear(dim, 64),
@@ -53,6 +57,14 @@ class NeuralBlendshapes(nn.Module):
                     nn.Linear(64,3)
         )
         
+        self.eyeball_deformer = nn.Sequential(
+                                    nn.Linear(dim+53, 64),
+                                    nn.SiLU(),
+                                    nn.Linear(64, 64),
+                                    nn.SiLU(),
+                                    nn.Linear(64, 3)
+                                    )
+
         self.pose_weight = nn.Sequential(
                     nn.Linear(dim, 32),
                     nn.SiLU(),
@@ -61,18 +73,20 @@ class NeuralBlendshapes(nn.Module):
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
+
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
         self.scale = torch.nn.Parameter(torch.tensor([1.]))
 
         self.pose_weight[-2].bias.data[0] = 1.
 
 
-
-
     def set_template(self, template, uv_template, vertex_parts=None, full_shape=None, head_indices=None, eyeball_indices=None):
         self.register_buffer('template', torch.cat([template, uv_template[0] - 0.5], dim=1))     
         self.register_buffer('encoded_vertices', self.coords_encoder(self.template*3))
         self.register_buffer('encoded_only_vertices', self.only_coords_encoder(template*3))
+
+        self.num_head_deformer = self.eyeball_index
+        self.num_eye_deformer = self.template.shape[0] - self.eyeball_index
 
 
     def forward(self, image=None, views=None, features=None, image_input=True):
@@ -90,12 +104,16 @@ class NeuralBlendshapes(nn.Module):
 
         # template_deformation = self.template_deformation
 
-        deformer_input = torch.cat([self.encoded_vertices[None].repeat(bsize, 1, 1), \
-                                    features[:, None, :53].repeat(1, self.encoded_vertices.shape[0], 1)], dim=2)
+        deformer_input = torch.cat([self.encoded_vertices[None, :self.eyeball_index].repeat(bsize, 1, 1), \
+                                    features[:, None, :53].repeat(1, self.num_head_deformer, 1)], dim=2)
 
         B, V, _ = deformer_input.shape
 
         expression_deformation = self.expression_deformer(deformer_input) * 0.1
+        eyeball_deformation = self.eyeball_deformer(torch.cat([self.encoded_only_vertices[None, self.eyeball_index:].repeat(bsize, 1, 1), \
+                                    features[:, None, :53].repeat(1, self.num_eye_deformer, 1)], dim=2)) * 0.1
+        
+        expression_deformation = torch.cat([expression_deformation, eyeball_deformation], dim=1)
 
         expression_vertices = self.template[None][..., :3] + expression_deformation + template_deformation[None]
 
@@ -144,8 +162,8 @@ class NeuralBlendshapes(nn.Module):
         torch.save(data, path)  
 
 
-def get_neural_blendshapes(model_path=None, train=True, device='cuda'):
-    neural_blendshapes = NeuralBlendshapes()
+def get_neural_blendshapes(model_path=None, train=True, ict_facekit=None, device='cuda'):
+    neural_blendshapes = NeuralBlendshapes(ict_facekit)
     neural_blendshapes.to(device)
 
     import os
