@@ -179,8 +179,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # ==============================================================================================
 
 
-    epochs = 0
-    # epochs = 0((args.iterations // 5) // len(dataloader_train)) + 1
+    # epochs = 0
+    epochs = ((args.iterations // 3) // len(dataloader_train)) + 1
     iteration = 0
     
     progress_bar = tqdm(range(epochs))
@@ -455,7 +455,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration, save_name='ict')
 
-
+                    del return_dict_, ict, deformed_verts, d_normals, debug_rgb_pred,
 
                     del debug_gbuffer, debug_cbuffers
             if iteration == 1 or iteration % (args.visualization_frequency * 10) == 0:

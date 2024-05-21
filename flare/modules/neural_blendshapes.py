@@ -47,6 +47,8 @@ class FACS2Deformation(nn.Module):
         
         layers.append(nn.Conv2d(feature_size, feature_size, 3, 1, 1))
         layers.append(nn.SiLU())
+        layers.append(nn.Conv2d(feature_size, feature_size, 3, 1, 1))
+        layers.append(nn.SiLU())
         layers.append(nn.Conv2d(feature_size, 3, 1, 1))
 
         self.layers = nn.Sequential(*layers)
@@ -100,7 +102,7 @@ class NeuralBlendshapes(nn.Module):
         self.face_index = 9409     
 
         parts_deformer_spec = {
-            'face': {'output_size': 1024, 'feature_size': 256, 'start_size': 256},
+            'face': {'output_size': 1024, 'feature_size': 128, 'start_size': 256},
             'head': {'output_size': 512, 'feature_size': 64, 'start_size': 128},
             'gums': {'output_size': 128, 'feature_size': 64, 'start_size': 32},
             'teeth': {'output_size': 128, 'feature_size': 64, 'start_size': 32},
