@@ -54,7 +54,7 @@ def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, de
     ## ============== Rasterize ==============================
     gbuffers = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
                         channels=channels_gbuffer, with_antialiasing=True, 
-                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
+                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh, vertex_labels=ict_facekit.vertex_labels)
     
     ## ============== predict color ==============================
     rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffers, views, mesh, args.finetune_color, lgt)
@@ -73,7 +73,7 @@ def run_relight(args, mesh, views, ict_facekit, neural_blendshapes, shader, rend
     ## ============== Rasterize ==============================
     gbuffers = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
                         channels=channels_gbuffer, with_antialiasing=True, 
-                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
+                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh, vertex_labels=ict_facekit.vertex_labels)
     
     ## ============== predict color ==============================
     relit_imgs, cbuffers, gbuffer_mask = shader.relight(gbuffers, views, mesh, args.finetune_color, lgt_list)

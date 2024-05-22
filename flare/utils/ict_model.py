@@ -26,6 +26,21 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.head_indices = model_dict['head_indices']
 
         vertex_parts = model_dict['vertex_parts']
+
+        parts_indices = {}
+        for n in set(vertex_parts):
+            parts_indices[n] = []
+
+        for i, p in enumerate(vertex_parts):
+            parts_indices[p].append(i)
+
+        self.parts_indices = parts_indices
+
+        vertex_labels = torch.zeros(len(vertex_parts), len(list(set(vertex_parts))))
+        for i in range(len(vertex_parts)):
+            vertex_labels[i, vertex_parts[i]] = 1
+            # print(i, vertex_parts[i])
+        self.register_buffer('vertex_labels', vertex_labels[None])
         self.vertex_parts = vertex_parts
 
         # print(neutral_mesh.shape, uv_neutral_mesh.shape, expression_shape_modes.shape, identity_shape_modes.shape, faces.shape, uv_faces.shape, uvs.shape, len(vertex_parts))
@@ -35,6 +50,8 @@ class ICTFaceKitTorch(torch.nn.Module):
         
         uv_neutral_mesh = torch.cat([torch.tensor(uv_neutral_mesh, dtype=torch.float32), vertex_parts[..., None]], dim=1)
 
+        # print(vertex_labels.shape, uv_neutral_mesh.shape)
+
         self.expression_names = model_dict['expression_names']
         self.identity_names = model_dict['identity_names']
         self.model_config = model_dict['model_config']
@@ -42,7 +59,8 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.register_buffer('neutral_mesh', torch.tensor(neutral_mesh, dtype=torch.float32)[None])
         self.register_buffer('uv_neutral_mesh', torch.tensor(uv_neutral_mesh, dtype=torch.float32)[None].clone().detach())
 
-        print(torch.min(self.uv_neutral_mesh), torch.max(self.uv_neutral_mesh))
+
+        # print(torch.min(self.uv_neutral_mesh), torch.max(self.uv_neutral_mesh))
 
         self.register_buffer('faces', torch.tensor(faces, dtype=torch.long))
         self.register_buffer('uv_faces', torch.tensor(uv_faces, dtype=torch.long))
@@ -75,6 +93,7 @@ class ICTFaceKitTorch(torch.nn.Module):
         # with torch.no_grad():
         canonical = self.forward(expression_weights=self.expression, identity_weights=self.identity, to_canonical=True)
         self.register_buffer('canonical', canonical)
+        self.register_buffer('neutral_mesh_canonical', self.to_canonical_space(self.neutral_mesh).clone().detach())
 
         # self.debug_indices()
 

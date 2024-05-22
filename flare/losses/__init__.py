@@ -8,3 +8,4 @@ from .ict import *
 from .normal import *
 from .feature import *
 from .synthetic import *
+from .segmentation import *

@@ -83,16 +83,58 @@ def _load_img(fn):
 def _load_semantic(fn):
     img = imageio.imread(fn, mode='F')
     h, w = img.shape
-    semantics = np.zeros((h, w, 9))
-    semantics[:, :, 0] = ((img == 1) + (img == 10) + (img == 8) + (img == 7) + (img == 14) + (img == 6) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
-    semantics[:, :, 1] = ((img == 4) + (img == 5)) >= 1 # left eye, right eye
-    semantics[:, :, 2] = ((img == 2) + (img == 3)) >= 1 # left eyebrow, right eyebrow
-    semantics[:, :, 3] = (img == 11) # mouth interior
-    # semantics[:, :, 4] = (img == 12)  # upper lip
-    # semantics[:, :, 5] = (img == 13)  # lower lip
-    semantics[:, :, 5] = ((img == 17) + (img == 9)) >= 1 # hair
-    semantics[:, :, 4] = ((img == 15) + (img == 16)) >= 1 # cloth, necklace
-    semantics[:, :, 8] = 1. - np.sum(semantics[:, :, :8], 2) # background
+    semantics = np.zeros((h, w, 6))
+    # Labels that ICT have
+    # face, head/neck/, left eye, right eye, mouth interior
+    # face + eyebrow + nose + upper lip + lower lip + ears +  == ICT-FaceKit.full_face_area
+    # left eye == ICT_FaceKit.eyeball_left
+    # right eye == ICT_FaceKit.eyeball_right
+    # mouth interior == ICT_FaceKit.mouth_interior == ICT_Facekit.outh_socket + ICT_Facekit.gums_and_tongue + ICT_FaceKit.teeth
+    # hair + cloth + necklace + neck == ICT_FaceKit.head_and_neck
+    # What I missed
+    # part_idx = {
+    #     'background': 0,
+    #     'skin': 1,
+    #     'l_brow': 2,
+    #     'r_brow': 3,
+    #     'l_eye': 4,
+    #     'r_eye': 5,
+    #     'eye_g': 6, # eyeglasses, ignored
+    #     'l_ear': 7,
+    #     'r_ear': 8,
+    #     'ear_r': 9,
+    #     'nose': 10,
+    #     'mouth': 11,
+    #     'u_lip': 12,
+    #     'l_lip': 13,
+    #     'neck': 14,
+    #     'neck_l': 15, # necklace
+    #     'cloth': 16,
+    #     'hair': 17,
+    #     'hat': 18
+    # }
+    # full face area : skin + nose + ears + left eyebwow + right eyebrow + upper lip + lower lip 
+    semantics[:, :, 0] = ((img == 1) + (img == 10) + (img == 9) + (img == 8) + (img == 7) + (img == 2) + (img == 3) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
+    # left eyeball
+    semantics[:, :, 1] = (img == 4) >= 1
+    # right eyeball
+    semantics[:, :, 2] = (img == 5) >= 1
+    # mouth interior
+    semantics[:, :, 3] = (img == 11) >= 1
+    # hair + cloth + necklace + neck
+    semantics[:, :, 4] = ((img == 17) + (img == 16) + (img == 15) + (img == 14)) >= 1
+
+    semantics[:, :, 5] = 1. - np.sum(semantics[:, :, :5], 2) # background
+
+    # semantics[:, :, 0] = ((img == 1) + (img == 10) + (img == 8) + (img == 7) + (img == 14) + (img == 6) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
+    # semantics[:, :, 1] = ((img == 4) + (img == 5)) >= 1 # left eye, right eye
+    # semantics[:, :, 2] = ((img == 2) + (img == 3)) >= 1 # left eyebrow, right eyebrow
+    # semantics[:, :, 3] = (img == 11) # mouth interior
+    # # semantics[:, :, 4] = (img == 12)  # upper lip
+    # # semantics[:, :, 5] = (img == 13)  # lower lip
+    # semantics[:, :, 5] = ((img == 17) + (img == 9)) >= 1 # hair
+    # semantics[:, :, 4] = ((img == 15) + (img == 16)) >= 1 # cloth, necklace
+    # semantics[:, :, 8] = 1. - np.sum(semantics[:, :, :8], 2) # background
 
     semantics = torch.tensor(semantics, dtype=torch.float32)
     return semantics

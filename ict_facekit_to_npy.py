@@ -158,7 +158,7 @@ def main(args):
     vertices = vertices[:24591]
     vertex_uvs = vertex_uvs[:24591]
 
-    parts_split = [9409, 14062, 17039, 21451, 23021, 24591]
+    parts_split = [9409, 11248, 13294, 13678, 14062, 17039, 21451, 23021, 24591]
     vertex_parts = [0] * len(vertices)
     
     for i, part in enumerate(parts_split):

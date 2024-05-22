@@ -13,7 +13,7 @@ HALF_PI = torch.pi / 2
 def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe, ict_facekit, canonical_mesh, batch_size, device):
     # sample random feature
     with torch.no_grad():
-        random_facs = torch.zeros(batch_size, 53+6, device=device)
+        random_facs = torch.zeros(batch_size, 53+7, device=device)
         for b in range(batch_size):
             weights = torch.tensor([1/i for i in range(1, 53)])
             random_integer = torch.multinomial(weights, 1).item() + 1
@@ -40,7 +40,7 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
 
         gbuffers = renderer.render_batch(views_subset['camera'][:batch_size], deformed_vertices.contiguous(), d_normals, 
                                 channels=channels_gbuffer, with_antialiasing=True, 
-                                canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh) 
+                                canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh, vertex_labels = ict_facekit.vertex_labels) 
         
         for k in views_subset:
             views_subset[k] = views_subset[k][:batch_size]

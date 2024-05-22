@@ -232,8 +232,6 @@ class DatasetLoader(Dataset):
 
             img = img[..., :3]
         
-        semantic = semantic[..., :6]
-
         # black bg because we have perceptual loss  
         img = img * mask 
         
