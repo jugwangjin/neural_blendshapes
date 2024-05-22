@@ -227,10 +227,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         # "normal": args.weight_normal,
         # "normal_laplacian": args.weight_normal_laplacian,
         "landmark": args.weight_landmark,
-        "closure": args.weight_closure,
+        # "closure": args.weight_closure,
         "ict": args.weight_ict,
-        "ict_landmark": args.weight_ict_landmark,
-        "ict_landmark_closure": args.weight_ict_closure,
         "random_ict": args.weight_ict,
         # "ict_identity": args.weight_ict_identity,
         "feature_regularization": args.weight_feature_regularization,
@@ -256,8 +254,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # T R A I N I N G
     # ==============================================================================================
 
-    # epochs = 0
-    epochs = ((args.iterations // 3) // len(dataloader_train)) + 1
+    epochs = 0
+    # epochs = ((args.iterations // 3) // len(dataloader_train)) + 1
     iteration = 0
     
     progress_bar = tqdm(range(epochs))
@@ -276,22 +274,21 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             features = neural_blendshapes.encoder(image=None, views=views_subset)
 
             return_dict = neural_blendshapes(image_input=False, features=features)
-            losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive)
+            losses['ict'], losses['random_ict'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive)
 
             losses['ict'] *= loss_weights['ict']
             losses['random_ict'] *= loss_weights['random_ict']
-            losses['ict_landmark'] *= loss_weights['ict_landmark']
-            losses['ict_landmark_closure'] *= loss_weights['ict_landmark_closure']
+            # losses['ict_landmark'] *= loss_weights['ict_landmark']
+            # losses['ict_landmark_closure'] *= loss_weights['ict_landmark_closure']
 
-            loss = (losses['ict'] + losses['random_ict'] + losses['ict_landmark_closure'] + losses['ict_landmark']).mean()
+            loss = (losses['ict'] + losses['random_ict'] ).mean()
 
             optimizer_neural_blendshapes.zero_grad()
             loss.backward() 
             optimizer_neural_blendshapes.step()
 
             progress_bar.set_postfix({'ict': losses['ict'].mean().detach().cpu().item(), \
-                                      'r_ict': losses['random_ict'].mean().detach().cpu().item(), 'l': \
-                                        losses['ict_landmark'].mean().detach().cpu().item(), 'l_closure': losses['ict_landmark_closure'].mean().detach().cpu().item()})
+                                      'r_ict': losses['random_ict'].mean().detach().cpu().item(),})
     # del features
     # del gt
     # del return_dict
@@ -365,7 +362,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
             
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
-            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
+            losses['landmark'], _ = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
+            # losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
             # ============================================= =================================================
             # loss function 
             # ==============================================================================================
@@ -377,7 +375,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             ## ======= regularization color ========
             # landmark losses
 
-            losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive, fullhead_template=pretrain)
+            losses['ict'], losses['random_ict'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive, fullhead_template=pretrain)
             
             # feature regularization
             # facs gt weightterm starts from 1e3, reduces to zero over half of the iterations exponentially
@@ -388,7 +386,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 
             
             with torch.no_grad():
-                shading_decay = torch.exp(-(losses['landmark'] * loss_weights['landmark'] + losses['closure'] * loss_weights['closure'] + losses['mask'] * loss_weights['mask'])).detach()
+                shading_decay = torch.exp(-(losses['landmark'] * loss_weights['landmark'] + losses['mask'] * loss_weights['mask'])).detach()
+                # shading_decay = torch.exp(-(losses['landmark'] * loss_weights['landmark'] + losses['closure'] * loss_weights['closure'] + losses['mask'] * loss_weights['mask'])).detach()
             # photometric losses decay by overall geometric loss
             # if the geometric loss is 0, the photometric losses are not decayed
             # exponentially decay the photometric losses by the overall geometric loss

@@ -22,7 +22,7 @@ class NeuralBlendshapes(nn.Module):
 
         self.ict_facekit=ict_facekit
 
-        self.coords_encoder, dim = get_embedder(5, input_dims=6)
+        self.coords_encoder, dim = get_embedder(7, input_dims=5)
 
 
         self.expression_deformer = nn.Sequential(
@@ -82,7 +82,7 @@ class NeuralBlendshapes(nn.Module):
 
     def set_template(self, template, uv_template, vertex_parts=None, full_shape=None, head_indices=None, eyeball_indices=None):
         self.register_buffer('template', torch.cat([template, uv_template[0] - 0.5], dim=1))     
-        self.register_buffer('encoded_vertices', self.coords_encoder(self.template*3))
+        self.register_buffer('encoded_vertices', self.coords_encoder(self.template[:, :5]*3))
         self.register_buffer('encoded_only_vertices', self.only_coords_encoder(template*3))
 
         self.num_head_deformer = self.eyeball_index
@@ -108,7 +108,7 @@ class NeuralBlendshapes(nn.Module):
                                     features[:, None, :53].repeat(1, self.num_head_deformer, 1)], dim=2)
 
         B, V, _ = deformer_input.shape
-
+        
         expression_deformation = self.expression_deformer(deformer_input) * 0.1
         eyeball_deformation = self.eyeball_deformer(torch.cat([self.encoded_only_vertices[None, self.eyeball_index:].repeat(bsize, 1, 1), \
                                     features[:, None, :53].repeat(1, self.num_eye_deformer, 1)], dim=2)) * 0.1
