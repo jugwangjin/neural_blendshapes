@@ -48,11 +48,11 @@ class ResnetEncoder(nn.Module):
         # assume scale is the same for all axes
         scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
         translation = transform_matrix[:, :3, 3]
-        translation[..., 2] = 0
         rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
         rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
         # print(rotation, translation, scale)
         features = self.tail(torch.cat([rotation, translation, scale], dim=-1))
+        features[:, 5] = 0
         features = torch.cat([blendshape, features], dim=-1) # shape of features: (batch_size, 60)
 
         return features

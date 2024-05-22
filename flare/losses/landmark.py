@@ -30,7 +30,7 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, features, nueral_blendsha
     """
     # Get the indices of landmarks used by the handle-based deformer
     landmark_indices = ict_facekit.landmark_indices
-    landmarks_on_clip_space = gbuffers['deformed_verts_clip_space'][:, landmark_indices]
+    landmarks_on_clip_space = gbuffers['deformed_verts_clip_space'].clone()[:, landmark_indices]
     landmarks_on_clip_space = landmarks_on_clip_space[..., :3] / torch.clamp(landmarks_on_clip_space[..., 3:], min=1e-8)
 
     detected_landmarks = views_subset['landmark'].clone().detach()

@@ -271,6 +271,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 acc_total_loss = 0
 
             if iteration % 100 == 1:
+                print(return_dict['features'][:, 53:])
                 print(neural_blendshapes.encoder.softplus(neural_blendshapes.encoder.blendshapes_multiplier))
                 print("=="*50)
                 for k, v in losses.items():

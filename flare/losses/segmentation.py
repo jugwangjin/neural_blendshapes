@@ -43,7 +43,7 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
     # print(gt_segs.shape, rendered_segs.shape)
     canonical_positions = gbuffers['canonical_position'] * views_subset["skin_mask"][..., :5].sum(dim=-1, keepdim=True)
 
-    vertices_on_clip_space = gbuffers['deformed_verts_clip_space']
+    vertices_on_clip_space = gbuffers['deformed_verts_clip_space'].clone()
     vertices_on_clip_space = vertices_on_clip_space[..., :3] / torch.clamp(vertices_on_clip_space[..., 3:], min=1e-8)
 
     seman_losses = []
