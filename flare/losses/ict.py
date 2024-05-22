@@ -57,7 +57,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
             random_facs[b, random_indices] = torch.rand_like(random_facs[b, random_indices])
         random_pose = torch.rand_like(random_facs) * torch.pi - HALF_PI
         random_features = torch.cat([random_facs[..., :53], random_pose[..., 53:]], dim=-1)
-    
+        
     random_ict = ict_facekit(expression_weights = random_features[..., :53], to_canonical = True)
     
     random_return_dict = neural_blendshapes(image_input=False, features=random_features)
@@ -65,29 +65,9 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
 
     random_ict_loss = torch.pow(random_ict * 10 - random_deformed_vertices * 10, 2).reshape(random_ict.shape[0], -1).mean(dim=-1)
 
-    # ICT landmark loss
-    ict_landmarks = ict[:, ict_facekit.landmark_indices]
 
-    ict_landmarks = neural_blendshapes.apply_deformation(ict_landmarks, features)
-    ict_landmarks_clip_space = renderer.get_vertices_clip_space_from_view(views_subset['camera'], ict_landmarks)
-    ict_landmarks_clip_space = ict_landmarks_clip_space[..., :3] / torch.clamp(ict_landmarks_clip_space[..., 3:], min=1e-8)
+    return ict_loss, random_ict_loss
 
-    detected_landmarks = views_subset['landmark'].clone().detach()
-    detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
-    detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
-
-    # ict jaw line landmark positions does not match with common 68 landmarks
-    ict_landmark_loss = (torch.pow(detected_landmarks[:, 17:, :2] - ict_landmarks_clip_space[:, 17:, :2], 2) * detected_landmarks[:, 17:, -1:]).reshape(detected_landmarks.shape[0], -1).mean(dim=-1)
-
-    eye_closure_loss = closure_loss_block(detected_landmarks, ict_landmarks_clip_space, EYELID_PAIRS) * 32
-    lip_closure_loss = closure_loss_block(detected_landmarks, ict_landmarks_clip_space, LIP_PAIRS)
-
-    closure_loss = eye_closure_loss + lip_closure_loss
-    
-    ict_landmark_loss = ict_landmark_loss
-    ict_landmark_closure_loss = closure_loss
-
-    return ict_loss, random_ict_loss, ict_landmark_loss, ict_landmark_closure_loss
 
 
 def ict_identity_regularization(ict_facekit):

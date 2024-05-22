@@ -152,10 +152,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "shading": args.weight_shading,
         "perceptual_loss": args.weight_perceptual_loss,
         "landmark": args.weight_landmark,
-        "closure": args.weight_closure,
+        # "closure": args.weight_closure,
         "ict": args.weight_ict,
-        "ict_landmark": args.weight_ict_landmark,
-        "ict_landmark_closure": args.weight_ict_closure,
         "random_ict": args.weight_ict,
         "feature_regularization": args.weight_feature_regularization,
         "deformation_map_regularization": 1e-3,
@@ -179,8 +177,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # ==============================================================================================
 
 
-    # epochs = 0
-    epochs = ((args.iterations // 3) // len(dataloader_train)) + 1
+    epochs = 0
+    # epochs = ((args.iterations // 3) // len(dataloader_train)) + 1
     iteration = 0
     
     progress_bar = tqdm(range(epochs))
@@ -199,23 +197,21 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             features = neural_blendshapes.encoder(image=None, views=views_subset)
 
             return_dict = neural_blendshapes(image_input=False, features=features)
-            losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive)
+            losses['ict'], losses['random_ict'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive)
 
             losses['ict'] *= loss_weights['ict']
             losses['random_ict'] *= loss_weights['random_ict']
-            losses['ict_landmark'] *= loss_weights['ict_landmark']
-            losses['ict_landmark_closure'] *= loss_weights['ict_landmark_closure']
+            # losses['ict_landmark'] *= loss_weights['ict_landmark']
+            # losses['ict_landmark_closure'] *= loss_weights['ict_landmark_closure']
 
-            loss = (losses['ict'] + losses['random_ict'] + losses['ict_landmark_closure'] + losses['ict_landmark']).mean()
+            loss = (losses['ict'] + losses['random_ict'] ).mean()
 
             optimizer_neural_blendshapes.zero_grad()
             loss.backward() 
             optimizer_neural_blendshapes.step()
 
             progress_bar.set_postfix({'ict': losses['ict'].mean().detach().cpu().item(), \
-                                      'r_ict': losses['random_ict'].mean().detach().cpu().item(), 'l': \
-                                        losses['ict_landmark'].mean().detach().cpu().item(), 'l_closure': losses['ict_landmark_closure'].mean().detach().cpu().item()})
-
+                                      'r_ict': losses['random_ict'].mean().detach().cpu().item(),})
 
     # del features, landmark, blendshape, transform_matrix
     # del input_image
@@ -270,24 +266,26 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
             losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
-            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
+            losses['landmark'], _ = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
+            # losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
             losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices, neural_blendshapes.face_index)
 
             losses['deformation_map_regularization'] = torch.zeros(deformed_vertices.shape[0], device=device)
             for map in return_dict['deformation_maps']:
                 deformation_map = return_dict['deformation_maps'][map]
-                losses['deformation_map_regularization'] += torch.mean(torch.pow(deformation_map[:, :, :-1, :] - deformation_map[:, :, 1:, :], 2), dim=[1,2,3]) + \
-                                                            torch.mean(torch.pow(deformation_map[:, :, :, :-1] - deformation_map[:, :, :, 1:], 2), dim=[1,2,3])
+                losses['deformation_map_regularization'] += torch.mean(torch.abs(deformation_map[:, :, :-1, :] - deformation_map[:, :, 1:, :]), dim=[1,2,3]) + \
+                                                            torch.mean(torch.abs(deformation_map[:, :, :, :-1] - deformation_map[:, :, :, 1:]), dim=[1,2,3])
                 
             losses['cbuffers_regularization'] = cbuffers_regularization(cbuffers)
-            losses['ict'], losses['random_ict'], losses['ict_landmark'], losses['ict_landmark_closure'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive, fullhead_template=pretrain)
+            losses['ict'], losses['random_ict'] = ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, renderer, lmk_adaptive, fullhead_template=pretrain)
             
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict], 
                                                                            views_subset["landmark"], neural_blendshapes.scale, iteration, facs_adaptive, facs_weight=0)
             # losses['feature_regularization'] += torch.mean(torch.pow(10 * return_dict['full_template_deformation'][neural_blendshapes.head_index:], 2))
             
             with torch.no_grad():
-                shading_decay = torch.exp(-(losses['landmark'] + losses['closure'] + losses['mask'])).detach()
+                shading_decay = torch.exp(-(losses['landmark'] * loss_weights['landmark']+ losses['mask'] * loss_weights['mask'])).detach()
+                # shading_decay = torch.exp(-(losses['landmark'] + losses['closure'] + losses['mask'])).detach()
             # photometric losses decay by overall geometric loss
             # if the geometric loss is 0, the photometric losses are not decayed
             # exponentially decay the photometric losses by the overall geometric loss

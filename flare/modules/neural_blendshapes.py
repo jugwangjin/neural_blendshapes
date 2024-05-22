@@ -102,8 +102,8 @@ class NeuralBlendshapes(nn.Module):
         self.face_index = 9409     
 
         parts_deformer_spec = {
-            'face': {'output_size': 1024, 'feature_size': 128, 'start_size': 256},
-            'head': {'output_size': 512, 'feature_size': 64, 'start_size': 128},
+            'face': {'output_size': 512, 'feature_size': 256, 'start_size': 128},
+            'head': {'output_size': 256, 'feature_size': 64, 'start_size': 64},
             'gums': {'output_size': 128, 'feature_size': 64, 'start_size': 32},
             'teeth': {'output_size': 128, 'feature_size': 64, 'start_size': 32},
         }
