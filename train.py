@@ -153,7 +153,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "feature_regularization": args.weight_feature_regularization,
         # "deformation_map_regularization": 1e-3,
         "cbuffers_regularization": args.weight_cbuffers_regularization,
-        "synthetic": args.weight_synthetic,
+        # "synthetic": args.weight_synthetic,
         "segmentation": args.weight_segmentation,
         "semantic_stat": args.weight_semantic_stat,
     }
@@ -240,7 +240,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             torch.cuda.empty_cache()
 
             # synthetic loss
-            losses['synthetic'] = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, 1, device) 
+            # losses['synthetic'] = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, 1, device) 
 
             torch.cuda.empty_cache()
 
@@ -272,7 +272,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             if iteration % 100 == 1:
                 print(return_dict['features'][:, 53:])
-                print(neural_blendshapes.encoder.softplus(neural_blendshapes.encoder.blendshapes_multiplier))
                 print("=="*50)
                 for k, v in losses.items():
                     v = v.mean()
@@ -326,42 +325,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                     ## ============== visualize ==============================
                     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
-
-                    # return_dict_ = neural_blendshapes(debug_views["img"].to(device), debug_views)
-                    
-                    # jaw_index = ict_facekit.expression_names.tolist().index('jawOpen')
-                    # eyeblink_L_index = ict_facekit.expression_names.tolist().index('eyeBlink_L')
-                    # eyeblink_R_index = ict_facekit.expression_names.tolist().index('eyeBlink_R')
-                    # facs = return_dict_['features'][:, :53]
-                    # print('jawopen', facs[:, jaw_index])
-                    # print('eyeblink_L', facs[:, eyeblink_L_index])
-                    # print('eyeblink_R', facs[:, eyeblink_R_index])
-
-                    # print('gt, jaw_index', debug_views['mp_blendshape'][:, ict_facekit.mediapipe_to_ict][:, jaw_index])
-                    # print('gt, eyeblink_L_index', debug_views['mp_blendshape'][:, ict_facekit.mediapipe_to_ict][:, eyeblink_L_index])
-                    # print('gt, eyeblink_R_index', debug_views['mp_blendshape'][:, ict_facekit.mediapipe_to_ict][:, eyeblink_R_index])
-
-                    # # for i, name in enumerate(ict_facekit.expression_names):
-                    # #     print(name, debug_views['facs'][:, sict_facekit.mediapipe_to_ict][:, i])
-                    # # exit()
-                    # ict = ict_facekit(expression_weights = return_dict_['features'][:, :53], to_canonical = True)
-                    # deformed_verts = neural_blendshapes.apply_deformation(ict, return_dict_['features'])
-
-                    # # mesh_ = ict_canonical_mesh.with_vertices(deformed_verts)
-
-
-                    # d_normals = mesh.fetch_all_normals(deformed_verts, mesh)
-
-
-                    # debug_gbuffer = renderer.render_batch(debug_views['camera'], deformed_verts.contiguous(), d_normals, 
-                    #                         channels=channels_gbuffer, with_antialiasing=True, 
-                    #                         canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh, vertex_labels = ict_facekit.vertex_labels) 
-
-                    # debug_rgb_pred, debug_cbuffers, gbuffer_mask = shader.shade(debug_gbuffer, debug_views, mesh, args.finetune_color, lgt)
-
-
-                    # visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration, save_name='ict')
-
 
                     del debug_gbuffer, debug_cbuffers, debug_rgb_pred
             if iteration == 1 or iteration % (args.visualization_frequency * 10) == 0:

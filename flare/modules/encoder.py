@@ -13,8 +13,8 @@ import pytorch3d.transforms as p3dt
 def initialize_weights(m, gain=0.1):
     
     for name, param in m.named_parameters():
-        # if 'weight' in name:
-        #     nn.init.xavier_uniform_(param.data, gain=gain)
+        if 'weight' in name:
+            nn.init.xavier_uniform_(param.data, gain=gain)
         if 'bias' in name:
             param.data.zero_()
 
@@ -25,23 +25,24 @@ class ResnetEncoder(nn.Module):
         self.ict_facekit = ict_facekit
 
         self.tail = nn.Linear(7, 7)
+        initialize_weights(self.tail, gain=0.01)
             
         # set weights of self.tail as identity
         self.tail.weight.data = torch.eye(7)
+        self.tail.bias.data.zero_()
 
-        self.tail.weight.data[3:6] *= 0.1
+        self.tail.weight.data[3:6] *= 0.01
         self.tail.weight.data[:2] *= -1
         
 
 
-        self.blendshapes_multiplier = torch.nn.Parameter(torch.ones(53))
+        # self.blendshapes_multiplier = torch.nn.Parameter(torch.ones(53))
         self.softplus = nn.Softplus(beta=10)
         
 
-        initialize_weights(self.tail, gain=0.01)
 
     def forward(self, image, views):
-        blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53) * self.softplus(self.blendshapes_multiplier)
+        blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53)
         transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4)
 
         # calculate scale, translation, rotation from transform matrix
