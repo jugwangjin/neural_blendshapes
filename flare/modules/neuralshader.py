@@ -78,7 +78,7 @@ class NeuralShader(torch.nn.Module):
         self.material_mlp_ch = 4 # diffuse 3 and roughness 1
         self.material_mlp = FC(self.inp_size, self.material_mlp_ch, disentangle_network_params["material_mlp_dims"], activation, last_activation).to(device) #sigmoid
         
-        self.light_mlp = FC(20, 3, disentangle_network_params["light_mlp_dims"], activation=activation, last_activation=None, bias=True).to(device) 
+        self.light_mlp = FC(20, 3, disentangle_network_params["light_mlp_dims"], activation=activation, last_activation=last_activation, bias=True).to(device) 
         self.dir_enc_func = generate_ide_fn(deg_view=3, device=self.device)
         # self.dir_enc_func_normals = generate_ide_fn(deg_view=4, device=self.device)
         
@@ -100,10 +100,11 @@ class NeuralShader(torch.nn.Module):
 
     def forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None):
         bz, h, w, ch = position.shape
-        uv_coordinates = gbuffer["uv_coordinates"]
+        uv_coordinates = gbuffer["uv_coordinates"].detach()
+        deformed_position = deformed_position.detach()
         pe_input = self.apply_pe(position=uv_coordinates)
 
-        view_dir = view_direction[:, None, None, :]
+        view_dir = view_direction[:, None, None, :].detach()
         normal_bend = self.get_shading_normals(deformed_position, view_dir, gbuffer, mesh)
 
         kr_max = torch.ones((bz, h, w, 1))
@@ -241,8 +242,8 @@ class NeuralShader(torch.nn.Module):
         ''' flip the backward facing normals
         '''
         normal = ru.prepare_shading_normal(position, view_dir, None, 
-                                           gbuffer["vertex_normals"], gbuffer["tangent_normals"], gbuffer["face_normals"], two_sided_shading=True, opengl=True, use_python=False)
-        gbuffer["normal"] =  dr.antialias(normal.contiguous(), gbuffer["rast"], gbuffer["deformed_verts_clip_space"], mesh.indices.int())
+                                           gbuffer["vertex_normals"].detach(), gbuffer["tangent_normals"].detach(), gbuffer["face_normals"].detach(), two_sided_shading=True, opengl=True, use_python=False)
+        gbuffer["normal"] =  dr.antialias(normal.contiguous(), gbuffer["rast"].detach(), gbuffer["deformed_verts_clip_space"].detach(), mesh.indices.int())
         return gbuffer["normal"]
     
     def apply_pe(self, position, normalize=False):

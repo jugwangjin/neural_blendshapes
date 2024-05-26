@@ -31,8 +31,8 @@ def laplacian_loss(mesh: Mesh, canonical_vertices,):
     L = mesh.laplacian
     V = mesh.vertices
 
-    mesh_laplacian = L.mm(V * 10).norm(dim=-1)
-    canonical_laplacian = L.mm(canonical_vertices * 10).norm(dim=-1)
+    mesh_laplacian = L.mm(V)
+    canonical_laplacian = L.mm(canonical_vertices)
 
     # print(mesh_laplacian.shape)
     # exit()

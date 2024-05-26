@@ -47,6 +47,7 @@ import open3d as o3d
 # ==============================================================================================    
 def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt):
     return_dict = neural_blendshapes(views["img"].to(device), views)
+    # print(return_dict['features'][:, 53:])
 
     deformed_vertices = return_dict['full_deformed_mesh']
     

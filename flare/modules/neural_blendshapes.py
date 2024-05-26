@@ -8,10 +8,10 @@ from flare.modules.embedder import *
 import pytorch3d.transforms as pt3d
 
 def initialize_weights(m, gain=0.1):
-    
+
     for name, param in m.named_parameters():
-        # if 'weight' in name:
-            # nn.init.xavier_uniform_(param.data, gain=gain)
+        if 'weight' in name:
+            nn.init.xavier_uniform_(param.data, gain=gain)
         if 'bias' in name:
             param.data.zero_()
 
@@ -85,18 +85,19 @@ class NeuralBlendshapes(nn.Module):
 
         self.ict_facekit = ict_facekit
 
-        self.only_coords_encoder, dim = get_embedder(2, input_dims=3)
+        self.only_coords_encoder, dim = get_embedder(4, input_dims=3)
         
+
         self.template_deformer = nn.Sequential(
-                    nn.Linear(dim, 64),
+                    nn.Linear(dim, 256),
                     nn.SiLU(),
-                    nn.Linear(64,64),
+                    nn.Linear(256,256),
                     nn.SiLU(),
-                    nn.Linear(64,64),
+                    nn.Linear(256,256),
                     nn.SiLU(),
-                    nn.Linear(64,64),
+                    nn.Linear(256,256),
                     nn.SiLU(),
-                    nn.Linear(64,3)
+                    nn.Linear(256,3)
         )
         
         self.pose_weight = nn.Sequential(
