@@ -97,8 +97,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     optimizer_neural_blendshapes = torch.optim.Adam([{'params': neural_blendshapes_encoder_params, 'lr': args.lr_encoder},
                                                     {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer}])
                                                      
-    scheduler_milestones = [args.iterations  * 2]
-    # scheduler_milestones = [int(args.iterations / 2), int(args.iterations * 2 / 3)]
+    scheduler_milestones = [args.iterations*2]
+    # scheduler_milestones = [int(args.iteratcons / 2), int(args.iterations * 2 / 3)]
     scheduler_gamma = 0.25
 
     scheduler_neural_blendshapes = torch.optim.lr_scheduler.MultiStepLR(optimizer_neural_blendshapes, milestones=scheduler_milestones, gamma=scheduler_gamma)
@@ -326,7 +326,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                     ## ============== visualize ==============================
                     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
-
 
                     del debug_gbuffer, debug_cbuffers, debug_rgb_pred
             if iteration == 1 or iteration % (args.visualization_frequency * 10) == 0:

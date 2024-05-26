@@ -38,12 +38,13 @@ class ResnetEncoder(nn.Module):
 
 
         self.blendshapes_multiplier = torch.nn.Parameter(torch.zeros(53))
+        self.blendshapes_bias = torch.nn.Parameter(torch.zeros(53))
         # self.softplus = nn.Softplus(beta=10)
         
 
 
     def forward(self, image, views):
-        blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53) * torch.exp(self.blendshapes_multiplier)
+        blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53) * torch.exp(self.blendshapes_multiplier) + self.blendshapes_bias
         transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4)
 
         # calculate scale, translation, rotation from transform matrix

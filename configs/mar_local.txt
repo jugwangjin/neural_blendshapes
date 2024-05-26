@@ -1,4 +1,5 @@
-run_name = shader_grad_cut_v10
+run_name = all_in_one_v1
+
 
 input_dir = ../flare_data/marcel
 train_dir = ["MVI_1797", "MVI_1801"]
