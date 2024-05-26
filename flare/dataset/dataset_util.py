@@ -113,18 +113,24 @@ def _load_semantic(fn):
     #     'hair': 17,
     #     'hat': 18
     # }
-    # full face area : skin + nose + ears + left eyebwow + right eyebrow + upper lip + lower lip 
-    semantics[:, :, 0] = ((img == 1) + (img == 10) + (img == 9) + (img == 8) + (img == 7) + (img == 2) + (img == 3) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
+    # tight face area : skin + nose + left eyebwow + right eyebrow + upper lip + lower lip + eyes 
+    semantics[:, :, 0] = ((img == 1) + (img == 2) + (img == 3) + (img == 4) + \
+                          (img == 5) + (img == 10) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
     # left eyeball
-    semantics[:, :, 1] = (img == 4) >= 1
-    # right eyeball
-    semantics[:, :, 2] = (img == 5) >= 1
-    # mouth interior
-    semantics[:, :, 3] = (img == 11) >= 1
-    # hair + cloth + necklace + neck
-    semantics[:, :, 4] = ((img == 17) + (img == 16) + (img == 15) + (img == 14)) >= 1
+    # semantics[:, :, 1] = (img == 4) >= 1
+    # # right eyeball
+    # semantics[:, :, 2] = (img == 5) >= 1
+    # # mouth interior
+    # semantics[:, :, 3] = (img == 11) >= 1
+    # hair + cloth +1necklace + neck
 
-    semantics[:, :, 5] = 1. - np.sum(semantics[:, :, :5], 2) # background
+
+
+    semantics[:, :, 1] = ((img == 17) + (img == 16) + (img == 15) + (img == 14) + (img==7) + (img==8) + (img==9)) >= 1
+
+    semantics[:, :, 2] = (img==11) >= 1
+
+    semantics[:, :, 3] = 1. - np.sum(semantics[:, :, :5], 2) # background
 
     # semantics[:, :, 0] = ((img == 1) + (img == 10) + (img == 8) + (img == 7) + (img == 14) + (img == 6) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
     # semantics[:, :, 1] = ((img == 4) + (img == 5)) >= 1 # left eye, right eye
@@ -132,6 +138,22 @@ def _load_semantic(fn):
     # semantics[:, :, 3] = (img == 11) # mouth interior
     # # semantics[:, :, 4] = (img == 12)  # upper lip
     # # semantics[:, :, 5] = (img == 13)  # lower lip
+    # semantics[:, :, 5] = ((img == 17) + (img == 9)) >= 1 # hair
+    # semantics[:, :, 4] = ((img == 15) + (img == 16)) >= 1 # cloth, necklace
+    # semantics[:, :, 8] = 1. - np.sum(semantics[:, :, :8], 2) # background
+
+    # semantics[:, :, 0] = ((img == 1) + (img == 10) + (img == 9) + (img == 8) + (img == 7) + (img == 2) + (img == 3) + (img == 12) + (img == 13)\
+    #                     + (img==4) + (img==5) + (img==11)) >= 1 # skin, nose, ears, neck, lips
+
+    # # hair + cloth +1necklace + neck
+    # semantics[:, :, 1] = ((img == 17) + (img == 16) + (img == 15) + (img == 14)) >= 1
+
+    # semantics[:, :, 2] = 1. - np.sum(semantics[:, :, :5], 2) # background
+
+    # semantics[:, :, 0] = ((img == 1) + (img == 10) + (img == 8) + (img == 7) + (img == 14) + (img == 6) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
+    # semantics[:, :, 1] = ((img == 4) + (img == 5)) >= 1 # left eye, right eye
+    # semantics[:, :, 2] = ((img == 2) + (img == 3)) >= 1 # left eyebrow, right eyebrow
+    # semantics[:, :, 3] = (img == 11) # mouth interior
     # semantics[:, :, 5] = ((img == 17) + (img == 9)) >= 1 # hair
     # semantics[:, :, 4] = ((img == 15) + (img == 16)) >= 1 # cloth, necklace
     # semantics[:, :, 8] = 1. - np.sum(semantics[:, :, :8], 2) # background

@@ -25,44 +25,49 @@ class NeuralBlendshapes(nn.Module):
 
         # self.coords_encoder, dim = get_embedder(7, input_dims=3)
 
+        self.only_coords_encoder, dim = get_embedder(4, input_dims=6)
+
 
         self.expression_deformer = nn.Sequential(
-                                    nn.Linear(3+3+53, 256),
-                                    nn.SiLU(),
-                                    nn.Linear(256, 256),
-                                    nn.SiLU(),
-                                    nn.Linear(256, 256),
-                                    nn.SiLU(),
-                                    nn.Linear(256, 256),
-                                    nn.SiLU(),
-                                    nn.Linear(256, 3)
-                                    )
+                    nn.Linear(dim+53, 256),
+                    nn.SiLU(),
+                    nn.Linear(256,256),
+                    nn.SiLU(),
+                    nn.Linear(256,256),
+                    nn.SiLU(),
+                    nn.Linear(256,256),
+                    nn.SiLU(),
+                    nn.Linear(256,3)
+        )
         
-        # self.only_coords_encoder, dim = get_embedder(2, input_dims=3)
+        
+        self.template_encoder, dim = get_embedder(4, input_dims=3)
 
         self.face_index = 9409     
 
         self.eyeball_index = 21451
    
+
         self.template_deformer = nn.Sequential(
-                    nn.Linear(3, 64),
+                    nn.Linear(dim, 256),
                     nn.SiLU(),
-                    nn.Linear(64,64),
+                    nn.Linear(256,256),
                     nn.SiLU(),
-                    nn.Linear(64,64),
+                    nn.Linear(256,256),
                     nn.SiLU(),
-                    nn.Linear(64,64),
+                    nn.Linear(256,256),
                     nn.SiLU(),
-                    nn.Linear(64,3)
+                    nn.Linear(256,3)
         )
         
-        self.eyeball_deformer = nn.Sequential(
-                                    nn.Linear(3+3+53, 64),
-                                    nn.SiLU(),
-                                    nn.Linear(64, 64),
-                                    nn.SiLU(),
-                                    nn.Linear(64, 3)
-                                    )
+        
+        # self.eyeball_deformer = nn.Sequential(
+        #                             nn.Linear(3+3+53, 64),
+        #                             nn.SiLU(),
+        #                             nn.Linear(64, 64),
+        #                             nn.SiLU(),
+        #                             nn.Linear(64, 3)
+        #                             )
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
@@ -73,11 +78,11 @@ class NeuralBlendshapes(nn.Module):
                     nn.Sigmoid()
         )
 
-        initialize_weights(self.expression_deformer, gain=0.01)
-        initialize_weights(self.template_deformer, gain=0.01)
-        initialize_weights(self.eyeball_deformer, gain=0.01)
+        # initialize_weights(self.expression_deformer, gain=0.01)
+        # initialize_weights(self.template_deformer, gain=0.01)
+        # initialize_weights(self.eyeball_deformer, gain=0.01)
         initialize_weights(self.pose_weight, gain=0.01)
-        self.pose_weight[-2].bias.data[0] = 4.
+        self.pose_weight[-2].bias.data[0] = 3.
 
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
 
@@ -92,6 +97,8 @@ class NeuralBlendshapes(nn.Module):
 
         self.num_face_deformer = self.face_index
 
+        self.num_vertex = self.template.shape[0]
+
 
     def forward(self, image=None, views=None, features=None, image_input=True):
         if image_input:
@@ -104,21 +111,24 @@ class NeuralBlendshapes(nn.Module):
 
         expression_deformation = self.ict_facekit(expression_weights = features[..., :53]) - self.ict_facekit.neutral_mesh_canonical
 
-        template_deformation = self.template_deformer(self.template)
+        template_deformation = self.template_deformer(self.template_encoder(self.template))
         pose_weight = self.pose_weight(self.template)
 
         # template_deformation = self.template_deformation
-        
-        face_deformation = self.expression_deformer(torch.cat([self.template[None, :self.face_index].repeat(bsize, 1, 1), \
-                                    expression_deformation[:, :self.face_index], \
-                                    features[:, None, :53].repeat(1, self.num_face_deformer, 1)], dim=2)) 
+        coords_encoded = self.only_coords_encoder(torch.cat([self.template.repeat(bsize, 1, 1), \
+                                                             expression_deformation], dim=2))
+        face_deformation = self.expression_deformer(torch.cat([coords_encoded, \
+                                    features[:, None, :53].repeat(1, self.num_vertex, 1)], dim=2)) 
+        # face_deformation = self.expression_deformer(torch.cat([self.template.repeat(bsize, 1, 1), \
+        #                             expression_deformation, \
+        #                             features[:, None, :53].repeat(1, self.num_vertex, 1)], dim=2)) 
 
-        eyeball_deformation = self.eyeball_deformer(torch.cat([self.template[None, self.eyeball_index:].repeat(bsize, 1, 1), \
-                                    expression_deformation[:, self.eyeball_index:], \
-                                    features[:, None, :53].repeat(1, self.num_eye_deformer, 1)], dim=2)) 
+        # eyeball_deformation = self.eyeball_deformer(torch.cat([self.template[None, self.eyeball_index:].repeat(bsize, 1, 1), \
+        #                             expression_deformation[:, self.eyeball_index:], \
+        #                             features[:, None, :53].repeat(1, self.num_eye_deformer, 1)], dim=2)) 
             
-        expression_deformation[:, :self.face_index] += face_deformation
-        expression_deformation[:, self.eyeball_index:] += eyeball_deformation
+        expression_deformation += face_deformation
+        # expression_deformation[:, self.eyeball_index:] += eyeball_deformation
 
         expression_vertices = self.template[None, ..., :3].repeat(bsize, 1, 1)
         expression_vertices += expression_deformation

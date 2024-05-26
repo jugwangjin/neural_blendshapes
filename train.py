@@ -97,7 +97,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     optimizer_neural_blendshapes = torch.optim.Adam([{'params': neural_blendshapes_encoder_params, 'lr': args.lr_encoder},
                                                     {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer}])
                                                      
-    scheduler_milestones = [int(args.iterations / 2), int(args.iterations * 2 / 3)]
+    scheduler_milestones = [args.iterations*2]
+    # scheduler_milestones = [int(args.iteratcons / 2), int(args.iterations * 2 / 3)]
     scheduler_gamma = 0.25
 
     scheduler_neural_blendshapes = torch.optim.lr_scheduler.MultiStepLR(optimizer_neural_blendshapes, milestones=scheduler_milestones, gamma=scheduler_gamma)
@@ -154,8 +155,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         # "deformation_map_regularization": 1e-3,
         "cbuffers_regularization": args.weight_cbuffers_regularization,
         # "synthetic": args.weight_synthetic,
-        "segmentation": args.weight_segmentation,
-        "semantic_stat": args.weight_semantic_stat,
+        # "segmentation": args.weight_segmentation,
+        # "semantic_stat": args.weight_semantic_stat,
     }
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
     print(loss_weights)
@@ -220,7 +221,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
             losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
-            losses['segmentation'], losses['semantic_stat'] = segmentation_loss(views_subset, gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
+            # losses['segmentation'], losses['semantic_stat'] = segmentation_loss(views_subset, gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
             losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
             losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices + return_dict['full_template_deformation'])
 

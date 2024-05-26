@@ -13,6 +13,19 @@ import torch
     # semantics[:, :, 5] = 1. - np.sum(semantics[:, :, :5], 2) # background
 
 
+    # tight face area : skin + nose + left eyebwow + right eyebrow + upper lip + lower lip + eyes 
+    # semantics[:, :, 0] = ((img == 1) + (img == 2) + (img == 3) + (img == 4) + \
+    #                       (img == 5) + (img == 10) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
+
+
+    # hair, neck, head, shoulder, cloth
+    # semantics[:, :, 1] = ((img == 17) + (img == 16) + (img == 15) + (img == 14)) >= 1
+
+    # mouth interior
+    # semantics[:, :, 2] = (img==11) >= 1
+
+    # semantics[:, :, 3] = 1. - np.sum(semantics[:, :, :5], 2) # background
+
     # mesh 0 face
     # mesh 1 head and neck
     # mesh 2 mouth socket
@@ -27,11 +40,11 @@ from pytorch3d.loss import chamfer_distance
 from pytorch3d.ops import knn_points
 
 seg_map_to_vertex_labels = {}
-seg_map_to_vertex_labels[0] = [0]
-seg_map_to_vertex_labels[1] = [3,7]
-seg_map_to_vertex_labels[2] = [4,8]
-seg_map_to_vertex_labels[3] = [2,5,6]
-seg_map_to_vertex_labels[4] = [1]
+seg_map_to_vertex_labels[0] = [0, 3,4,7,8]
+# seg_map_to_vertex_labels[1] = [3,7]
+# seg_map_to_vertex_labels[2] = [4,8]
+seg_map_to_vertex_labels[1] = [1, -1]
+seg_map_to_vertex_labels[2] = [2, 5, 6]
 
 
 def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices, img_size=512):
@@ -41,7 +54,7 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
     gt_segs = views_subset['skin_mask'] # Shape of B, H, W, 6
     # rendered_segs = gbuffers['vertex_labels'] # Shape of B, H, W, 9
     # print(gt_segs.shape, rendered_segs.shape)
-    canonical_positions = gbuffers['canonical_position'] * views_subset["skin_mask"][..., :5].sum(dim=-1, keepdim=True)
+    canonical_positions = gbuffers['canonical_position'] * views_subset["skin_mask"][..., :2].sum(dim=-1, keepdim=True)
 
     vertices_on_clip_space = gbuffers['deformed_verts_clip_space'].clone()
     vertices_on_clip_space = vertices_on_clip_space[..., :3] / torch.clamp(vertices_on_clip_space[..., 3:], min=1e-8)
@@ -63,13 +76,17 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
             valid_idx = torch.unique(valid_idx)
             # print(valid_idx.shape)
 
-        for i in range(5):
+        for i in range(len(seg_map_to_vertex_labels)):
             gt_seg_pixels = (torch.nonzero(gt_seg[:,:,i]) / (img_size - 1)) * 2 - 1
             # print(rendered_seg.shape)
             part_index = []
             
             for n in seg_map_to_vertex_labels[i]:
-                part_index += parts_indices[n]
+                if n == -1:
+                    part_index += list(range(6706, 9409))
+                    continue
+                else:
+                    part_index += parts_indices[n]
             #     print(n, len(parts_indices[n]))
             # print(len(part_index))
             # part index should be intersection of valid_idx and part index
@@ -90,8 +107,8 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
 
             stat_loss += (gt_seg_pixels_mean - rendered_seg_pixels_mean).pow(2).mean()
 
-        seman_losses.append(seman_loss / 5.)
-        stat_losses.append(stat_loss / 5.)
+        seman_losses.append(seman_loss / len(seg_map_to_vertex_labels))
+        stat_losses.append(stat_loss / len(seg_map_to_vertex_labels))
 
     return torch.stack(seman_losses), torch.stack(stat_losses)
  

@@ -37,11 +37,18 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, features, nueral_blendsha
     detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
     detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
 
-    landmark_loss = ((detected_landmarks[:, 17:, :2] - landmarks_on_clip_space[:, 17:, :2]).pow(2) * detected_landmarks[:, 17:, -1:]).reshape(detected_landmarks.shape[0], -1).mean(dim=-1)
+    landmark_loss = ((detected_landmarks[:, :, :2] - landmarks_on_clip_space[:, :, :2]).pow(2) * detected_landmarks[:, :, -1:]).reshape(detected_landmarks.shape[0], -1).mean(dim=-1)
 
-    eye_closure_loss = closure_loss_block(detected_landmarks, landmarks_on_clip_space, EYELID_PAIRS) * 8
-    lip_closure_loss = closure_loss_block(detected_landmarks, landmarks_on_clip_space, LIP_PAIRS)
+    gt_closure = detected_landmarks[:, None, :, :2] - detected_landmarks[:, :, None, :2] 
+    gt_closure_confidence = detected_landmarks[:, None, :, -1:] * detected_landmarks[:, :, None, -1:]
 
-    closure_loss = eye_closure_loss + lip_closure_loss
+    estimated_closure = landmarks_on_clip_space[:, None, :, :2] - landmarks_on_clip_space[:, :, None, :2]
+
+    closure_loss = ((estimated_closure - gt_closure).pow(2) * gt_closure_confidence).reshape(detected_landmarks.shape[0], -1).mean(dim=-1)
+
+    # eye_closure_loss = closure_loss_block(detected_landmarks, landmarks_on_clip_space, EYELID_PAIRS) * 2
+    # lip_closure_loss = closure_loss_block(detected_landmarks, landmarks_on_clip_space, LIP_PAIRS)
+
+    # closure_loss = eye_closure_loss + lip_closure_loss
 
     return landmark_loss, closure_loss
