@@ -8,7 +8,7 @@ from flare.modules.embedder import *
 import pytorch3d.transforms as pt3d
 
 def initialize_weights(m, gain=0.1):
-    
+
     for name, param in m.named_parameters():
         if 'weight' in name:
             nn.init.xavier_uniform_(param.data, gain=gain)
@@ -25,7 +25,7 @@ class NeuralBlendshapes(nn.Module):
 
         # self.coords_encoder, dim = get_embedder(7, input_dims=3)
 
-        self.only_coords_encoder, dim = get_embedder(4, input_dims=6)
+        self.only_coords_encoder, dim = get_embedder(2, input_dims=6)
 
 
         self.expression_deformer = nn.Sequential(
@@ -37,11 +37,13 @@ class NeuralBlendshapes(nn.Module):
                     nn.SiLU(),
                     nn.Linear(256,256),
                     nn.SiLU(),
+                    nn.Linear(256,256),
+                    nn.SiLU(),
                     nn.Linear(256,3)
         )
         
         
-        self.template_encoder, dim = get_embedder(4, input_dims=3)
+        self.template_encoder, dim = get_embedder(2, input_dims=3)
 
         self.face_index = 9409     
 
@@ -50,6 +52,8 @@ class NeuralBlendshapes(nn.Module):
 
         self.template_deformer = nn.Sequential(
                     nn.Linear(dim, 256),
+                    nn.SiLU(),
+                    nn.Linear(256,256),
                     nn.SiLU(),
                     nn.Linear(256,256),
                     nn.SiLU(),
@@ -78,8 +82,8 @@ class NeuralBlendshapes(nn.Module):
                     nn.Sigmoid()
         )
 
-        # initialize_weights(self.expression_deformer, gain=0.01)
-        # initialize_weights(self.template_deformer, gain=0.01)
+        initialize_weights(self.expression_deformer, gain=0.01)
+        initialize_weights(self.template_deformer, gain=0.01)
         # initialize_weights(self.eyeball_deformer, gain=0.01)
         initialize_weights(self.pose_weight, gain=0.01)
         self.pose_weight[-2].bias.data[0] = 3.
@@ -111,27 +115,22 @@ class NeuralBlendshapes(nn.Module):
 
         expression_deformation = self.ict_facekit(expression_weights = features[..., :53]) - self.ict_facekit.neutral_mesh_canonical
 
-        template_deformation = self.template_deformer(self.template_encoder(self.template))
-        pose_weight = self.pose_weight(self.template)
+        template_deformation = self.template_deformer(self.template_encoder(3 * self.ict_facekit.neutral_mesh_canonical[0]))
+        pose_weight = self.pose_weight(self.ict_facekit.neutral_mesh_canonical[0])
 
         # template_deformation = self.template_deformation
-        coords_encoded = self.only_coords_encoder(torch.cat([self.template.repeat(bsize, 1, 1), \
+        coords_encoded = self.only_coords_encoder(3 * torch.cat([self.ict_facekit.neutral_mesh_canonical.repeat(bsize, 1, 1), \
                                                              expression_deformation], dim=2))
-        face_deformation = self.expression_deformer(torch.cat([coords_encoded, \
+        additional_expression_deformation = self.expression_deformer(torch.cat([coords_encoded, \
                                     features[:, None, :53].repeat(1, self.num_vertex, 1)], dim=2)) 
-        # face_deformation = self.expression_deformer(torch.cat([self.template.repeat(bsize, 1, 1), \
-        #                             expression_deformation, \
-        #                             features[:, None, :53].repeat(1, self.num_vertex, 1)], dim=2)) 
-
-        # eyeball_deformation = self.eyeball_deformer(torch.cat([self.template[None, self.eyeball_index:].repeat(bsize, 1, 1), \
-        #                             expression_deformation[:, self.eyeball_index:], \
-        #                             features[:, None, :53].repeat(1, self.num_eye_deformer, 1)], dim=2)) 
             
-        expression_deformation += face_deformation
+        
         # expression_deformation[:, self.eyeball_index:] += eyeball_deformation
 
-        expression_vertices = self.template[None, ..., :3].repeat(bsize, 1, 1)
-        expression_vertices += expression_deformation
+        expression_vertices = self.ict_facekit.neutral_mesh_canonical.repeat(bsize, 1, 1)
+        expression_vertices += additional_expression_deformation
+        expression_vertices += expression_deformation 
+        # expression_vertices += additional_expression_deformation
         expression_vertices += template_deformation[None]
 
         deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
@@ -141,6 +140,7 @@ class NeuralBlendshapes(nn.Module):
 
         return_dict['full_template_deformation'] = template_deformation
         return_dict['full_expression_deformation'] = expression_deformation
+        return_dict['additional_expression_deformation'] = additional_expression_deformation
         return_dict['full_expression_mesh'] = expression_vertices
         return_dict['pose_weight'] = pose_weight
         return_dict['full_deformed_mesh'] = deformed_mesh

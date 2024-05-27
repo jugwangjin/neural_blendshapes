@@ -228,7 +228,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['cbuffers_regularization'] = cbuffers_regularization(cbuffers)
             
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict], 
-                                                                           views_subset["landmark"], iteration, facs_adaptive, facs_weight=0)
+                                                                           views_subset["landmark"], iteration, facs_adaptive, facs_weight=0) 
 
 
             with torch.no_grad():
