@@ -6,7 +6,7 @@ if __name__ == '__main__':
     # run base command, with one of those weight args set to 0
     # make proper --run_name, and --wandb_name for each run
     #  --iterations == 10000
-    params_list = ["mask", "laplacian_regularization", "shading", "perceptual_loss", "landmark", "closure", "feature_regularization", "cbuffers_regularization", "segmentation", "semantic_stat"]
+    params_list = ["shading", "perceptual_loss", "landmark", "closure"]
 
     for i in range(len(params_list)):
         for j in range(i+1, len(params_list)):

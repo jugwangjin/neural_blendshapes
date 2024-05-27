@@ -223,12 +223,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
             # losses['segmentation'], losses['semantic_stat'] = segmentation_loss(views_subset, gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
             losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
-            losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices + return_dict['full_template_deformation'])
+            losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices + return_dict['full_template_deformation'], neural_blendshapes.face_index)
 
             losses['cbuffers_regularization'] = cbuffers_regularization(cbuffers)
             
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict], 
-                                                                           views_subset["landmark"], iteration, facs_adaptive, facs_weight=0)
+                                                                           views_subset["landmark"], iteration, facs_adaptive, facs_weight=0) 
 
 
             with torch.no_grad():
