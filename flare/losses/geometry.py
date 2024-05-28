@@ -21,7 +21,7 @@ def laplacian_loss(mesh: Mesh):
     return loss.mean()
 
 
-def laplacian_loss(mesh: Mesh, canonical_vertices,):
+def laplacian_loss(mesh: Mesh, deformed_vertices,):
     """ Compute the Laplacian term as the mean squared Euclidean norm of the differential coordinates.
 
     Args:
@@ -30,14 +30,24 @@ def laplacian_loss(mesh: Mesh, canonical_vertices,):
 
     L = mesh.laplacian
     V = mesh.vertices
-
+        
     mesh_laplacian = L.mm(V)
-    canonical_laplacian = L.mm(canonical_vertices)
+    if len(deformed_vertices.shape) == 2:
+        canonical_laplacian = L.mm(deformed_vertices)
 
-    # print(mesh_laplacian.shape)
-    # exit()
+        # print(mesh_laplacian.shape)
+        # exit()
 
-    loss = torch.pow(mesh_laplacian - canonical_laplacian, 2) 
+        loss = torch.pow(mesh_laplacian - canonical_laplacian, 2) 
+
+    else:
+        losses = []
+        for deformed_vertex in deformed_vertices:
+            canonical_laplacian = L.mm(deformed_vertex)
+            losses.append(torch.pow(mesh_laplacian - canonical_laplacian, 2))
+
+        loss = torch.stack(losses).mean(dim=0)
+
 
     # add Euclidean norm of the vertex coordinates
     # loss += torch.pow((V - canonical_vertices).norm(dim=-1), 2)

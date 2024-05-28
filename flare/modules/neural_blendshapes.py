@@ -26,8 +26,8 @@ class NeuralBlendshapes(nn.Module):
         # self.coords_encoder, dim = get_embedder(7, input_dims=3)
 
 
-        self.expression_deformation = torch.zeros_like(self.ict_facekit.expression_shape_modes)
-        self.template_deformation = torch.zeros_like(self.ict_facekit.neutral_mesh_canonical[0])
+        self.expression_deformation = torch.nn.Parameter(torch.zeros_like(self.ict_facekit.expression_shape_modes))
+        self.template_deformation = torch.nn.Parameter(torch.zeros_like(self.ict_facekit.canonical[0]))
 
         # self.eyeball_deformer = nn.Sequential(
         #                             nn.Linear(3+3+53, 64),
@@ -63,7 +63,7 @@ class NeuralBlendshapes(nn.Module):
         # self.num_head_deformer = self.eyeball_index
         # self.num_eye_deformer = self.template.shape[0] - self.eyeball_index
 
-        self.num_face_deformer = self.face_index
+        # self.num_face_deformer = self.face_index
 
         self.num_vertex = self.template.shape[0]
 
@@ -77,16 +77,16 @@ class NeuralBlendshapes(nn.Module):
             
         bsize = features.shape[0]
 
-        expression_deformation = self.ict_facekit(expression_weights = features[..., :53]) - self.ict_facekit.neutral_mesh_canonical
+        expression_deformation = self.ict_facekit(expression_weights = features[..., :53]) - self.ict_facekit.canonical
         
         template_deformation = self.template_deformation
-        pose_weight = self.pose_weight(self.ict_facekit.neutral_mesh_canonical[0])
+        pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
 
         additional_expression_deformation = torch.einsum('bn, bnmd -> bmd', features[..., :53], self.expression_deformation.repeat(bsize, 1, 1, 1)) 
         
         # expression_deformation[:, self.eyeball_index:] += eyeball_deformation
 
-        expression_vertices = self.ict_facekit.neutral_mesh_canonical.repeat(bsize, 1, 1)
+        expression_vertices = self.ict_facekit.canonical.repeat(bsize, 1, 1)
         expression_vertices += additional_expression_deformation
         expression_vertices += expression_deformation 
         expression_vertices += template_deformation[None]

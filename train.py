@@ -54,7 +54,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
-    ict_canonical_mesh = Mesh(ict_facekit.neutral_mesh_canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
+    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
     ict_canonical_mesh.compute_connectivity()
 
     write_mesh(Path(meshes_save_path / "init_ict_canonical.obj"), ict_canonical_mesh.to('cpu'))
@@ -219,11 +219,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
 
             losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
-            losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
+            if loss_weights["perceptual_loss"] > 0.0:
+                losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
             # losses['segmentation'], losses['semantic_stat'] = segmentation_loss(views_subset, gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
             losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
-            losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices + return_dict['full_template_deformation'])
+            losses['laplacian_regularization'] = laplacian_loss(mesh, deformed_vertices)
 
             losses['cbuffers_regularization'] = cbuffers_regularization(cbuffers)
             
