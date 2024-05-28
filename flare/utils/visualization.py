@@ -115,7 +115,7 @@ def diffuse_specular(cbuffers, gbuffer_mask, color_list, convert_uint):
     H, W = 512, 512
 
 # ==================== visualizations =================================
-def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images_save_path, iteration, save_name=None):
+def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images_save_path, iteration, save_name=None, ict_facekit=None):
     device = shaded_image.device
     convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
 
@@ -134,6 +134,41 @@ def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images
     shading = add_directionlight(debug_gbuffer["normal"].reshape([1, -1, 3]), device)
     shading = shading.reshape(debug_gbuffer["normal"].shape)
     shading = shading * gbuffer_mask 
+
+
+
+    # both landmarks_on_clip_space and detected_landmarks are in clip space -> x, y in range of [-1, 1]
+
+    # landmark_indices = ict_facekit.landmark_indices
+    # landmarks_on_clip_space = debug_gbuffer['deformed_verts_clip_space'].clone()[:, landmark_indices]
+    # landmarks_on_clip_space = landmarks_on_clip_space[..., :3] / torch.clamp(landmarks_on_clip_space[..., 3:4], min=1e-8) 
+    
+
+    # detected_landmarks = debug_view['landmark'].clone().detach()
+    # detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
+    # detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
+    
+    # draw landmarks on shaded image, debug_view["img"], normal_image, shading
+    # landmarks on clip space for red 3x3 dot
+    # detected landmarks for green 3x3 dot
+    # for i in range(Bz):
+    #     for j in range(landmarks_on_clip_space.shape[1]):
+    #         x, y = int((landmarks_on_clip_space[i, j, 0] + 1) * W / 2), int((landmarks_on_clip_space[i, j, 1] + 1) * H / 2)
+    #         x_, y_ = int((detected_landmarks[i, j, 0] + 1) * W / 2), int((detected_landmarks[i, j, 1] + 1) * H / 2)
+    #         shaded_image[i, y-1:y+2, x-1:x+2] = torch.tensor([1, 0, 0], device=device)
+    #         shaded_image[i, y_-1:y_+2, x_-1:x_+2] = torch.tensor([0, 1, 0], device=device)
+    #         debug_view["img"][i, y-1:y+2, x-1:x+2] = torch.tensor([1, 0, 0], device=device)
+    #         normal_image[i, y-1:y+2, x-1:x+2] = torch.tensor([1, 0, 0], device=device)
+    #         shading[i, y-1:y+2, x-1:x+2] = torch.tensor([1, 0, 0], device=device)
+    #         debug_view["img"][i, y_-1:y_+2, x_-1:x_+2] = torch.tensor([0, 1, 0], device=device)
+    #         normal_image[i, y_-1:y_+2, x_-1:x_+2] = torch.tensor([0, 1, 0], device=device)
+    #         shading[i, y_-1:y_+2, x_-1:x_+2] = torch.tensor([0, 1, 0], device=device)
+
+
+
+
+    
+
 
     save_individual_img(shaded_image, debug_view, normal_image, gbuffer_mask, cbuffers, grid_path_each)
     color_list = []

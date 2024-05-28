@@ -26,7 +26,7 @@ def image_loss_fn(img, target):
     img    = _tonemap_srgb(torch.log(torch.clamp(img, min=0, max=65535) + 1))
     target = _tonemap_srgb(torch.log(torch.clamp(target, min=0, max=65535) + 1))
 
-    out = (img - target).abs().reshape(img.shape[0], -1).mean(dim=-1)
+    out = (img - target).abs().mean()
     # out = torch.nn.functional.l1_loss(img, target)
     if torch.is_anomaly_enabled():
         assert torch.all(torch.isfinite(out)), "Output of image_loss contains inf or NaN"
@@ -42,7 +42,7 @@ def mask_loss(masks, gbuffers, loss_function = torch.nn.MSELoss()):
         loss_function (Callable): Function for comparing the masks or generally a set of pixels
     """
     
-    return (masks - gbuffers).pow(2).reshape(gbuffers.shape[0], -1).mean(dim=-1)
+    return (masks - gbuffers).pow(2).mean()
     loss = []
     for gt_mask, gbuffer_mask in zip(masks, gbuffers):
         loss.append(loss_function(gt_mask, gbuffer_mask))

@@ -31,20 +31,19 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, features, nueral_blendsha
     # Get the indices of landmarks used by the handle-based deformer
     landmark_indices = ict_facekit.landmark_indices
     landmarks_on_clip_space = gbuffers['deformed_verts_clip_space'].clone()[:, landmark_indices]
-    landmarks_on_clip_space = landmarks_on_clip_space[..., :3] / torch.clamp(landmarks_on_clip_space[..., 3:], min=1e-8)
+    landmarks_on_clip_space = landmarks_on_clip_space[..., :2] / torch.clamp(landmarks_on_clip_space[..., -1:], min=1e-8) 
 
     detected_landmarks = views_subset['landmark'].clone().detach()
     detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
-    detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
 
-    landmark_loss = ((detected_landmarks[:, 17:, :2] - landmarks_on_clip_space[:, 17:, :2]).pow(2) * detected_landmarks[:, 17:, -1:]).reshape(detected_landmarks.shape[0], -1).mean(dim=-1)
+    landmark_loss = ((detected_landmarks[:, 17:, :2] - landmarks_on_clip_space[:, 17:, :2]).pow(2) * detected_landmarks[:, 17:, -1:]).mean()
 
     gt_closure = detected_landmarks[:, None, 17:, :2] - detected_landmarks[:, 17:, None, :2] 
     gt_closure_confidence = detected_landmarks[:, None, 17:, -1:] * detected_landmarks[:, 17:, None, -1:]
 
     estimated_closure = landmarks_on_clip_space[:, None, 17:, :2] - landmarks_on_clip_space[:, 17:, None, :2]
 
-    closure_loss = ((estimated_closure - gt_closure).pow(2) * gt_closure_confidence).reshape(detected_landmarks.shape[0], -1).mean(dim=-1)
+    closure_loss = ((estimated_closure - gt_closure).pow(2) * gt_closure_confidence).mean()
 
     # eye_closure_loss = closure_loss_block(detected_landmarks, landmarks_on_clip_space, EYELID_PAIRS) * 2
     # lip_closure_loss = closure_loss_block(detected_landmarks, landmarks_on_clip_space, LIP_PAIRS)

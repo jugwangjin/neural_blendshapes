@@ -1,4 +1,5 @@
-run_name = no_mediapipe_adjust_v3
+run_name = apply_scale_no_divide_by_z_v1
+
 
 
 input_dir = ../flare_data/marcel
@@ -13,9 +14,9 @@ sample_idx_ratio = 1
 iterations = 40000
 upsample_iterations = [500]
 
-lr_encoder = 1e-4
+lr_encoder = 5e-5
 lr_shader = 1e-3
-lr_deformer = 1e-3
+lr_deformer = 1e-4
 
 
 
@@ -27,15 +28,15 @@ weight_white_lgt_regularization = 0.01
 weight_roughness_regularization = 0.01
 weight_fresnel_coeff = 0.01
 weight_normal_regularization = 0.02
-weight_laplacian_regularization = 1e3
+weight_laplacian_regularization = 1e1
 
 weight_normal = 0.25
-weight_normal_laplacian = 1
-weight_landmark = 100
-weight_closure = 500
+weight_normal_laplacian = 10
+weight_landmark = 1
+weight_closure = 1
 
-weight_segmentation = 0.1
-weight_semantic_stat = 0.25
+weight_segmentation = 0.25
+weight_semantic_stat = 1
 
 
 

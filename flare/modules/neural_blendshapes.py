@@ -35,65 +35,64 @@ class NeuralBlendshapes(nn.Module):
 
         # self.coords_encoder, dim = get_embedder(7, input_dims=3)
 
-        self.only_coords_encoder, dim = get_embedder(4, input_dims=6)
+class NeuralBlendshapes(nn.Module):
+    def __init__(self, vertex_parts, ict_facekit):
+        super().__init__()
+        self.encoder = ResnetEncoder(53+6, ict_facekit)
+
+        self.ict_facekit = ict_facekit
+
+
+        # self.coords_encoder, dim = get_embedder(7, input_dims=3)
+
 
 
         self.expression_deformer = nn.Sequential(
-                    nn.Linear(dim+53, 256),
-                    nn.SiLU(),
-                    nn.Linear(256,256),
-                    nn.SiLU(),
-                    nn.Linear(256,256),
-                    nn.SiLU(),
-                    nn.Linear(256,256),
-                    nn.SiLU(),
-                    nn.Linear(256,256),
-                    nn.SiLU(),
-                    nn.Linear(256,3)
+                    nn.Linear(3+53, 512),
+                    GaussianActivation(),
+                    nn.Linear(512, 512),
+                    GaussianActivation(),
+                    nn.Linear(512, 512),
+                    GaussianActivation(),
+                    nn.Linear(512, 512),
+                    GaussianActivation(),
+                    nn.Linear(512, 512),
+                    GaussianActivation(),
+                    nn.Linear(512,3)
         )
         
-        
-        self.template_encoder, dim = get_embedder(4, input_dims=3)
 
         self.face_index = 9409     
 
         self.eyeball_index = 21451
-   
+
 
         self.template_deformer = nn.Sequential(
-                    nn.Linear(dim, 256),
-                    nn.SiLU(),
-                    nn.Linear(256,256),
-                    nn.SiLU(),
-                    nn.Linear(256,256),
-                    nn.SiLU(),
-                    nn.Linear(256,256),
-                    nn.SiLU(),
-                    nn.Linear(256,256),
-                    nn.SiLU(),
-                    nn.Linear(256,3)
+                    nn.Linear(3, 512),
+                    GaussianActivation(),
+                    nn.Linear(512, 512),
+                    GaussianActivation(),
+                    nn.Linear(512, 512),
+                    GaussianActivation(),
+                    nn.Linear(512, 512),
+                    GaussianActivation(),
+                    nn.Linear(512, 512),
+                    GaussianActivation(),
+                    nn.Linear(512,3)
         )
         
         
-        # self.eyeball_deformer = nn.Sequential(
-        #                             nn.Linear(3+3+53, 64),
-        #                             nn.SiLU(),
-        #                             nn.Linear(64, 64),
-        #                             nn.SiLU(),
-        #                             nn.Linear(64, 3)
-        #                             )
-
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
-                    nn.SiLU(),
+                    GaussianActivation(),
                     nn.Linear(32,32),
-                    nn.SiLU(),
+                    GaussianActivation(),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
 
-        initialize_weights(self.expression_deformer, gain=0.01)
-        initialize_weights(self.template_deformer, gain=0.01)
+        initialize_weights(self.expression_deformer, gain=0.1)
+        initialize_weights(self.template_deformer, gain=0.1)
         # initialize_weights(self.eyeball_deformer, gain=0.01)
         initialize_weights(self.pose_weight, gain=0.01)
         self.pose_weight[-2].bias.data[0] = 3.
@@ -116,28 +115,27 @@ class NeuralBlendshapes(nn.Module):
 
     def forward(self, image=None, views=None, features=None, image_input=True):
         if image_input:
-            # print(image.shape)
-            if image.shape[1] != 3 and image.shape[3] == 3:
-                image = image.permute(0, 3, 1, 2)
-            features = self.encoder(image, views)
+            features = self.encoder(views)
             
         bsize = features.shape[0]
 
-        expression_deformation = self.ict_facekit(expression_weights = features[..., :53]) - self.ict_facekit.neutral_mesh_canonical
+        deformed_ict = self.ict_facekit(expression_weights = features[..., :53])
 
-        template_deformation = self.template_deformer(self.template_encoder(self.ict_facekit.neutral_mesh_canonical[0]))
-        pose_weight = self.pose_weight(self.ict_facekit.neutral_mesh_canonical[0])
+        expression_deformation = deformed_ict - self.ict_facekit.canonical # shape of B, V, 3
+
+        template_deformation = self.template_deformer(self.ict_facekit.canonical[0])
+        pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
 
         # template_deformation = self.template_deformation
-        coords_encoded = self.only_coords_encoder(torch.cat([self.ict_facekit.neutral_mesh_canonical.repeat(bsize, 1, 1), \
-                                                             expression_deformation], dim=2))
-        additional_expression_deformation = self.expression_deformer(torch.cat([coords_encoded, \
-                                    features[:, None, :53].repeat(1, self.num_vertex, 1)], dim=2)) 
-            
+        coords_cat = torch.cat([self.ict_facekit.canonical.repeat(bsize, 1, 1), features[:, None, :53].repeat(1, self.num_vertex, 1)], dim=2)
+        additional_expression_deformation = self.expression_deformer(coords_cat)
         
+
+
+
         # expression_deformation[:, self.eyeball_index:] += eyeball_deformation
 
-        expression_vertices = self.ict_facekit.neutral_mesh_canonical.repeat(bsize, 1, 1)
+        expression_vertices = self.ict_facekit.canonical.repeat(bsize, 1, 1)
         expression_vertices += additional_expression_deformation
         expression_vertices += expression_deformation 
         # expression_vertices += additional_expression_deformation

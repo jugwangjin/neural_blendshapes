@@ -71,9 +71,8 @@ class DatasetLoader(Dataset):
         self.K[0, 2] = focal_cxcy[2] * self.resolution[0]
         self.K[1, 2] = focal_cxcy[3] * self.resolution[1]
 
-        self.face_alignment = face_alignment.FaceAlignment(face_alignment.LandmarksType.THREE_D, flip_input=False, 
+        self.face_alignment = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, flip_input=False, 
                                                             device='cuda' if torch.cuda.is_available() else 'cpu')
-
 
         BaseOptions = mp.tasks.BaseOptions
         FaceLandmarker = mp.tasks.vision.FaceLandmarker
@@ -94,12 +93,12 @@ class DatasetLoader(Dataset):
         if self.pre_load:
             self.all_images, self.all_masks, self.all_skin_mask, \
             self.all_camera, self.frames, self.all_landmarks,\
-            self.all_mp_landmarks, self.all_mp_blendshapes, self.all_mp_transform_matrix = [], [], [], [], [], [], [], [], []
+            self.all_mp_landmarks, self.all_mp_blendshapes, self.all_mp_transform_matrix, self.all_normals = [], [], [], [], [], [], [], [], [], []
             
             print('loading all images from all_img_path')
             for i in tqdm(range(len(self.all_img_path))):
                 img, mask, skin_mask, camera, frame_name, landmark, \
-                    mp_landmark, mp_blendshape, mp_transform_matrix = self._parse_frame_single(i)
+                    mp_landmark, mp_blendshape, mp_transform_matrix, normal = self._parse_frame_single(i)
                 self.all_images.append(img)
                 self.all_masks.append(mask)
                 self.all_skin_mask.append(skin_mask)
@@ -109,6 +108,8 @@ class DatasetLoader(Dataset):
                 self.all_mp_landmarks.append(mp_landmark)
                 self.all_mp_blendshapes.append(mp_blendshape)
                 self.all_mp_transform_matrix.append(mp_transform_matrix)
+                self.all_normals.append(normal)
+
 
             self.len_img = len(self.all_images)    
             print("loaded {:d} views".format(self.len_img))
@@ -152,11 +153,12 @@ class DatasetLoader(Dataset):
             camera = self.all_camera[itr % self.len_img]
             frame_name = self.frames[itr % self.len_img]
             landmark = self.all_landmarks[itr % self.len_img]
+            normal = self.all_normals[itr % self.len_img]
         else:
             local_itr = itr % self.len_img
             if local_itr not in self.loaded:
                 self.loaded[local_itr] = self._parse_frame_single(local_itr)
-            img, mask, skin_mask, camera, frame_name, landmark, mp_landmark, mp_blendshape, mp_transform_matrix = self.loaded[local_itr]
+            img, mask, skin_mask, camera, frame_name, landmark, mp_landmark, mp_blendshape, mp_transform_matrix, normal = self.loaded[local_itr]
 
         # facs = (facs / self.facs_range).clamp(0, 1)
 
@@ -171,6 +173,7 @@ class DatasetLoader(Dataset):
             'mp_landmark': mp_landmark,
             'mp_blendshape': mp_blendshape,
             'mp_transform_matrix': mp_transform_matrix,
+            'normal': normal,
         }
 
 
@@ -220,6 +223,26 @@ class DatasetLoader(Dataset):
         semantic_path = semantic_parent / (img_path.stem + ".png")
         semantic = _load_semantic(semantic_path)
     
+
+
+        # ================ normal =======================
+        normal_parent = img_path.parent.parent / "normal"
+        normal_path = normal_parent / (img_path.stem + ".png")
+        
+        if os.path.exists(normal_path):
+            normal = imageio.imread(normal_path)
+            normal = torch.tensor(normal / 255, dtype=torch.float32)
+
+        else:
+            normal = torch.zeros(512, 512, 3)
+
+        # normal mask is zero where all normal values are zero
+        normal_mask = (torch.sum(normal, dim=2) > 0).float()
+
+
+        # concat normal_mask on semantic
+        semantic = torch.cat([semantic, normal_mask[..., None]], dim=-1) # shape of 512, 512, 7
+
         # ================ img & mask =======================
         img  = _load_img(img_path)
         mask_parent = img_path.parent.parent / "mask"
@@ -240,6 +263,7 @@ class DatasetLoader(Dataset):
         camera = Camera(self.K, self.fixed_cam['R'], self.fixed_cam['t'], device=device)
 
         # facs = torch.tensor(json_dict["facs"], dtype=torch.float32)
+        # facs = torch.tensor(json_dict["facs"], dtype=torch.float32)
 
         frame_name = img_path.stem
 
@@ -247,7 +271,7 @@ class DatasetLoader(Dataset):
             landmarks, scores, _ = self.face_alignment.get_landmarks_from_image(str(img_path), return_bboxes=True, return_landmark_score=True)
 
             if len(landmarks) == 0:
-                landmark = torch.zeros(68, 4)
+                landmark = torch.zeros(68, 3)
             else:
                 landmark = torch.tensor(landmarks[0], dtype=torch.float32)
                 # print(torch.amin(landmark, dim=0), torch.amax(landmark, dim=0))
@@ -259,5 +283,5 @@ class DatasetLoader(Dataset):
 
         return img[None, ...], mask[None, ...], semantic[None, ...], \
                 camera, frame_name, landmark[None, ...], \
-                mp_landmark[None, ...], mp_blendshape[None, ...], mp_transform_matrix[None, ...]
+                mp_landmark[None, ...], mp_blendshape[None, ...], mp_transform_matrix[None, ...], normal[None, ...]
                     # Add batch dimension

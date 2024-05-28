@@ -43,4 +43,5 @@ class Dataset(torch.utils.data.Dataset):
             'mp_landmark': torch.cat(list([item['mp_landmark'] for item in batch]), dim=0).to(device),
             'mp_blendshape' : torch.cat(list([item['mp_blendshape'] for item in batch]), dim=0).to(device),
             'mp_transform_matrix' : torch.cat(list([item['mp_transform_matrix'] for item in batch]), dim=0).to(device),
+            'normal' : torch.cat(list([item['normal'] for item in batch]), dim=0).to(device),
         }

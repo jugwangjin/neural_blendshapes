@@ -72,4 +72,4 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
         loss = torch.mean((encoder_out - random_features[i:i+1]) ** 2)
         losses.append(loss)
 
-    return torch.stack(losses)
+    return torch.mean(torch.stack(losses))

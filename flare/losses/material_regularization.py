@@ -33,10 +33,10 @@ def cbuffers_regularization(cbuffers):
     roughness = material[..., 3:4]
     
     # roughness to be zero
-    loss = (roughness**2).reshape(bsize, -1).mean(dim=-1)
+    loss = (roughness**2).mean()
 
     # light to be white
-    loss += ((light[..., :3] - 1.0) ** 2).reshape(bsize, -1).mean(dim=-1)
+    loss += ((light[..., :3] - 1.0) ** 2).mean()
 
     return loss
 

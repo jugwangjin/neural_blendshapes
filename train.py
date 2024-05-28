@@ -151,17 +151,17 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         # "ict_landmark": args.weight_ict_landmark,
         # "ict_landmark_closure": args.weight_ict_closure,
         # "random_ict": args.weight_ict,
+        "normal_laplacian": args.weight_normal_laplacian,
         "feature_regularization": args.weight_feature_regularization,
         # "deformation_map_regularization": 1e-3,
         "cbuffers_regularization": args.weight_cbuffers_regularization,
         # "synthetic": args.weight_synthetic,
-        # "segmentation": args.weight_segmentation,
-        # "semantic_stat": args.weight_semantic_stat,
+        "segmentation": args.weight_segmentation,
+        "semantic_stat": args.weight_semantic_stat,
     }
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
     print(loss_weights)
-    if loss_weights["perceptual_loss"] > 0.0:
-        VGGloss = VGGPerceptualLoss().to(device)
+    VGGloss = VGGPerceptualLoss().to(device)
 
     print("=="*50)
     shader.train()
@@ -199,7 +199,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             iteration += 1
             progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}')
 
-            pretrain = iteration < args.iterations // 8
+            pretrain = iteration < args.iterations // 10
 
             # ==============================================================================================
             # encode input images
@@ -221,8 +221,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
             losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
-            # losses['segmentation'], losses['semantic_stat'] = segmentation_loss(views_subset, gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
+            losses['segmentation'], losses['semantic_stat'] = segmentation_loss(views_subset, gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
             losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
+            if pretrain:
+                losses['landmark'] *= 1e2
+                losses['closure'] *= 1e2
             losses['laplacian_regularization'] = laplacian_loss(mesh, ict_canonical_mesh.vertices + return_dict['full_template_deformation'], neural_blendshapes.face_index)
 
             losses['cbuffers_regularization'] = cbuffers_regularization(cbuffers)
@@ -230,20 +233,20 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict], 
                                                                            views_subset["landmark"], iteration, facs_adaptive, facs_weight=0) 
 
+            losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
 
             with torch.no_grad():
-                shading_decay = torch.exp(-(losses['landmark'] + losses['closure'] + losses['mask'])).detach()
+                shading_decay = torch.exp(-(losses['mask'] + losses['segmentation'] + losses['semantic_stat']).mean()).detach()
             # photometric losses decay by overall geometric loss
             # if the geometric loss is 0, the photometric losses are not decayed
             # exponentially decay the photometric losses by the overall geometric loss
             losses['shading'] = losses['shading'] * shading_decay
             losses['perceptual_loss'] = losses['perceptual_loss'] * shading_decay
+            losses['normal_laplacian'] = losses['normal_laplacian'] * shading_decay
             torch.cuda.empty_cache()
 
             # synthetic loss
             # losses['synthetic'] = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, 1, device) 
-
-            torch.cuda.empty_cache()
 
 
             loss = torch.tensor(0., device=device) 
@@ -322,10 +325,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 with torch.no_grad():
                     debug_rgb_pred, debug_gbuffer, debug_cbuffers = run(args, mesh, debug_views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt)
 
-
+                    
 
                     ## ============== visualize ==============================
-                    visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
+                    visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration, ict_facekit=ict_facekit)
 
                     del debug_gbuffer, debug_cbuffers, debug_rgb_pred
             if iteration == 1 or iteration % (args.visualization_frequency * 10) == 0:
