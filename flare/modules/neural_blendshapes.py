@@ -91,8 +91,8 @@ class NeuralBlendshapes(nn.Module):
                     nn.Sigmoid()
         )
 
-        initialize_weights(self.expression_deformer, gain=0.1)
-        initialize_weights(self.template_deformer, gain=0.1)
+        # initialize_weights(self.expression_deformer, gain=0.1)
+        # initialize_weights(self.template_deformer, gain=0.1)
         # initialize_weights(self.eyeball_deformer, gain=0.01)
         initialize_weights(self.pose_weight, gain=0.01)
         self.pose_weight[-2].bias.data[0] = 3.

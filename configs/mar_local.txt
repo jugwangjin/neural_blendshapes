@@ -11,12 +11,12 @@ output_dir = out/
 batch_size = 2
 sample_idx_ratio = 1
 
-iterations = 10000
+iterations = 20000
 upsample_iterations = [500]
 
-lr_encoder = 5e-5
+lr_encoder = 1e-4
 lr_shader = 1e-3
-lr_deformer = 1e-4
+lr_deformer = 3e-4
 
 
 

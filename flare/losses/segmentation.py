@@ -29,10 +29,17 @@ seg_map_to_vertex_labels[0] = [0]
 # seg_map_to_vertex_labels[2] = [4,8]
 seg_map_to_vertex_labels[1] = [1, -1]
 
+def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices, img_size=512):
+    # full face gt 2d points -> sample where gt_seg is 0
+    bsize = views_subset['skin_mask'].shape[0]
 
-def loss_function(gt_segs, canonical_positions, canonical_vertices, parts_indices, vertices_on_clip_space, img_size=512):
-    
-    bsize = gt_segs.shape[0]
+    gt_segs = views_subset['skin_mask'] # Shape of B, H, W, 6
+    # rendered_segs = gbuffers['vertex_labels'] # Shape of B, H, W, 9
+    # print(gt_segs.shape, rendered_segs.shape)
+    canonical_positions = gbuffers['canonical_position'] * views_subset["skin_mask"][..., :2].sum(dim=-1, keepdim=True)
+
+    vertices_on_clip_space = gbuffers['deformed_verts_clip_space'].clone()
+    vertices_on_clip_space = vertices_on_clip_space[..., :3] / torch.clamp(vertices_on_clip_space[..., 3:], min=1e-8)
 
     seman_losses = torch.tensor(0.0, device=gt_segs.device)
     stat_losses = torch.tensor(0.0, device=gt_segs.device)
@@ -85,34 +92,7 @@ def loss_function(gt_segs, canonical_positions, canonical_vertices, parts_indice
         seman_losses += (seman_loss / float(len(seg_map_to_vertex_labels)))
         stat_losses += (stat_loss / float(len(seg_map_to_vertex_labels)))
 
-    return seman_losses / bsize, stat_losses / bsize
-
-
-def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices, img_size=512, ict_gbuffers=None):
-    # full face gt 2d points -> sample where gt_seg is 0
-    bsize = views_subset['skin_mask'].shape[0]
-
-    gt_segs = views_subset['skin_mask'] # Shape of B, H, W, 6
-    # rendered_segs = gbuffers['vertex_labels'] # Shape of B, H, W, 9
-    # print(gt_segs.shape, rendered_segs.shape)
-    canonical_positions = gbuffers['canonical_position'] * views_subset["skin_mask"][..., :2].sum(dim=-1, keepdim=True)
-
-    vertices_on_clip_space = gbuffers['deformed_verts_clip_space'].clone()
-    vertices_on_clip_space = vertices_on_clip_space[..., :3] / torch.clamp(vertices_on_clip_space[..., 3:], min=1e-8)
-
-    seman_losses, stat_losses = loss_function(gt_segs, canonical_positions, canonical_vertices, parts_indices, vertices_on_clip_space, img_size=img_size)
-
-    if ict_gbuffers is not None:
-        canonical_positions = ict_gbuffers['canonical_position'] * views_subset["skin_mask"][..., :2].sum(dim=-1, keepdim=True)
-
-        vertices_on_clip_space = ict_gbuffers['deformed_verts_clip_space'].clone()
-        vertices_on_clip_space = vertices_on_clip_space[..., :3] / torch.clamp(vertices_on_clip_space[..., 3:], min=1e-8)
-
-        ict_seman_losses, ict_stat_losses = loss_function(gt_segs, canonical_positions, canonical_vertices, parts_indices, vertices_on_clip_space, img_size=img_size)
-        seman_losses += ict_seman_losses
-        stat_losses += ict_stat_losses
-
-    return seman_losses, stat_losses
-
+    return seman_losses/bsize, stat_losses/bsize
+ 
 
     
