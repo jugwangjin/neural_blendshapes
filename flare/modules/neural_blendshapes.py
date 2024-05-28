@@ -129,19 +129,18 @@ class NeuralBlendshapes(nn.Module):
         # template_deformation = self.template_deformation
         coords_cat = torch.cat([self.ict_facekit.canonical.repeat(bsize, 1, 1), features[:, None, :53].repeat(1, self.num_vertex, 1)], dim=2)
         additional_expression_deformation = self.expression_deformer(coords_cat)
-        
-
-
 
         # expression_deformation[:, self.eyeball_index:] += eyeball_deformation
 
         expression_vertices = self.ict_facekit.canonical.repeat(bsize, 1, 1)
-        expression_vertices += additional_expression_deformation
-        expression_vertices += expression_deformation 
-        # expression_vertices += additional_expression_deformation
         expression_vertices += template_deformation[None]
+        expression_vertices += expression_deformation 
+        only_ict_deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
+        expression_vertices += additional_expression_deformation
+        # expression_vertices += additional_expression_deformation
 
         deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
+
 
         return_dict = {} 
         return_dict['features'] = features
@@ -152,6 +151,7 @@ class NeuralBlendshapes(nn.Module):
         return_dict['full_expression_mesh'] = expression_vertices
         return_dict['pose_weight'] = pose_weight
         return_dict['full_deformed_mesh'] = deformed_mesh
+        return_dict['full_ict_deformed_mesh'] = only_ict_deformed_mesh
 
         return return_dict
 

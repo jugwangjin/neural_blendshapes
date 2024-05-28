@@ -11,7 +11,7 @@ output_dir = out/
 batch_size = 2
 sample_idx_ratio = 1
 
-iterations = 40000
+iterations = 10000
 upsample_iterations = [500]
 
 lr_encoder = 5e-5
@@ -35,7 +35,7 @@ weight_normal_laplacian = 10
 weight_landmark = 1
 weight_closure = 1
 
-weight_segmentation = 0.25
+weight_segmentation = 0.5
 weight_semantic_stat = 1
 
 
