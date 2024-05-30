@@ -24,10 +24,10 @@ from pytorch3d.loss import chamfer_distance
 from pytorch3d.ops import knn_points
 
 seg_map_to_vertex_labels = {}
-seg_map_to_vertex_labels[0] = [0]
+seg_map_to_vertex_labels[0] = [0, 1]
 # seg_map_to_vertex_labels[1] = [3,7]
 # seg_map_to_vertex_labels[2] = [4,8]
-seg_map_to_vertex_labels[1] = [1, -1]
+# seg_map_to_vertex_labels[1] = [1, -1]
 
 def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices, img_size=512):
     # full face gt 2d points -> sample where gt_seg is 0
@@ -36,7 +36,7 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
     gt_segs = views_subset['skin_mask'] # Shape of B, H, W, 6
     # rendered_segs = gbuffers['vertex_labels'] # Shape of B, H, W, 9
     # print(gt_segs.shape, rendered_segs.shape)
-    canonical_positions = gbuffers['canonical_position'] * views_subset["skin_mask"][..., :2].sum(dim=-1, keepdim=True)
+    canonical_positions = gbuffers['canonical_position'] * views_subset["skin_mask"][..., :1].sum(dim=-1, keepdim=True)
 
     vertices_on_clip_space = gbuffers['deformed_verts_clip_space'].clone()
     vertices_on_clip_space = vertices_on_clip_space[..., :3] / torch.clamp(vertices_on_clip_space[..., 3:], min=1e-8)
@@ -59,16 +59,13 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
             # print(valid_idx.shape)
 
         for i in range(len(seg_map_to_vertex_labels)):
+
             gt_seg_pixels = (torch.nonzero(gt_seg[:,:,i]) / (img_size - 1)) * 2 - 1
-            # print(rendered_seg.shape)
+
             part_index = []
             
             for n in seg_map_to_vertex_labels[i]:
-                if n == -1:
-                    part_index += list(range(6706, 9409))
-                    continue
-                else:
-                    part_index += parts_indices[n]
+                part_index += parts_indices[n]
             #     print(n, len(parts_indices[n]))
             # print(len(part_index))
             # part index should be intersection of valid_idx and part index
@@ -84,14 +81,14 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
             seman_loss += cd_loss
             # print(batch_loss)
             # additionally, get mean and std of them and add to loss
-            gt_seg_pixels_mean = gt_seg_pixels.mean(dim=0)
-            rendered_seg_pixels_mean = seg_pixels_on_clip_space.mean(dim=0)
+            # gt_seg_pixels_mean = gt_seg_pixels.mean(dim=0)
+            # rendered_seg_pixels_mean = seg_pixels_on_clip_space.mean(dim=0)
 
-            stat_loss += (gt_seg_pixels_mean - rendered_seg_pixels_mean).pow(2).mean()
+            # stat_loss += (gt_seg_pixels_mean - rendered_seg_pixels_mean).pow(2).mean()
 
         seman_losses += (seman_loss / float(len(seg_map_to_vertex_labels)))
-        stat_losses += (stat_loss / float(len(seg_map_to_vertex_labels)))
-
+        # stat_losses += (stat_loss / float(len(seg_map_to_vertex_labels)))
+    # exit()
     return seman_losses/bsize, stat_losses/bsize
  
 

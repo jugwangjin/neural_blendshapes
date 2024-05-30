@@ -1,3 +1,7 @@
 [submodule "face_normals"]
 	path = face_normals
 	url = https://github.com/boukhayma/face_normals
+
+[submodule "NeuralJacobianFields"]
+	path = NeuralJacobianFields
+	url = https://github.com/ThibaultGROUEIX/NeuralJacobianFields

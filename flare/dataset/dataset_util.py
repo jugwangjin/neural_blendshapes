@@ -83,7 +83,7 @@ def _load_img(fn):
 def _load_semantic(fn):
     img = imageio.imread(fn, mode='F')
     h, w = img.shape
-    semantics = np.zeros((h, w, 3))
+    semantics = np.zeros((h, w, 2))
     # Labels that ICT have
     # face, head/neck/, left eye, right eye, mouth interior
     # face + eyebrow + nose + upper lip + lower lip + ears +  == ICT-FaceKit.full_face_area
@@ -119,7 +119,9 @@ def _load_semantic(fn):
     # eyes area -> not effective 
 
     # tight face area : skin + nose + left eyebwow + right eyebrow + upper lip + lower lip 
-    semantics[:, :, 0] = ((img == 1) + (img == 2) + (img == 3) + (img == 10) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
+    semantics[:, :, 0] = ((img == 1) + (img == 2) + (img == 3) + (img == 10) + (img == 12) + (img == 13)\
+                        + (img == 17) + (img == 16) + (img == 15) + (img == 14) + (img==7) + (img==8) + (img==9)) >= 1 # skin, nose, ears, neck, lips
+    # semantics[:, :, 0] = ((img == 1) + (img == 2) + (img == 3) + (img == 10) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
     # left eyeball
     # semantics[:, :, 1] = (img == 4) >= 1
     # # right eyeball
@@ -129,11 +131,12 @@ def _load_semantic(fn):
     # hair + cloth +1necklace + neck
 
 
+    # hair and neck
+    # semantics[:, :, 1] = ((img == 17) + (img == 16) + (img == 15) + (img == 14) + (img==7) + (img==8) + (img==9)) >= 1
+    # semantics[:, :, 1] = ((img == 17) + (img == 16) + (img == 15) + (img == 14) + (img==7) + (img==8) + (img==9)) >= 1
 
-    semantics[:, :, 1] = ((img == 17) + (img == 16) + (img == 15) + (img == 14) + (img==7) + (img==8) + (img==9)) >= 1
 
-
-    semantics[:, :, 2] = 1. - np.sum(semantics[:, :, :-1], 2) # background
+    semantics[:, :, 1] = 1. - np.sum(semantics[:, :, :-1], 2) # background
 
     # semantics[:, :, 0] = ((img == 1) + (img == 10) + (img == 8) + (img == 7) + (img == 14) + (img == 6) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
     # semantics[:, :, 1] = ((img == 4) + (img == 5)) >= 1 # left eye, right eye

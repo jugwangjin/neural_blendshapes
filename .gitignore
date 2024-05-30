@@ -1,5 +1,6 @@
 **/__pycache__
-
+NeuralJacobianFields
+NFR_pytorch
 # outputs
 debug
 wandb

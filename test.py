@@ -151,7 +151,7 @@ if __name__ == '__main__':
 
 
     model_path = Path(experiment_dir / "stage_2" / "network_weights" / f"neural_blendshapes_latest.pt")
-    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, device=device) 
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, exp_dir=experiment_dir, device=device) 
 
     head_template = ict_canonical_mesh.vertices[ict_facekit.head_indices].to(device)
     eye_template = ict_canonical_mesh.vertices[ict_facekit.eyeball_indices].to(device)

@@ -7,6 +7,8 @@ from flare.modules.embedder import *
 # import tinycudann as tcnn
 import pytorch3d.transforms as pt3d
 
+from flare.modules.NJF_sourcemesh import SourceMesh
+import os
 
 # different activation functions
 class GaussianActivation(nn.Module):
@@ -19,11 +21,12 @@ class GaussianActivation(nn.Module):
 
 def initialize_weights(m, gain=0.1):
 
-    for name, param in m.named_parameters():
-        if 'weight' in name:
-            nn.init.xavier_uniform_(param.data, gain=gain)
-        if 'bias' in name:
-            param.data.zero_()
+    # iterate over layers, apply if it is nn.Linear
+
+    for l in m.children():
+        if isinstance(l, nn.Linear):
+            nn.init.xavier_uniform_(l.weight, gain=gain)
+            l.bias.data.zero_()
 
 class NeuralBlendshapes(nn.Module):
     def __init__(self, vertex_parts, ict_facekit):
@@ -36,118 +39,190 @@ class NeuralBlendshapes(nn.Module):
         # self.coords_encoder, dim = get_embedder(7, input_dims=3)
 
 class NeuralBlendshapes(nn.Module):
-    def __init__(self, vertex_parts, ict_facekit):
+    def __init__(self, vertex_parts, ict_facekit, exp_dir):
         super().__init__()
         self.encoder = ResnetEncoder(53+6, ict_facekit)
 
         self.ict_facekit = ict_facekit
-
-
-        # self.coords_encoder, dim = get_embedder(7, input_dims=3)
-
-
-
-        self.expression_deformer = nn.Sequential(
-                    nn.Linear(3+53, 512),
-                    GaussianActivation(),
-                    nn.Linear(512, 512),
-                    GaussianActivation(),
-                    nn.Linear(512, 512),
-                    GaussianActivation(),
-                    nn.Linear(512, 512),
-                    GaussianActivation(),
-                    nn.Linear(512, 512),
-                    GaussianActivation(),
-                    nn.Linear(512,3)
-        )
         
-
         self.face_index = 9409     
 
-        self.eyeball_index = 21451
-
-
-        self.template_deformer = nn.Sequential(
-                    nn.Linear(3, 512),
-                    GaussianActivation(),
-                    nn.Linear(512, 512),
-                    GaussianActivation(),
-                    nn.Linear(512, 512),
-                    GaussianActivation(),
-                    nn.Linear(512, 512),
-                    GaussianActivation(),
-                    nn.Linear(512, 512),
-                    GaussianActivation(),
-                    nn.Linear(512,3)
-        )
         
+        self.head_index = 11248
+
+        # ict_facekit.neutral_mesh_canonical[0].cpu().data, ict_facekit.faces.cpu().data
+
+        vertices = ict_facekit.canonical[0].cpu().data.numpy()
+        faces = ict_facekit.faces.cpu().data.numpy()
+        
+        # remove source_mesh directory
+        if os.path.exists(os.path.join(str(exp_dir), 'source_mesh')):
+            os.system('rm -r ' + os.path.join(str(exp_dir), 'source_mesh'))
+        os.makedirs(os.path.join(str(exp_dir), 'source_mesh'), exist_ok=True)
+        self.source_mesh = SourceMesh(source_ind=None, source_dir = os.path.join(str(exp_dir), 'source_mesh'), \
+                                      extra_source_fields=[], random_scale=1, use_wks=False, random_centering=False, cpuonly=False)
+        
+        # filter faces
+        faces = faces[faces[:, 0] < self.head_index]
+        faces = faces[faces[:, 1] < self.head_index]
+        faces = faces[faces[:, 2] < self.head_index]
+
+        self.source_mesh.load(source_v = vertices[:self.head_index], source_f = faces)
+
+
+        point_dim = self.source_mesh.get_point_dim()
+        code_dim = 53
+
+
+        self.points_encoder, encoded_point_dim = get_embedder(4, input_dims=point_dim)
+        self.coords_encoder, encoded_coord_dim = get_embedder(4, input_dims=3)
+
+        self.expression_deformer = nn.Sequential(nn.Linear(encoded_point_dim + code_dim + 9, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 9))
+        
+        self.global_translation = nn.Sequential(nn.Linear(53, 32),
+                                                 GaussianActivation(),
+                                                 nn.Linear(32, 32),
+                                                 GaussianActivation(),
+                                                 nn.Linear(32, 3))
+
         
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
                     GaussianActivation(),
+                    
                     nn.Linear(32,32),
                     GaussianActivation(),
+                    
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
 
-        # initialize_weights(self.expression_deformer, gain=0.1)
-        # initialize_weights(self.template_deformer, gain=0.1)
-        # initialize_weights(self.eyeball_deformer, gain=0.01)
+        self.template_deformation = nn.Sequential(nn.Linear(encoded_coord_dim, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 3))
+        
+        self.expression_innards = nn.Sequential(nn.Linear(encoded_coord_dim + code_dim + 3, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 256),
+                                                  GaussianActivation(),
+                                                  nn.Linear(256, 3))
+
+
+        # zero deformation as the default
+        initialize_weights(self.template_deformation, gain=0.01)
+        self.template_deformation[-1].bias.data.zero_()
+
+        initialize_weights(self.expression_innards, gain=0.01)
+        self.expression_innards[-1].bias.data.zero_()
+
+        # last layer to all zeros, to make zero deformation as the default            
+        initialize_weights(self.expression_deformer, gain=0.01)
+        self.expression_deformer[-1].weight.data.zero_()
+        self.expression_deformer[-1].bias.data.zero_()
+
+        # by default, weight to almost ones
         initialize_weights(self.pose_weight, gain=0.01)
         self.pose_weight[-2].bias.data[0] = 3.
 
-        self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
 
+        initialize_weights(self.global_translation, gain=0.01)
+        self.global_translation[-1].bias.data.zero_()
+
+        self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
 
 
     def set_template(self, template, uv_template, vertex_parts=None, full_shape=None, head_indices=None, eyeball_indices=None):
         self.register_buffer('template', template)     
         # self.register_buffer('template', torch.cat([template, uv_template[0] - 0.5], dim=1))     
 
-        self.num_head_deformer = self.eyeball_index
-        self.num_eye_deformer = self.template.shape[0] - self.eyeball_index
-
         self.num_face_deformer = self.face_index
 
         self.num_vertex = self.template.shape[0]
+
+    '''
+    TODO
+    - part-wise solver? -> inefficient. 
+    - eye/mouth -> simple mlp deformer.
+    - or, make pseudo-connection between the parts and the whole mesh. -> it will make more not 2-manifold
+    - make a virtual point, and connect the virtual point to the part.
+      
+    '''
 
 
     def forward(self, image=None, views=None, features=None, image_input=True):
         if image_input:
             features = self.encoder(views)
             
+
         bsize = features.shape[0]
 
-        deformed_ict = self.ict_facekit(expression_weights = features[..., :53])
+        points = self.source_mesh.get_centroids_and_normals()
+        encoded_points = self.points_encoder(points)
+        encoded_coords = self.coords_encoder(self.ict_facekit.canonical[0])
 
-        expression_deformation = deformed_ict - self.ict_facekit.canonical # shape of B, V, 3
+        template_deformation = self.template_deformation(encoded_coords)
+        template_mesh = self.template + template_deformation
 
-        template_deformation = self.template_deformer(self.ict_facekit.canonical[0])
         pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
 
-        # template_deformation = self.template_deformation
-        coords_cat = torch.cat([self.ict_facekit.canonical.repeat(bsize, 1, 1), features[:, None, :53].repeat(1, self.num_vertex, 1)], dim=2)
-        additional_expression_deformation = self.expression_deformer(coords_cat)
+        deformed_ict = self.ict_facekit(expression_weights = features[..., :53])
+        only_ict_deformed_mesh = self.apply_deformation(deformed_ict + template_deformation[None], features, pose_weight)
 
-        # expression_deformation[:, self.eyeball_index:] += eyeball_deformation
+        ict_jacobian = self.source_mesh.jacobians_from_vertices(deformed_ict[:, :self.head_index])
 
-        expression_vertices = self.ict_facekit.canonical.repeat(bsize, 1, 1)
-        expression_vertices += template_deformation[None]
-        expression_vertices += expression_deformation 
-        only_ict_deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
-        expression_vertices += additional_expression_deformation
-        # expression_vertices += additional_expression_deformation
+        expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), features[:, None, :53].repeat(1, points.shape[0], 1), ict_jacobian.reshape(bsize, -1, 9)], dim=2) # B V ? 
+        expression_jacobian = self.expression_deformer(expression_input).reshape(bsize, -1, 3, 3) + ict_jacobian
+        
+        expression_mesh = []
+        for b in range(bsize):
+            expression_mesh.append(self.source_mesh.vertices_from_jacobians(expression_jacobian[b:b+1]))
+        expression_mesh = torch.cat(expression_mesh, dim=0)
+
+        # mean translated positions
+        expression_backhead_mean = expression_mesh[:, 6705:self.face_index].mean(dim=1)
+        ict_backhead_mean = deformed_ict[:, 6705:self.face_index].mean(dim=1)
+        global_translation = ict_backhead_mean - expression_backhead_mean
+
+        global_translation += self.global_translation(features[..., :53])
+        expression_mesh += global_translation[:, None]
+
+        innards_expression_input = torch.cat([encoded_coords[None, self.head_index:].repeat(bsize, 1, 1), features[:, None, :53].repeat(1, self.template[self.head_index:].shape[0], 1), deformed_ict[:, self.head_index:]], dim=2) # B V ?
+        innards_expression = self.expression_innards(innards_expression_input)
+
+        expression_mesh = torch.cat([expression_mesh, deformed_ict[:, self.head_index:] + innards_expression], dim=1)
+    
+        expression_vertices = expression_mesh + template_deformation[None] # because the neutral mesh is already in the canonical space
 
         deformed_mesh = self.apply_deformation(expression_vertices, features, pose_weight)
 
 
         return_dict = {} 
         return_dict['features'] = features
-
-        return_dict['full_template_deformation'] = template_deformation
-        return_dict['full_expression_deformation'] = expression_deformation
-        return_dict['additional_expression_deformation'] = additional_expression_deformation
+        return_dict['template_mesh'] = template_mesh
         return_dict['full_expression_mesh'] = expression_vertices
         return_dict['pose_weight'] = pose_weight
         return_dict['full_deformed_mesh'] = deformed_mesh
@@ -178,9 +253,13 @@ class NeuralBlendshapes(nn.Module):
         }
         torch.save(data, path)  
 
+    def to(self, device):
+        super().to(device)
+        self.source_mesh.to(device)
+        return self
 
-def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_facekit=None, device='cuda'):
-    neural_blendshapes = NeuralBlendshapes(vertex_parts, ict_facekit)
+def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_facekit=None, exp_dir=None, device='cuda'):
+    neural_blendshapes = NeuralBlendshapes(vertex_parts, ict_facekit, exp_dir)
     neural_blendshapes.to(device)
 
     import os
