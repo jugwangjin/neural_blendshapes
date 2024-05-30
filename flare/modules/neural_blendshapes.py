@@ -134,9 +134,9 @@ class NeuralBlendshapes(nn.Module):
 
         # zero deformation as the default
         initialize_weights(self.template_deformation, gain=0.01)
-        self.template_deformation[-1].bias.data.zero_()
 
         initialize_weights(self.expression_innards, gain=0.01)
+        self.expression_innards[-1].weight.data.zero_()
         self.expression_innards[-1].bias.data.zero_()
 
         # last layer to all zeros, to make zero deformation as the default            
@@ -150,6 +150,7 @@ class NeuralBlendshapes(nn.Module):
 
 
         initialize_weights(self.global_translation, gain=0.01)
+        self.global_translation[-1].weight.data.zero_()
         self.global_translation[-1].bias.data.zero_()
 
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))

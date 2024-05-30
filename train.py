@@ -236,6 +236,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 losses['closure'] *= 1e2
             losses['laplacian_regularization'] = laplacian_loss(mesh, return_dict['template_mesh'], neural_blendshapes.face_index)
             losses['laplacian_regularization'] += 1e-3 * (return_dict['full_deformed_mesh'] - return_dict['full_ict_deformed_mesh']).pow(2).mean()
+            losses['laplacian_regularization'] += 1e1 * (return_dict['full_deformed_mesh'] - return_dict['full_ict_deformed_mesh'])[:, neural_blendshapes.head_index:].pow(2).mean()
 
             losses['cbuffers_regularization'] = cbuffers_regularization(cbuffers)
             
