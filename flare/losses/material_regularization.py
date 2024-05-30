@@ -30,7 +30,6 @@ def cbuffers_regularization(cbuffers):
 
     # diffuse = material[..., :3]
     bsize = material.shape[0]
-    roughness = material[..., 3:4]
     
     # roughness to be zero
     loss = (roughness**2).mean()

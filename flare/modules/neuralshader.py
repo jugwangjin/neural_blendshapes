@@ -117,11 +117,10 @@ class NeuralShader(torch.nn.Module):
         material = self.material_mlp(pe_input.view(-1, self.inp_size).to(torch.float32)) 
 
         diffuse = material[..., :3]
-        roughness = material[..., 3:]
         
         light = self.light_mlp(view_dir.view(-1, 20))
 
-        specular = light * roughness
+        specular = light 
 
         color = diffuse + specular
 
@@ -161,7 +160,7 @@ class NeuralShader(torch.nn.Module):
         pred_color_masked = dr.antialias(pred_color_masked.contiguous(), gbuffer["rast"], gbuffer["deformed_verts_clip_space"], mesh.indices.int())
         
         cbuffers = {}
-        cbuffers['material'] = material
+        # cbuffers['material'] = material
         cbuffers['light'] = light
 
         return pred_color_masked[..., :3], cbuffers, pred_color_masked[..., -1:]
