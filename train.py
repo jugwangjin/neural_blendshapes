@@ -97,7 +97,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     optimizer_neural_blendshapes = torch.optim.Adam([{'params': neural_blendshapes_encoder_params, 'lr': args.lr_encoder},
                                                     {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer}])
                                                      
-    scheduler_milestones = [args.iterations*2]
+    scheduler_milestones = [args.iterations//2]
     # scheduler_milestones = [int(args.iteratcons / 2), int(args.iterations * 2 / 3)]
     scheduler_gamma = 0.25
 
@@ -188,15 +188,17 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     
     # face_alignment = face_alignment.FaceAlignment(face_alignment.LandmarksType.THREE_D, flip_input=False, 
                                                             # device='cuda' if torch.cuda.is_available() else 'cpu')
+    deformer_or_shader = True
     
     import wandb
     if 'debug' not in run_name:
         wandb_name = args.wandb_name if args.wandb_name is not None else run_name
         wandb.init(project="neural_blendshape", name=wandb_name, config=args)
     for epoch in progress_bar:
-        for iter_, views_subset in enumerate(dataloader_train):
+        for iter_, views_subset in tqdm(enumerate(dataloader_train)):
             # views_subset = debug_views
-            iteration += 1
+            if deformer_or_shader:
+                iteration += 1
             progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}')
 
             pretrain = iteration < args.iterations // 10
@@ -232,11 +234,16 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             
             losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
             if pretrain:
-                losses['landmark'] *= 1e1
-                losses['closure'] *= 1e2
+                losses['landmark'] *= (1e2 / args.weight_landmark)
+                losses['closure'] *= (1e2 / args.weight_closure)
             # losses['laplacian_regularization'] = laplacian_loss(mesh, return_dict['template_mesh'], neural_blendshapes.face_index)
-            losses['laplacian_regularization'] = 1e-4 * (return_dict['full_deformed_mesh'] - return_dict['full_ict_deformed_mesh']).pow(2).mean()
-            losses['laplacian_regularization'] += 1e1 * (return_dict['full_deformed_mesh'] - return_dict['full_ict_deformed_mesh'])[:, neural_blendshapes.head_index:].pow(2).mean()
+            losses['laplacian_regularization'] = laplacian_loss(mesh, return_dict['template_mesh'], neural_blendshapes.face_index, neural_blendshapes.head_index)
+            losses['laplacian_regularization'] += 1e-6 * (return_dict['full_deformed_mesh'] - return_dict['full_ict_deformed_mesh']).pow(2).mean()
+            losses['laplacian_regularization'] += 1e-4 * (return_dict['ict_jacobian'][:, neural_blendshapes.face_index:] - return_dict['expression_jacobian'][:, neural_blendshapes.face_index:]).pow(2).mean()
+        
+            # losses['laplacian_regularization'] += 1e-5 * return_dict['template_deformation'].pow(2).mean()
+        
+            # losses['laplacian_regularization'] += 1e1 * (return_dict['full_deformed_mesh'] - return_dict['full_ict_deformed_mesh'])[:, neural_blendshapes.head_index:].pow(2).mean()
 
             # losses['cbuffers_regularization'] = cbuffers_regularization(cbuffers)
             
@@ -299,29 +306,28 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # Optimizer step
             # ==============================================================================================
             # if not pretrain:
+            neural_blendshapes.zero_grad()
             optimizer_shader.zero_grad()
         
-            neural_blendshapes.zero_grad()
 
             loss.backward()
             
             torch.cuda.synchronize()
+            
+            if args.grad_scale and args.fourier_features == "hashgrid":
+                shader.fourier_feature_transform.params.grad /= 8.0
             torch.nn.utils.clip_grad_norm_(shader.parameters(), 5.0)
             torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 5.0)
 
             ### increase the gradients of positional encoding following tinycudnn
             # if not pretrain:
-        
-            if args.grad_scale and args.fourier_features == "hashgrid":
-                shader.fourier_feature_transform.params.grad /= 8.0
+            if deformer_or_shader:
+                optimizer_neural_blendshapes.step()
+                scheduler_neural_blendshapes.step()
+            else:
 
-            optimizer_shader.step()
-            # clip gradients
-
-            optimizer_neural_blendshapes.step()
-
-            scheduler_shader.step()
-            scheduler_neural_blendshapes.step()
+                optimizer_shader.step()
+                scheduler_shader.step()
 
             progress_bar.set_postfix({'loss': loss.detach().cpu().item()})
 
@@ -347,9 +353,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                     # debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, debug_views, mesh, args.finetune_color, lgt)
                     # visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration, ict_facekit=ict_facekit, save_name='ict')
-                    for n in range(debug_views['img'].shape[0]):
+                    # for n in range(debug_views['img'].shape[0]):
 
-                        write_mesh(meshes_save_path / f"mesh_{iteration:06d}_{n}.obj", mesh.with_vertices(return_dict_['full_deformed_mesh'][n]).detach().to('cpu'))                                
+                    #     write_mesh(meshes_save_path / f"mesh_{iteration:06d}_{n}.obj", mesh.with_vertices(return_dict_['full_deformed_mesh'][n]).detach().to('cpu'))                                
 
                     del debug_gbuffer, debug_cbuffers, debug_rgb_pred
             if iteration == 1 or iteration % (args.visualization_frequency * 10) == 0:
@@ -360,9 +366,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             ## ============== save intermediate ==============================
             if (args.save_frequency > 0) and (iteration == 1 or iteration % args.save_frequency == 0):
                 with torch.no_grad():
-                    # write_mesh(meshes_save_path / f"mesh_{iteration:06d}.obj", mesh.with_vertices(return_dict['template_mesh']).detach().to('cpu'))                                
+                    write_mesh(meshes_save_path / f"mesh_{iteration:06d}.obj", mesh.with_vertices(return_dict['template_mesh']).detach().to('cpu'))                                
                     shader.save(shaders_save_path / f'shader.pt')
                     neural_blendshapes.save(shaders_save_path / f'neural_blendshapes.pt')
+
+            deformer_or_shader = not deformer_or_shader
 
     end = time.time()
     total_time = ((end - start) % 3600)
@@ -376,7 +384,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # ==============================================================================================
     with open(experiment_dir / "args.txt", "w") as text_file:
         print(f"{args}", file=text_file)
-    # write_mesh(meshes_save_path / f"mesh_latest.obj", mesh.with_vertices(return_dict['template_mesh']).detach().to('cpu'))
+    write_mesh(meshes_save_path / f"mesh_latest.obj", mesh.with_vertices(return_dict['template_mesh']).detach().to('cpu'))
     shader.save(shaders_save_path / f'shader_latest.pt')
     neural_blendshapes.save(shaders_save_path / f'neural_blendshapes_latest.pt')
 

@@ -191,8 +191,8 @@ class DatasetLoader(Dataset):
         var_facs = torch.var(all_facs, dim=0, keepdim=True) + 5e-2 # to avoid zero prob.
 
         importance = torch.sum((all_facs - mean_facs)  ** 2 / var_facs, dim=-1) 
-        importance = importance / (torch.amax(importance) / 1.5)
-        self.importance = list(importance.clamp(0.05, 1).cpu().data.numpy())
+        importance = importance / (torch.amax(importance) / 2)
+        self.importance = list(importance.clamp(0.2, 1).cpu().data.numpy())
 
         self.min_facs = torch.amin(all_facs, dim=0)
         self.max_facs = torch.amax(all_facs, dim=0)

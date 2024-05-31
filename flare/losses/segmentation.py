@@ -34,6 +34,22 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
     bsize = views_subset['skin_mask'].shape[0]
 
     gt_segs = views_subset['skin_mask'] # Shape of B, H, W, 6
+
+    # # save segs image to debug. 
+    # face_and_head_seg = gt_segs[..., 0]
+    # background = gt_segs[..., 1]
+    # for b in range(bsize):
+    #     face_and_head_seg[b] = torch.clamp(face_and_head_seg[b], 0, 1)
+    #     background[b] = torch.clamp(background[b], 0, 1)
+    #     import cv2
+    #     import numpy as np
+    #     cv2.imwrite(f'debug/face_and_head_seg_{b}.png', np.uint8(face_and_head_seg[b].detach().cpu().numpy() * 255))
+    #     cv2.imwrite(f'debug/background_{b}.png', np.uint8(background[b].detach().cpu().numpy() * 255))
+    #     cv2.imwrite(f'debug/input_{b}.png', np.uint8(views_subset['img'][b].detach().cpu().numpy() * 255))
+    # # print(face_and_head_seg.shape, background.shape)
+    # exit()
+
+
     # rendered_segs = gbuffers['vertex_labels'] # Shape of B, H, W, 9
     # print(gt_segs.shape, rendered_segs.shape)
     canonical_positions = gbuffers['canonical_position'] * views_subset["skin_mask"][..., :1].sum(dim=-1, keepdim=True)
@@ -78,6 +94,8 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
             # print(i, gt_seg_pixels.shape, rendered_seg_pixels.shape)
             # calculate chamfer distance
             cd_loss, _ = chamfer_distance(gt_seg_pixels[None], seg_pixels_on_clip_space[None])
+            # cd_loss, _ = chamfer_distance(gt_seg_pixels[None], seg_pixels_on_clip_space[None], batch_reduction=None, point_reduction=None)
+            # cd_loss = cd_loss[0].pow(2).mean() + cd_loss[1].pow(2).mean()
             seman_loss += cd_loss
             # print(batch_loss)
             # additionally, get mean and std of them and add to loss
