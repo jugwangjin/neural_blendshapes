@@ -33,7 +33,7 @@ def normal_loss(gbuffers, views_subset, gbuffer_mask, device):
     laplacian_kernel = torch.tensor([[0, -1, 0], [-1, 4, -1], [0, -1, 0]], device=device, dtype=torch.float32).view(1,1,3,3).repeat(3,3,1,1) / 4.
     gt_normal = gt_normal.permute(0, 3, 1, 2) * 2 - 1 # shape of B, 3, H, W
     gt_normal_laplacian = torch.nn.functional.conv2d(gt_normal, laplacian_kernel, padding=1)
-    mask = ((torch.sum(views_subset["skin_mask"][..., :2], dim=-1) * views_subset["skin_mask"][..., -1]) > 0).float() # shape of B H W
+    mask = ((torch.sum(views_subset["skin_mask"][..., 1]) * views_subset["skin_mask"][..., -1]) > 0).float() # shape of B H W
     # print(gbuffer_mask.shape)
     
     mask = mask[:, None] * gbuffer_mask.permute(0,3,1,2)

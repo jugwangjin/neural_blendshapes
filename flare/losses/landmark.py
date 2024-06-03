@@ -15,7 +15,7 @@ def closure_loss_block(gt, estimated, pairs):
     closure_loss = ((estimated_closure - gt_closure).pow(2) * confidence).reshape(gt_closure.shape[0], -1).mean(dim=-1)
     return closure_loss
 
-def landmark_loss(ict_facekit, gbuffers, views_subset, features, nueral_blendshapes, lmk_adaptive, device):
+def landmark_loss(ict_facekit, gbuffers, views_subset, use_jaw, device):
     """
     Calculates the landmark loss by comparing the detected landmarks with the deformed landmarks.
 
@@ -36,12 +36,14 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, features, nueral_blendsha
     detected_landmarks = views_subset['landmark'].clone().detach()
     detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
 
-    landmark_loss = ((detected_landmarks[:, 17:, :2] - landmarks_on_clip_space[:, 17:, :2]).pow(2) * detected_landmarks[:, 17:, -1:]).mean()
+    starting_index = 0 if use_jaw else 17
 
-    gt_closure = detected_landmarks[:, None, 17:, :2] - detected_landmarks[:, 17:, None, :2] 
-    gt_closure_confidence = detected_landmarks[:, None, 17:, -1:] * detected_landmarks[:, 17:, None, -1:]
+    landmark_loss = ((detected_landmarks[:, starting_index:, :2] - landmarks_on_clip_space[:, starting_index:, :2]).pow(2) * detected_landmarks[:, starting_index:, -1:]).mean()
 
-    estimated_closure = landmarks_on_clip_space[:, None, 17:, :2] - landmarks_on_clip_space[:, 17:, None, :2]
+    gt_closure = detected_landmarks[:, None, starting_index:, :2] - detected_landmarks[:, starting_index:, None, :2] 
+    gt_closure_confidence = detected_landmarks[:, None, starting_index:, -1:] * detected_landmarks[:, starting_index:, None, -1:]
+
+    estimated_closure = landmarks_on_clip_space[:, None, starting_index:, :2] - landmarks_on_clip_space[:, starting_index:, None, :2]
 
     closure_loss = ((estimated_closure - gt_closure).pow(2) * gt_closure_confidence).mean()
 

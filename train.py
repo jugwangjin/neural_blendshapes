@@ -118,7 +118,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     }
 
     # Create the optimizer for the neural shader
-    shader = NeuralShader(fourier_features=args.fourier_features,
+    # shader = NeuralShader(fourier_features=args.fourier_features,
+    shader = NeuralShader(fourier_features='positional',
                           activation=args.activation,
                           last_activation=torch.nn.Sigmoid(), 
                           disentangle_network_params=disentangle_network_params,
@@ -151,7 +152,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         # "ict_landmark": args.weight_ict_landmark,
         # "ict_landmark_closure": args.weight_ict_closure,
         # "random_ict": args.weight_ict,
-        # "normal_laplacian": args.weight_normal_laplacian,
+        "normal_laplacian": args.weight_normal_laplacian,
         "feature_regularization": args.weight_feature_regularization,
         # "deformation_map_regularization": 1e-3,
         # "cbuffers_regularization": args.weight_cbuffers_regularization,
@@ -195,13 +196,36 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         wandb_name = args.wandb_name if args.wandb_name is not None else run_name
         wandb.init(project="neural_blendshape", name=wandb_name, config=args)
     for epoch in progress_bar:
+        
+        if epoch == epochs // 2 and args.fourier_features != "positional":
+            shader = NeuralShader(fourier_features=args.fourier_features,
+                    activation=args.activation,
+                    last_activation=torch.nn.Sigmoid(), 
+                    disentangle_network_params=disentangle_network_params,
+                    bsdf=args.bsdf,
+                    aabb=ict_mesh_aabb,
+                    device=device)
+            params = list(shader.parameters()) 
+
+            if args.weight_albedo_regularization > 0:
+                from robust_loss_pytorch.adaptive import AdaptiveLossFunction
+                _adaptive = AdaptiveLossFunction(num_dims=4, float_dtype=np.float32, device=device)
+                params += list(_adaptive.parameters()) ## need to train it
+
+            optimizer_shader = torch.optim.Adam(params, lr=args.lr_shader)
+
+            scheduler_shader = torch.optim.lr_scheduler.MultiStepLR(optimizer_shader, milestones=scheduler_milestones, gamma=scheduler_gamma)
+
+
         for iter_, views_subset in tqdm(enumerate(dataloader_train)):
             # views_subset = debug_views
-            if deformer_or_shader:
-                iteration += 1
+            # if deformer_or_shader:
+            iteration += 1
             progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}')
 
-            pretrain = iteration < args.iterations // 10
+            pretrain = iteration < args.iterations // 8
+
+
 
             # ==============================================================================================
             # encode input images
@@ -232,14 +256,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # ict_seg, _ = segmentation_loss(views_subset, ict_gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
             # losses['segmentation'] += ict_seg
             
-            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, features, neural_blendshapes, lmk_adaptive, device)
+            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, pretrain, device)
             if pretrain:
                 losses['landmark'] *= (1e2 / args.weight_landmark)
                 losses['closure'] *= (1e2 / args.weight_closure)
             # losses['laplacian_regularization'] = laplacian_loss(mesh, return_dict['template_mesh'], neural_blendshapes.face_index)
             losses['laplacian_regularization'] = laplacian_loss(mesh, return_dict['template_mesh'], neural_blendshapes.face_index, neural_blendshapes.head_index)
-            losses['laplacian_regularization'] += 1e-6 * (return_dict['full_deformed_mesh'] - return_dict['full_ict_deformed_mesh']).pow(2).mean()
-            losses['laplacian_regularization'] += 1e-4 * (return_dict['ict_jacobian'][:, neural_blendshapes.face_index:] - return_dict['expression_jacobian'][:, neural_blendshapes.face_index:]).pow(2).mean()
+            losses['laplacian_regularization'] += (1e-3 / args.weight_laplacian_regularization) * (return_dict['full_deformed_mesh'] - return_dict['full_ict_deformed_mesh']).pow(2).mean()
+            # losses['laplacian_regularization'] += (1e-1 / args.weight_laplacian_regularization) * (return_dict['ict_jacobian'][:, neural_blendshapes.face_index:] - return_dict['expression_jacobian'][:, neural_blendshapes.face_index:]).pow(2).mean()
         
             # losses['laplacian_regularization'] += 1e-5 * return_dict['template_deformation'].pow(2).mean()
         
@@ -250,7 +274,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict], 
                                                                            views_subset["landmark"], iteration, facs_adaptive, facs_weight=0) 
 
-            # losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
+            losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
 
             with torch.no_grad():
                 shading_decay = torch.exp(-(losses['mask']).mean()).detach()
@@ -293,7 +317,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             if iteration % 100 == 1:
                 print(return_dict['features'][:, 53:])
-                print(torch.exp(neural_blendshapes.encoder.blendshapes_multiplier))
+                # print(torch.exp(neural_blendshapes.encoder.blendshapes_multiplier))
                 print("=="*50)
                 for k, v in losses.items():
                     # if k in losses_to_print:
@@ -321,13 +345,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             ### increase the gradients of positional encoding following tinycudnn
             # if not pretrain:
-            if deformer_or_shader:
-                optimizer_neural_blendshapes.step()
-                scheduler_neural_blendshapes.step()
-            else:
+            # if deformer_or_shader:
+            optimizer_neural_blendshapes.step()
+            scheduler_neural_blendshapes.step()
+            # else:
 
-                optimizer_shader.step()
-                scheduler_shader.step()
+            optimizer_shader.step()
+            scheduler_shader.step()
 
             progress_bar.set_postfix({'loss': loss.detach().cpu().item()})
 
@@ -370,7 +394,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     shader.save(shaders_save_path / f'shader.pt')
                     neural_blendshapes.save(shaders_save_path / f'neural_blendshapes.pt')
 
-            deformer_or_shader = not deformer_or_shader
+            # deformer_or_shader = not deformer_or_shader
 
     end = time.time()
     total_time = ((end - start) % 3600)

@@ -41,15 +41,22 @@ class ResnetEncoder(nn.Module):
         self.blendshapes_bias = torch.nn.Parameter(torch.zeros(53))
         # self.softplus = nn.Softplus(beta=10)
         
+        # self.blendshapes = nn.Linear(53+7+16, 53)
+        # self.blendshapes.weight.data.zero_()
+        # self.blendshapes.bias.data.zero_()
+        # self.blendshapes.weight.data[:53, :53] = torch.eye(53)
 
 
 
     def forward(self, views):
 
         # blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53)
+        # blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53) * torch.exp(self.blendshapes_multiplier ) + self.blendshapes_bias 
         blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53) * torch.exp(self.blendshapes_multiplier ) + self.blendshapes_bias 
+        
 
         transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4)
+
 
         # calculate scale, translation, rotation from transform matrix
         # assume scale is the same for all axes
@@ -59,6 +66,10 @@ class ResnetEncoder(nn.Module):
         rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
         # print(rotation, translation, scale)
         features = self.tail(torch.cat([rotation, translation, scale], dim=-1))
+
+        # bshapes_input = torch.cat([views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53), transform_matrix.reshape(-1, 16), features], dim=-1)
+        # blendshape = self.blendshapes(bshapes_input)
+        
         features[:, 5] = 0
         features = torch.cat([blendshape, features], dim=-1) # shape of features: (batch_size, 60)
 

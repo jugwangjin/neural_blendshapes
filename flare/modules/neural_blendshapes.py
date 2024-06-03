@@ -85,16 +85,16 @@ class NeuralBlendshapes(nn.Module):
         self.coords_encoder, encoded_coord_dim = get_embedder(4, input_dims=3)
 
         self.expression_deformer = nn.Sequential(nn.Linear(encoded_point_dim + code_dim + 9, 512),
-                                                  mygroupnorm(num_groups=8, num_channels=512),
+                                                  mygroupnorm(num_groups=16, num_channels=512),
                                                   nn.PReLU(),
                                                   nn.Linear(512, 512), 
-                                                  mygroupnorm(num_groups=8, num_channels=512),
+                                                  mygroupnorm(num_groups=16, num_channels=512),
                                                   nn.PReLU(),
                                                   nn.Linear(512, 512),
-                                                  mygroupnorm(num_groups=8, num_channels=512),
+                                                  mygroupnorm(num_groups=16, num_channels=512),
                                                   nn.PReLU(),
                                                   nn.Linear(512, 512),
-                                                  mygroupnorm(num_groups=8, num_channels=512),
+                                                  mygroupnorm(num_groups=16, num_channels=512),
                                                   nn.PReLU(),
                                                   nn.Linear(512, 9))
         
@@ -136,16 +136,16 @@ class NeuralBlendshapes(nn.Module):
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
         
         self.template_deformation = nn.Sequential(nn.Linear(encoded_coord_dim, 512),
-                                                  mygroupnorm(num_groups=8, num_channels=512),
+                                                  mygroupnorm(num_groups=16, num_channels=512),
                                                   nn.PReLU(),
                                                   nn.Linear(512, 512), 
-                                                  mygroupnorm(num_groups=8, num_channels=512),
+                                                  mygroupnorm(num_groups=16, num_channels=512),
                                                   nn.PReLU(),
                                                   nn.Linear(512, 512),
-                                                  mygroupnorm(num_groups=8, num_channels=512),
+                                                  mygroupnorm(num_groups=16, num_channels=512),
                                                   nn.PReLU(),
                                                   nn.Linear(512, 512),
-                                                  mygroupnorm(num_groups=8, num_channels=512),
+                                                  mygroupnorm(num_groups=16, num_channels=512),
                                                   nn.PReLU(),
                                                   nn.Linear(512, 3))
 
@@ -191,9 +191,13 @@ class NeuralBlendshapes(nn.Module):
         only_ict_deformed_mesh = self.apply_deformation(deformed_ict + template_deformation[None], features, pose_weight)
 
         ict_jacobian = self.source_mesh.jacobians_from_vertices(deformed_ict[:, :self.head_index])
+        ict_jacobian_face = ict_jacobian[:, :self.face_index]
 
-        expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), features[:, None, :53].repeat(1, points.shape[0], 1), ict_jacobian.reshape(bsize, -1, 9)], dim=2) # B V ? 
-        expression_jacobian = self.expression_deformer(expression_input).reshape(bsize, -1, 3, 3) + ict_jacobian
+        expression_input = torch.cat([encoded_points[None, :self.face_index].repeat(bsize, 1, 1), features[:, None, :53].repeat(1, ict_jacobian_face.shape[1], 1), ict_jacobian_face.reshape(bsize, -1, 9)], dim=2) # B V ? 
+        expression_jacobian = self.expression_deformer(expression_input).reshape(bsize, -1, 3, 3)
+        # expression_jacobian = self.expression_deformer(expression_input).reshape(bsize, -1, 3, 3) + ict_jacobian
+        ict_jacobian[:, :self.face_index] += expression_jacobian
+        expression_jacobian = ict_jacobian
         
         expression_mesh = []
         for b in range(bsize):
