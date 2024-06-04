@@ -50,7 +50,7 @@ class NeuralBlendshapes(nn.Module):
         self.encoder = ResnetEncoder(53+6, ict_facekit)
 
         self.ict_facekit = ict_facekit
-        
+        self.tight_face_index = 6705
         self.face_index = 9409     
         self.head_index = 14062
 
@@ -69,14 +69,45 @@ class NeuralBlendshapes(nn.Module):
             os.system('rm -r ' + os.path.join(str(exp_dir), 'source_mesh'))
         os.makedirs(os.path.join(str(exp_dir), 'source_mesh'), exist_ok=True)
         self.source_mesh = SourceMesh(source_ind=None, source_dir = os.path.join(str(exp_dir), 'source_mesh'), \
-                                      extra_source_fields=[], random_scale=1, use_wks=False, random_centering=False, cpuonly=False)
+                          extra_source_fields=[], random_scale=1, use_wks=False, random_centering=False, cpuonly=False)
+        
         
         # filter faces
-        faces = faces[faces[:, 0] < self.head_index]
-        faces = faces[faces[:, 1] < self.head_index]
-        faces = faces[faces[:, 2] < self.head_index]
+        faces = ict_facekit.faces.cpu().data.numpy()
+        faces = faces[faces[:, 0] < self.tight_face_index]
+        faces = faces[faces[:, 1] < self.tight_face_index]
+        faces = faces[faces[:, 2] < self.tight_face_index]
+
+        faces_ = ict_facekit.faces.cpu().data.numpy()
+        faces_ = faces_[(faces_[:, 0] < self.head_index)]
+        faces_ = faces_[(faces_[:, 1] < self.head_index)]
+        faces_ = faces_[(faces_[:, 2] < self.head_index)]
+
+        faces_ = faces_[np.logical_not((faces_[:, 0] < self.tight_face_index) & \
+                         (faces_[:, 1] < self.tight_face_index) & \
+                            (faces_[:, 2] < self.tight_face_index))]
+
+        faces = np.concatenate([faces, faces_], axis=0)
 
         self.source_mesh.load(source_v = vertices[:self.head_index], source_f = faces)
+
+        head_faces = faces
+
+        # source mesh for tight face
+        # re-filter faces
+        faces = ict_facekit.faces.cpu().data.numpy()
+        faces = faces[faces[:, 0] < self.tight_face_index]
+        faces = faces[faces[:, 1] < self.tight_face_index]
+        faces = faces[faces[:, 2] < self.tight_face_index]
+
+        tight_faces = faces
+
+
+        self.source_mesh_tight_face = SourceMesh(source_ind=None, source_dir = os.path.join(str(exp_dir), 'source_mesh'), \
+                                        extra_source_fields=[], random_scale=1, use_wks=False, random_centering=False, cpuonly=False)
+        self.source_mesh_tight_face.load(source_v = vertices[:self.tight_face_index], source_f = faces)
+
+        self.num_tight_face_jacobian = self.source_mesh_tight_face.get_centroids_and_normals().shape[0]
 
         point_dim = self.source_mesh.get_point_dim()
         code_dim = 53
@@ -88,6 +119,9 @@ class NeuralBlendshapes(nn.Module):
                                                   mygroupnorm(num_groups=16, num_channels=512),
                                                   nn.PReLU(),
                                                   nn.Linear(512, 512), 
+                                                  mygroupnorm(num_groups=16, num_channels=512),
+                                                  nn.PReLU(),
+                                                  nn.Linear(512, 512),
                                                   mygroupnorm(num_groups=16, num_channels=512),
                                                   nn.PReLU(),
                                                   nn.Linear(512, 512),
@@ -135,19 +169,19 @@ class NeuralBlendshapes(nn.Module):
 
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
         
-        self.template_deformation = nn.Sequential(nn.Linear(encoded_coord_dim, 512),
-                                                  mygroupnorm(num_groups=16, num_channels=512),
+        self.template_deformation = nn.Sequential(nn.Linear(encoded_coord_dim, 256),
+                                                  mygroupnorm(num_groups=16, num_channels=256),
                                                   nn.PReLU(),
-                                                  nn.Linear(512, 512), 
-                                                  mygroupnorm(num_groups=16, num_channels=512),
+                                                  nn.Linear(256, 256), 
+                                                  mygroupnorm(num_groups=16, num_channels=256),
                                                   nn.PReLU(),
-                                                  nn.Linear(512, 512),
-                                                  mygroupnorm(num_groups=16, num_channels=512),
+                                                  nn.Linear(256, 256),
+                                                  mygroupnorm(num_groups=16, num_channels=256),
                                                   nn.PReLU(),
-                                                  nn.Linear(512, 512),
-                                                  mygroupnorm(num_groups=16, num_channels=512),
+                                                  nn.Linear(256, 256),
+                                                  mygroupnorm(num_groups=16, num_channels=256),
                                                   nn.PReLU(),
-                                                  nn.Linear(512, 3))
+                                                  nn.Linear(256, 3))
 
         initialize_weights(self.template_deformation, gain=0.01)
         self.template_deformation[-1].bias.data.zero_()
@@ -179,7 +213,9 @@ class NeuralBlendshapes(nn.Module):
         bsize = features.shape[0]
 
         points = self.source_mesh.get_centroids_and_normals()
+        points_tight = self.source_mesh_tight_face.get_centroids_and_normals()
         encoded_points = self.points_encoder(points)
+        encoded_points_tight = self.points_encoder(points_tight)
         encoded_coords = self.coords_encoder(self.ict_facekit.canonical[0])
 
         template_deformation = self.template_deformation(encoded_coords)
@@ -190,15 +226,20 @@ class NeuralBlendshapes(nn.Module):
         deformed_ict = self.ict_facekit(expression_weights = features[..., :53])
         only_ict_deformed_mesh = self.apply_deformation(deformed_ict + template_deformation[None], features, pose_weight)
 
-        ict_jacobian = self.source_mesh.jacobians_from_vertices(deformed_ict[:, :self.head_index])
-        ict_jacobian_face = ict_jacobian[:, :self.face_index]
+        tight_index = encoded_points_tight.shape[0]
 
-        expression_input = torch.cat([encoded_points[None, :self.face_index].repeat(bsize, 1, 1), features[:, None, :53].repeat(1, ict_jacobian_face.shape[1], 1), ict_jacobian_face.reshape(bsize, -1, 9)], dim=2) # B V ? 
-        expression_jacobian = self.expression_deformer(expression_input).reshape(bsize, -1, 3, 3)
-        # expression_jacobian = self.expression_deformer(expression_input).reshape(bsize, -1, 3, 3) + ict_jacobian
-        ict_jacobian[:, :self.face_index] += expression_jacobian
-        expression_jacobian = ict_jacobian
+        ict_jacobian = self.source_mesh.jacobians_from_vertices(deformed_ict[:, :self.head_index])
+        ict_jacobian_tight_face = ict_jacobian[:, :tight_index]
         
+
+        expression_input = torch.cat([encoded_points_tight[None].repeat(bsize, 1, 1), features[:, None, :53].repeat(1, ict_jacobian_tight_face.shape[1], 1), ict_jacobian_tight_face.reshape(bsize, -1, 9)], dim=2) # B V ? 
+        expression_jacobian = self.expression_deformer(expression_input).reshape(bsize, -1, 3, 3)
+        additional_jacobian = expression_jacobian
+        # expression_jacobian = self.expression_deformer(expression_input).reshape(bsize, -1, 3, 3) + ict_jacobian
+        ict_jacobian[:, :tight_index] += expression_jacobian
+        expression_jacobian = ict_jacobian
+
+
         expression_mesh = []
         for b in range(bsize):
             expression_mesh.append(self.source_mesh.vertices_from_jacobians(expression_jacobian[b:b+1]))
@@ -228,12 +269,14 @@ class NeuralBlendshapes(nn.Module):
         return_dict['features'] = features
         return_dict['template_mesh'] = template_mesh
         return_dict['template_deformation'] = template_deformation
+        return_dict['only_expression_mesh'] = expression_mesh
         return_dict['full_expression_mesh'] = expression_vertices
         return_dict['pose_weight'] = pose_weight
         return_dict['full_deformed_mesh'] = deformed_mesh
         return_dict['full_ict_deformed_mesh'] = only_ict_deformed_mesh
         return_dict['ict_jacobian'] = ict_jacobian
         return_dict['expression_jacobian'] = expression_jacobian
+        return_dict['additional_jacobian'] = additional_jacobian
 
         return return_dict
 
@@ -263,6 +306,7 @@ class NeuralBlendshapes(nn.Module):
     def to(self, device):
         super().to(device)
         self.source_mesh.to(device)
+        self.source_mesh_tight_face.to(device)
         return self
 
 def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_facekit=None, exp_dir=None, device='cuda'):

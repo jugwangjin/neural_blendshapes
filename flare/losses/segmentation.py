@@ -30,6 +30,7 @@ seg_map_to_vertex_labels[0] = [0, 1]
 # seg_map_to_vertex_labels[1] = [1, -1]
 
 def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices, img_size=512):
+
     # full face gt 2d points -> sample where gt_seg is 0
     bsize = views_subset['skin_mask'].shape[0]
 
@@ -74,18 +75,19 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
             valid_idx = torch.unique(valid_idx)
             # print(valid_idx.shape)
 
-        for i in range(len(seg_map_to_vertex_labels)):
-
+        # for i in range(len(seg_map_to_vertex_labels)):
+        for i in seg_map_to_vertex_labels.keys():
             gt_seg_pixels = (torch.nonzero(gt_seg[:,:,i]) / (img_size - 1)) * 2 - 1
 
-            part_index = []
+            part_index = list(range(11248))
             
-            for n in seg_map_to_vertex_labels[i]:
-                part_index += parts_indices[n]
+            # for n in seg_map_to_vertex_labels[i]:
+            #     part_index += parts_indices[n]
             #     print(n, len(parts_indices[n]))
             # print(len(part_index))
             # part index should be intersection of valid_idx and part index
-            part_index = list(set(part_index) & set(valid_idx.cpu().numpy().tolist()))
+            # part_index = list(set(part_index) & set(valid_idx.cpu().numpy().tolist()))
+            # part_index = list(set(part_index) & set(valid_idx.cpu().numpy().tolist()))
 
             if len(gt_seg_pixels) == 0 or len(part_index) == 0:
                 continue
