@@ -54,6 +54,8 @@ class NeuralBlendshapes(nn.Module):
         self.face_index = 9409     
         self.head_index = 14062
 
+        self.socket_index = 11248
+
         innards_vertices = ict_facekit.canonical[0, self.head_index:]
         exterior_vertices = ict_facekit.canonical[0, :self.head_index]
 
@@ -74,20 +76,20 @@ class NeuralBlendshapes(nn.Module):
         
         # filter faces
         faces = ict_facekit.faces.cpu().data.numpy()
-        faces = faces[faces[:, 0] < self.tight_face_index]
-        faces = faces[faces[:, 1] < self.tight_face_index]
-        faces = faces[faces[:, 2] < self.tight_face_index]
+        faces = faces[faces[:, 0] < self.head_index]
+        faces = faces[faces[:, 1] < self.head_index]
+        faces = faces[faces[:, 2] < self.head_index]
 
-        faces_ = ict_facekit.faces.cpu().data.numpy()
-        faces_ = faces_[(faces_[:, 0] < self.head_index)]
-        faces_ = faces_[(faces_[:, 1] < self.head_index)]
-        faces_ = faces_[(faces_[:, 2] < self.head_index)]
+        # faces_ = ict_facekit.faces.cpu().data.numpy()
+        # faces_ = faces_[(faces_[:, 0] < self.head_index)]
+        # faces_ = faces_[(faces_[:, 1] < self.head_index)]
+        # faces_ = faces_[(faces_[:, 2] < self.head_index)]
 
-        faces_ = faces_[np.logical_not((faces_[:, 0] < self.tight_face_index) & \
-                         (faces_[:, 1] < self.tight_face_index) & \
-                            (faces_[:, 2] < self.tight_face_index))]
+        # faces_ = faces_[np.logical_not((faces_[:, 0] < self.tight_face_index) & \
+        #                  (faces_[:, 1] < self.tight_face_index) & \
+        #                     (faces_[:, 2] < self.tight_face_index))]
 
-        faces = np.concatenate([faces, faces_], axis=0)
+        # faces = np.concatenate([faces, faces_], axis=0)
 
         self.source_mesh.load(source_v = vertices[:self.head_index], source_f = faces)
 
@@ -95,25 +97,25 @@ class NeuralBlendshapes(nn.Module):
 
         # source mesh for tight face
         # re-filter faces
-        faces = ict_facekit.faces.cpu().data.numpy()
-        faces = faces[faces[:, 0] < self.tight_face_index]
-        faces = faces[faces[:, 1] < self.tight_face_index]
-        faces = faces[faces[:, 2] < self.tight_face_index]
+        # faces = ict_facekit.faces.cpu().data.numpy()
+        # faces = faces[faces[:, 0] < self.tight_face_index]
+        # faces = faces[faces[:, 1] < self.tight_face_index]
+        # faces = faces[faces[:, 2] < self.tight_face_index]
 
-        tight_faces = faces
+        # tight_faces = faces
 
 
-        self.source_mesh_tight_face = SourceMesh(source_ind=None, source_dir = os.path.join(str(exp_dir), 'source_mesh'), \
-                                        extra_source_fields=[], random_scale=1, use_wks=False, random_centering=False, cpuonly=False)
-        self.source_mesh_tight_face.load(source_v = vertices[:self.tight_face_index], source_f = faces)
+        # self.source_mesh_tight_face = SourceMesh(source_ind=None, source_dir = os.path.join(str(exp_dir), 'source_mesh'), \
+        #                                 extra_source_fields=[], random_scale=1, use_wks=False, random_centering=False, cpuonly=False)
+        # self.source_mesh_tight_face.load(source_v = vertices[:self.tight_face_index], source_f = faces)
 
-        self.num_tight_face_jacobian = self.source_mesh_tight_face.get_centroids_and_normals().shape[0]
+        # self.num_tight_face_jacobian = self.source_mesh_tight_face.get_centroids_and_normals().shape[0]
 
         point_dim = self.source_mesh.get_point_dim()
         code_dim = 53
 
-        self.points_encoder, encoded_point_dim = get_embedder(4, input_dims=point_dim)
-        self.coords_encoder, encoded_coord_dim = get_embedder(4, input_dims=3)
+        self.points_encoder, encoded_point_dim = get_embedder(3, input_dims=point_dim)
+        self.coords_encoder, encoded_coord_dim = get_embedder(3, input_dims=3)
 
         self.expression_deformer = nn.Sequential(nn.Linear(encoded_point_dim + code_dim + 9, 512),
                                                   mygroupnorm(num_groups=16, num_channels=512),
@@ -213,9 +215,9 @@ class NeuralBlendshapes(nn.Module):
         bsize = features.shape[0]
 
         points = self.source_mesh.get_centroids_and_normals()
-        points_tight = self.source_mesh_tight_face.get_centroids_and_normals()
+        # points_tight = self.source_mesh_tight_face.get_centroids_and_normals()
         encoded_points = self.points_encoder(points)
-        encoded_points_tight = self.points_encoder(points_tight)
+        # encoded_points_tight = self.points_encoder(points_tight)
         encoded_coords = self.coords_encoder(self.ict_facekit.canonical[0])
 
         template_deformation = self.template_deformation(encoded_coords)
@@ -226,17 +228,17 @@ class NeuralBlendshapes(nn.Module):
         deformed_ict = self.ict_facekit(expression_weights = features[..., :53])
         only_ict_deformed_mesh = self.apply_deformation(deformed_ict + template_deformation[None], features, pose_weight)
 
-        tight_index = encoded_points_tight.shape[0]
+        # tight_index = encoded_points_tight.shape[0]
 
         ict_jacobian = self.source_mesh.jacobians_from_vertices(deformed_ict[:, :self.head_index])
-        ict_jacobian_tight_face = ict_jacobian[:, :tight_index]
+        # ict_jacobian_tight_face = ict_jacobian[:, :tight_index]
         
 
-        expression_input = torch.cat([encoded_points_tight[None].repeat(bsize, 1, 1), features[:, None, :53].repeat(1, ict_jacobian_tight_face.shape[1], 1), ict_jacobian_tight_face.reshape(bsize, -1, 9)], dim=2) # B V ? 
+        expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), features[:, None, :53].repeat(1, ict_jacobian.shape[1], 1), ict_jacobian.reshape(bsize, -1, 9)], dim=2) # B V ? 
         expression_jacobian = self.expression_deformer(expression_input).reshape(bsize, -1, 3, 3)
         additional_jacobian = expression_jacobian
         # expression_jacobian = self.expression_deformer(expression_input).reshape(bsize, -1, 3, 3) + ict_jacobian
-        ict_jacobian[:, :tight_index] += expression_jacobian
+        ict_jacobian += expression_jacobian
         expression_jacobian = ict_jacobian
 
 
@@ -306,7 +308,7 @@ class NeuralBlendshapes(nn.Module):
     def to(self, device):
         super().to(device)
         self.source_mesh.to(device)
-        self.source_mesh_tight_face.to(device)
+        # self.source_mesh_tight_face.to(device)
         return self
 
 def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_facekit=None, exp_dir=None, device='cuda'):

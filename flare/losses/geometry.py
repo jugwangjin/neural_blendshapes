@@ -48,6 +48,11 @@ def laplacian_loss(mesh: Mesh, canonical_vertices, face_index, head_index):
     
     return loss.mean()
 
+def normal_reg_loss(mesh1, mesh2):
+    # compute cosine similarity between normals
+    loss = 1 - torch.cosine_similarity(mesh1.face_normals, mesh2.face_normals, dim=-1)
+    return (loss**2).mean()
+
 
 def normal_consistency_loss(mesh: Mesh):
     """ Compute the normal consistency term as the cosine similarity between neighboring face normals.

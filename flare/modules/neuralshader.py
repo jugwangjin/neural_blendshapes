@@ -169,8 +169,10 @@ class NeuralShader(torch.nn.Module):
         kr_max = kr_max.to(self.device)                    
 
         wo = util.safe_normalize(view_dir - deformed_position)
-        reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
-        view_dir = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
+        # reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
+        view_dir = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
+        # view_dir = self.dir_enc_func(wo.view(-1, 3), kr_max.view(-1, 1))
+        # view_dir = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
 
         material = self.material_mlp(pe_input.view(-1, self.inp_size).to(torch.float32)) 
 

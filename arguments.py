@@ -42,10 +42,11 @@ def config_parser():
     parser.add_argument('--lr_shader', type=float, default=1e-3, help="Step size/learning rate for the shader parameters")
     parser.add_argument('--lr_encoder', type=float, default=1e-4, help="Step size/learning rate for the vertex positions")
     parser.add_argument('--lr_deformer', type=float, default=1e-4, help="Step size/learning rate for the deformation parameters")
+    parser.add_argument('--lr_jacobian', type=float, default=1e-3, help="Step size/learning rate for the deformation parameters")
 
     # loss weights
     parser.add_argument('--weight_mask', type=float, default=2.0, help="Weight of the mask term")
-    parser.add_argument('--weight_normal_regularization', type=float, default=0.1, help="Weight of the normal term")
+    parser.add_argument('--weight_normal_regularization', type=float, default=1e-3, help="Weight of the normal term")
     parser.add_argument('--weight_laplacian_regularization', type=float, default=60.0, help="Weight of the laplacian term")
     parser.add_argument('--weight_shading', type=float, default=1.0, help="Weight of the shading term")
     parser.add_argument('--weight_perceptual_loss', type=float, default=0.1, help="Weight of the perceptual loss")
