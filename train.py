@@ -160,7 +160,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         # "deformation_map_regularization": 1e-3,
         # "cbuffers_regularization": args.weight_cbuffers_regularization,
         # "synthetic": args.weight_synthetic,
-        "segmentation": args.weight_segmentation,
+        # "segmentation": args.weight_segmentation,
         # "semantic_stat": args.weight_semantic_stat,
     }
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
@@ -200,7 +200,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         wandb.init(project="neural_blendshape", name=wandb_name, config=args)
     for epoch in progress_bar:
         
-        if epoch == 3 * (epochs // 4) and args.fourier_features != "positional":
+        if epoch == 2 * (epochs // 3) and args.fourier_features != "positional":
             shader = NeuralShader(fourier_features=args.fourier_features,
                     activation=args.activation,
                     last_activation=torch.nn.Sigmoid(), 
@@ -230,8 +230,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             iteration += 1
             progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}')
 
-            pretrain = iteration < args.iterations // 10
+            pretrain = iteration < args.iterations // 3
 
+            use_jaw = iteration < args.iterations // 3
 
 
             # ==============================================================================================
@@ -259,52 +260,33 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['shading'], pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
             losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
-            losses['segmentation'], _ = segmentation_loss(views_subset, gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
-            ict_seg, _ = segmentation_loss(views_subset, ict_gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
-            losses['segmentation'] += ict_seg
+            # losses['segmentation'], _ = segmentation_loss(views_subset, gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
+            # ict_seg, _ = segmentation_loss(views_subset, ict_gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
+            # losses['segmentation'] += ict_seg
             
-            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, pretrain, device)
+            losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, use_jaw, device)
+            ict_lmk, ict_closure = landmark_loss(ict_facekit, ict_gbuffers, views_subset, use_jaw, device)
+            losses['landmark'] += ict_lmk
+            losses['closure'] += ict_closure
             if pretrain:
                 losses['landmark'] *= (1e2 / args.weight_landmark)
                 losses['closure'] *= (1e2 / args.weight_closure)
-            # losses['laplacian_regularization'] = laplacian_loss(mesh, return_dict['template_mesh'], neural_blendshapes.face_index)
-            # losses['laplacian_regularization'] = laplacian_loss(mesh, return_dict['template_mesh'], neural_blendshapes.face_index, neural_blendshapes.head_index)
-            losses['laplacian_regularization'] = laplacian_loss(ict_canonical_mesh, return_dict['template_mesh'], neural_blendshapes.face_index, neural_blendshapes.head_index)
-            losses['laplacian_regularization'] += (1e-2 / args.weight_laplacian_regularization) * (ict_canonical_mesh.vertices - return_dict['template_mesh']).pow(2).mean()
-            # print(torch.mean(return_dict['expression_jacobian'], dim=(0, 1)))
-            # print(torch.std(return_dict['expression_jacobian'], dim=(0, 1)))
-            # print(torch.amax(return_dict['expression_jacobian'], dim=(0, 1)))
-            # print(torch.amin(return_dict['expression_jacobian'], dim=(0, 1)))
-            losses['laplacian_regularization'] += (1e-4 / args.weight_laplacian_regularization) * (return_dict['additional_jacobian']).pow(2).mean()
-            # losses['laplacian_regularization'] += 
-            # losses['normal_regularization'] = normal_loss(ict_canonical_mesh, mesh)
-            losses['laplacian_regularization'] += (1e-2 / args.weight_laplacian_regularization) * (return_dict['full_deformed_mesh'][:, neural_blendshapes.socket_index:] - return_dict['full_ict_deformed_mesh'][:, neural_blendshapes.socket_index:]).pow(2).mean()
-            # losses['laplacian_regularization'] += (1e-1 / args.weight_laplacian_regularization) * (return_dict['ict_jacobian'][:, neural_blendshapes.face_index:] - return_dict['expression_jacobian'][:, neural_blendshapes.face_index:]).pow(2).mean()
-            losses['normal_regularization'] = normal_reg_loss(mesh, ict_canonical_mesh)
-            # losses['laplacian_regularization'] += 1e-5 * return_dict['template_deformation'].pow(2).mean()
-        
-            # losses['laplacian_regularization'] += 1e1 * (return_dict['full_deformed_mesh'] - return_dict['full_ict_deformed_mesh'])[:, neural_blendshapes.head_index:].pow(2).mean()
 
-            # losses['cbuffers_regularization'] = cbuffers_regularization(cbuffers)
-            
+            losses['laplacian_regularization'] = laplacian_loss(ict_canonical_mesh, return_dict['template_mesh'], neural_blendshapes.face_index, neural_blendshapes.head_index) # template
+            losses['laplacian_regularization'] += (1e-2 / args.weight_laplacian_regularization) * (ict_canonical_mesh.vertices - return_dict['template_mesh']).pow(2).mean() # template
+            losses['laplacian_regularization'] += (1e-4 / args.weight_laplacian_regularization) * (return_dict['additional_jacobian']).pow(2).mean() # close to ict 
+            losses['laplacian_regularization'] += (1e-2 / args.weight_laplacian_regularization) * (return_dict['full_deformed_mesh'] - return_dict['full_ict_deformed_mesh']).pow(2).mean() # close to ict 
+
+            losses['normal_regularization'] = normal_reg_loss(mesh, ict_canonical_mesh) # template
+
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict], 
                                                                            views_subset["landmark"], iteration, facs_adaptive, facs_weight=0) 
 
-            # losses['normal_laplacian'] = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
-
             with torch.no_grad():
                 shading_decay = torch.exp(-(losses['mask']).mean()).detach()
-            # photometric losses decay by overall geometric loss
-            # if the geometric loss is 0, the photometric losses are not decayed
-            # exponentially decay the photometric losses by the overall geometric loss
             losses['shading'] = losses['shading'] * shading_decay
             losses['perceptual_loss'] = losses['perceptual_loss'] * shading_decay
-            # losses['normal_laplacian'] = losses['normal_laplacian'] * shading_decay
             torch.cuda.empty_cache()
-
-            # synthetic loss
-            # losses['synthetic'] = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, 1, device) 
-
 
             loss = torch.tensor(0., device=device) 
             for k, v in losses.items():

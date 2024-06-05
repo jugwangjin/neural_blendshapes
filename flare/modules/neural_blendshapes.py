@@ -129,9 +129,6 @@ class NeuralBlendshapes(nn.Module):
                                                   nn.Linear(512, 512),
                                                   mygroupnorm(num_groups=16, num_channels=512),
                                                   nn.PReLU(),
-                                                  nn.Linear(512, 512),
-                                                  mygroupnorm(num_groups=16, num_channels=512),
-                                                  nn.PReLU(),
                                                   nn.Linear(512, 9))
         
         self.global_translation = nn.Sequential(nn.Linear(53, 32),
@@ -146,12 +143,10 @@ class NeuralBlendshapes(nn.Module):
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
                     mygroupnorm(num_groups=4, num_channels=32),
-                    
-                                                  nn.PReLU(),
+                    nn.PReLU(),
                     nn.Linear(32,32),
                     mygroupnorm(num_groups=4, num_channels=32),
-                    
-                                                  nn.PReLU(),
+                    nn.PReLU(),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
@@ -172,16 +167,13 @@ class NeuralBlendshapes(nn.Module):
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
         
         self.template_deformation = nn.Sequential(nn.Linear(encoded_coord_dim, 256),
-                                                  mygroupnorm(num_groups=16, num_channels=256),
+                                                  mygroupnorm(num_groups=8, num_channels=256),
                                                   nn.PReLU(),
                                                   nn.Linear(256, 256), 
-                                                  mygroupnorm(num_groups=16, num_channels=256),
+                                                  mygroupnorm(num_groups=8, num_channels=256),
                                                   nn.PReLU(),
                                                   nn.Linear(256, 256),
-                                                  mygroupnorm(num_groups=16, num_channels=256),
-                                                  nn.PReLU(),
-                                                  nn.Linear(256, 256),
-                                                  mygroupnorm(num_groups=16, num_channels=256),
+                                                  mygroupnorm(num_groups=8, num_channels=256),
                                                   nn.PReLU(),
                                                   nn.Linear(256, 3))
 
