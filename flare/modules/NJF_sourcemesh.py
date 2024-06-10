@@ -12,6 +12,7 @@ import numpy as np
 import sys
 import random
 import time
+import trimesh
 
 class SourceMesh:
     '''
@@ -120,6 +121,38 @@ class SourceMesh:
             
             self.__loaded_data[key] = data
         # print("Ellapsed load source mesh ", time.time() - start)
+
+    def compute_centroids_from_vertices(self, vertices):
+        m = trimesh.Trimesh(vertices=vertices, faces=self.faces, process=False)
+        return np.hstack((np.mean(m.triangles, axis=1), m.face_normals))
+
+
+    def get_centroids_from_vertices(self, vertices):
+        # if vertices is tensor, convert to numpy
+        if torch.is_tensor(vertices):
+            vertices = vertices.cpu().detach().numpy()
+        batched = True
+        if len(vertices.shape) == 2:
+            vertices = vertices[None, ...]
+            batched = False
+
+        point_and_normals_list = []
+        for i in range(vertices.shape[0]):
+            points_and_normals = self.mesh_processor.compute_centroids_from_vertices(vertices[i])
+            points_and_normals = torch.from_numpy(points_and_normals).type(self.__ttype)
+
+            if self.center_source:
+                c = self.source_mesh_centroid
+                points_and_normals[:, 0:3] -= c
+        
+            point_and_normals_list.append(points_and_normals)
+
+        if batched:
+            return torch.stack(point_and_normals_list, dim=0)
+        else:
+            return point_and_normals_list[0]
+
+        
 
     def load(self, source_v=None, source_f=None):
         # mesh_data = SourceMeshData.SourceMeshData.meshprocessor_from_file(self.source_dir)

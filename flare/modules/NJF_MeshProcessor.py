@@ -163,6 +163,10 @@ class MeshProcessor:
         if use_wks:
             self.get_samples()# this is to compute WKS for centroids
 
+    def compute_centroids_from_vertices(self, vertices):
+        m = trimesh.Trimesh(vertices=vertices, faces=self.faces, process=False)
+        return np.hstack((np.mean(m.triangles, axis=1), m.face_normals))
+
     def get_differential_operators(self):
         if self.diff_ops.grad is None:
             if not self.from_file:

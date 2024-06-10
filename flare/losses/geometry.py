@@ -48,11 +48,41 @@ def laplacian_loss(mesh: Mesh, canonical_vertices, face_index, head_index):
     
     return loss.mean()
 
-def normal_reg_loss(mesh1, mesh2):
-    # compute cosine similarity between normals
-    loss = 1 - torch.cosine_similarity(mesh1.face_normals, mesh2.face_normals, dim=-1)
-    return (loss**2).mean()
+def laplacian_loss_two_meshes(mesh, vertrices1, vertices2):
+    """ Compute the Laplacian term as the mean squared Euclidean norm of the differential coordinates.
 
+    Args:
+        mesh (Mesh): Mesh used to build the differential coordinates.
+    """
+
+    L = mesh.laplacian
+    V1 = vertrices1
+    V2 = vertices2
+
+
+
+    for b in range(V1.shape[0]):
+        v1_lap = L.mm(V1[b])
+        v2_lap = L.mm(V2[b])
+        loss = torch.pow(v1_lap - v2_lap, 2)
+        if b == 0:
+            total_loss = loss
+        else:
+            total_loss += loss
+    return total_loss.mean()
+
+def normal_reg_loss(mesh, vertices1, vertices2):
+    for b in range(vertices1.shape[0]):
+        mesh1 = mesh.with_vertices(vertices1[b])
+        mesh2 = mesh.with_vertices(vertices2[b])
+
+        loss = 1 - torch.cosine_similarity(mesh1.face_normals, mesh2.face_normals, dim=-1)
+        if b == 0:
+            total_loss = loss
+        else:
+            total_loss += loss
+
+    return total_loss.mean()
 
 def normal_consistency_loss(mesh: Mesh):
     """ Compute the normal consistency term as the cosine similarity between neighboring face normals.

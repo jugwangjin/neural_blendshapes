@@ -101,13 +101,13 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
             seman_loss += cd_loss
             # print(batch_loss)
             # additionally, get mean and std of them and add to loss
-            # gt_seg_pixels_mean = gt_seg_pixels.mean(dim=0)
-            # rendered_seg_pixels_mean = seg_pixels_on_clip_space.mean(dim=0)
+            gt_seg_pixels_mean = gt_seg_pixels.mean(dim=0)
+            rendered_seg_pixels_mean = seg_pixels_on_clip_space.mean(dim=0)
 
-            # stat_loss += (gt_seg_pixels_mean - rendered_seg_pixels_mean).pow(2).mean()
+            stat_loss += (gt_seg_pixels_mean - rendered_seg_pixels_mean).pow(2).mean()
 
         seman_losses += (seman_loss / float(len(seg_map_to_vertex_labels)))
-        # stat_losses += (stat_loss / float(len(seg_map_to_vertex_labels)))
+        stat_losses += (stat_loss / float(len(seg_map_to_vertex_labels)))
     # exit()
     return seman_losses/bsize, stat_losses/bsize
  
