@@ -186,6 +186,10 @@ class NeuralBlendshapes(nn.Module):
         # deformed_ict = deformed_ict + template_deformation[None]
         only_ict_deformed_mesh = self.apply_deformation(deformed_ict, features, pose_weight)
         # only_ict_deformed_mesh = self.apply_deformation(deformed_ict + template_deformation[None], features, pose_weight)
+        
+
+        features = features.detach()
+        deformed_ict = deformed_ict.detach()
 
         ict_jacobian = self.source_mesh.jacobians_from_vertices(deformed_ict[:, :self.head_index])
         
