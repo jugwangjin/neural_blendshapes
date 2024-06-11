@@ -59,7 +59,9 @@ def laplacian_loss_two_meshes(mesh, vertrices1, vertices2):
     V1 = vertrices1
     V2 = vertices2
 
-
+    if len(V1.shape) == 2:
+        V1 = V1.unsqueeze(0)
+        V2 = V2.unsqueeze(0)
 
     for b in range(V1.shape[0]):
         v1_lap = L.mm(V1[b])
@@ -72,6 +74,10 @@ def laplacian_loss_two_meshes(mesh, vertrices1, vertices2):
     return total_loss.mean()
 
 def normal_reg_loss(mesh, vertices1, vertices2):
+    if len(vertices1.shape) == 2:
+        vertices1 = vertices1.unsqueeze(0)
+        vertices2 = vertices2.unsqueeze(0)
+
     for b in range(vertices1.shape[0]):
         mesh1 = mesh.with_vertices(vertices1[b])
         mesh2 = mesh.with_vertices(vertices2[b])

@@ -201,7 +201,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         wandb.init(project="neural_blendshape", name=wandb_name, config=args)
     for epoch in progress_bar:
         
-        if epoch == 2 * (epochs // 3) and args.fourier_features != "positional":
+        if epoch == 3 * (epochs // 4) and args.fourier_features != "positional":
             del shader
             del optimizer_shader
             del scheduler_shader
@@ -239,9 +239,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             
 
             # use_jaw = iteration < args.iterations // 5
-            use_jaw = iteration < args.iterations // 3
+            # use_jaw = iteration < args.iterations // 3
+            use_jaw = True
             pretrain_lmk = iteration < args.iterations // 6
 
+            if iteration == args.iterations // 2:
+                loss_weights['landmark'] /= 10
+                loss_weights['closure'] /= 10
 
             # ==============================================================================================
             # encode input images
@@ -251,7 +255,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             return_dict = neural_blendshapes(input_image, views_subset)
             features = return_dict['features']
-            mesh = ict_canonical_mesh.with_vertices(ict_canonical_mesh.vertices)
+            mesh = ict_canonical_mesh.with_vertices(return_dict['template_mesh'])
+            # mesh = ict_canonical_mesh.with_vertices(ict_canonical_mesh.vertices)
             deformed_vertices = return_dict["full_deformed_mesh"]
 
             d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
@@ -270,19 +275,21 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['perceptual_loss'] = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
             losses['mask'] = mask_loss(views_subset["mask"], gbuffer_mask)
             losses['segmentation'], losses['semantic_stat'] = segmentation_loss(views_subset, gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
-            # ict_seg, semantic_stat = segmentation_loss(views_subset, ict_gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
-            # losses['segmentation'] += ict_seg * 0.5
-            # losses['semantic_stat'] += semantic_stat * 0.5
+            ict_seg, semantic_stat = segmentation_loss(views_subset, ict_gbuffers, ict_facekit.parts_indices, ict_canonical_mesh.vertices)
+            losses['segmentation'] += ict_seg
+            losses['semantic_stat'] += semantic_stat
             
             losses['landmark'], losses['closure'] = landmark_loss(ict_facekit, gbuffers, views_subset, use_jaw, device)
             ict_lmk, ict_closure = landmark_loss(ict_facekit, ict_gbuffers, views_subset, use_jaw, device)
             losses['landmark'] += ict_lmk
             losses['closure'] += ict_closure
 
-            losses['laplacian_regularization'] = laplacian_loss_two_meshes(ict_canonical_mesh, return_dict['full_deformed_mesh'], return_dict['full_ict_deformed_mesh'].detach())
-            losses['laplacian_regularization'] += (1e-4 / args.weight_laplacian_regularization) * (return_dict['additional_jacobian']).pow(2).mean() # close to ict 
+            losses['laplacian_regularization'] = laplacian_loss_two_meshes(ict_canonical_mesh, return_dict['template_mesh'], ict_canonical_mesh.vertices)
+            # losses['laplacian_regularization'] = laplacian_loss_two_meshes(ict_canonical_mesh, return_dict['full_deformed_mesh'], return_dict['full_ict_deformed_mesh'].detach())
+            losses['laplacian_regularization'] += (1e-5 / args.weight_laplacian_regularization) * (return_dict['additional_jacobian']).pow(2).mean() # close to ict 
 
-            losses['normal_regularization'] = normal_reg_loss(ict_canonical_mesh, return_dict['full_deformed_mesh'], return_dict['full_ict_deformed_mesh'].detach()) # template
+            losses['normal_regularization'] = normal_reg_loss(ict_canonical_mesh, return_dict['template_mesh'], ict_canonical_mesh.vertices) # template
+            # losses['normal_regularization'] = normal_reg_loss(ict_canonical_mesh, return_dict['full_deformed_mesh'], return_dict['full_ict_deformed_mesh'].detach()) # template
 
             losses['feature_regularization'] = feature_regularization_loss(features, views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict], 
                                                                            neural_blendshapes, facs_weight=0) 
@@ -401,7 +408,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     for n in range(debug_views['img'].shape[0]):
 
                         write_mesh(meshes_save_path / f"mesh_{iteration:06d}_{n}.obj", mesh.with_vertices(return_dict_['full_deformed_mesh'][n]).detach().to('cpu'))                                
+                        if n != 0:
+                            break
                     for nn in range(views_subset['img'].shape[0]):
+                        if nn != 0:
+                            break
                         only_expression_mesh = mesh.with_vertices(return_dict['only_expression_mesh'][nn]).detach().to('cpu')
                         write_mesh(meshes_save_path / f"expression_{nn:02d}.obj", only_expression_mesh)                    
 
@@ -415,7 +426,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             ## ============== save intermediate ==============================
             if (args.save_frequency > 0) and (iteration == 1 or iteration % args.save_frequency == 0):
                 with torch.no_grad():
-                    # write_mesh(meshes_save_path / f"mesh_{iteration:06d}.obj", mesh.with_vertices(return_dict['template_mesh']).detach().to('cpu'))                                
+                    write_mesh(meshes_save_path / f"mesh_{iteration:06d}.obj", mesh.with_vertices(return_dict['template_mesh']).detach().to('cpu'))                                
                     shader.save(shaders_save_path / f'shader.pt')
                     neural_blendshapes.save(shaders_save_path / f'neural_blendshapes.pt')
 
