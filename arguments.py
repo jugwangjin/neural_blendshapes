@@ -43,6 +43,7 @@ def config_parser():
     parser.add_argument('--lr_encoder', type=float, default=1e-4, help="Step size/learning rate for the vertex positions")
     parser.add_argument('--lr_deformer', type=float, default=1e-4, help="Step size/learning rate for the deformation parameters")
     parser.add_argument('--lr_jacobian', type=float, default=1e-3, help="Step size/learning rate for the deformation parameters")
+    parser.add_argument('--lr_template', type=float, default=1e-3, help="Step size/learning rate for the deformation parameters")
 
     # loss weights
     parser.add_argument('--weight_mask', type=float, default=2.0, help="Weight of the mask term")
@@ -97,5 +98,8 @@ def config_parser():
     parser.add_argument('--eye_deformer_layers', type=int, default=2, help="eye deformer layers")
     parser.add_argument('--eye_deformer_hidden_dim', type=int, default=64, help="eye deformer hidden dim")
     parser.add_argument('--eye_deformer_multires', type=int, default=2, help="eye deformer multires")
+
+    parser.add_argument('--skip_eval', action='store_true', help="skip eval")
+    parser.add_argument('--skip_wandb', action='store_true', help="skip eval")
 
     return parser

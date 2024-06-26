@@ -126,7 +126,7 @@ class Renderer:
         batch_size = vertices.shape[0]
         # single fixed camera and for now we fix res also
         resolution = (512, 512)
-        P_batch, Rt = Renderer.to_gl_camera_batch(views, resolution, n=self.near, f=self.far)
+        P_batch, Rt = Renderer.to_gl_camera_batch(views['camera'], resolution, n=self.near, f=self.far)
         deformed_vertices_clip_space = Renderer.transform_pos_batch(P_batch, vertices)
         return deformed_vertices_clip_space
 
@@ -134,7 +134,7 @@ class Renderer:
         P_batch = gbuffers["P_batch"]
         return Renderer.transform_pos_batch(P_batch, vertices)
 
-    def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx, canonical_uv, vertex_labels):
+    def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx, canonical_uv):
         """ Render G-buffers from a set of views.
 
         Args:
@@ -184,18 +184,6 @@ class Renderer:
         uv_coordinates, _ = dr.interpolate(canonical_uv, rast, idx, rast_db=rast_out_db, diff_attrs='all')
         gbuffer["uv_coordinates"] = dr.antialias(uv_coordinates, rast, deformed_vertices_clip_space, idx) if with_antialiasing else uv_coordinates
 
-
-        # render vertex labels as well
-        # print(torch.min(vertex_labels), torch.max(vertex_labels))
-        # # print(vertex_labels.shape)
-        # vertex_labels, _ = dr.interpolate(vertex_labels, rast, idx, rast_db=rast_out_db, diff_attrs='all')
-        # # print(vertex_labels.min(), vertex_labels.max())
-        # # print(vertex_labels.shape)
-        # gbuffer["vertex_labels"] = dr.antialias(vertex_labels, rast, deformed_vertices_clip_space, idx) if with_antialiasing else vertex_labels
-        # print(torch.min(vertex_labels), torch.max(vertex_labels))
-        # print(vertex_labels.shape)
-        # exit()/
-  
         # We store the deformed vertices in clip space, the transformed camera matrix and the barycentric coordinates
         # to antialias texture and mask after computing the color 
         gbuffer["rast"] = rast

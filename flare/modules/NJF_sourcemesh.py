@@ -37,6 +37,7 @@ class SourceMesh:
         self.source_mesh_centroid = None
         self.mesh_processor = None
         self.cpuonly = cpuonly
+        self.device = 'cpu'
 
     def get_vertices(self):
         return self.source_vertices
@@ -67,6 +68,7 @@ class SourceMesh:
         self.centroids_and_normals = self.centroids_and_normals.to(device)
         for key in self.__loaded_data.keys():
             self.__loaded_data[key] = self.__loaded_data[key].to(device)
+        self.device = device
         return self
 
     def __init_from_mesh_data(self):
@@ -148,9 +150,9 @@ class SourceMesh:
             point_and_normals_list.append(points_and_normals)
 
         if batched:
-            return torch.stack(point_and_normals_list, dim=0)
+            return torch.stack(point_and_normals_list, dim=0).to(self.device)
         else:
-            return point_and_normals_list[0]
+            return point_and_normals_list[0].to(self.device)
 
         
 

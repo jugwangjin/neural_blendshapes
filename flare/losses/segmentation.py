@@ -31,76 +31,46 @@ seg_map_to_vertex_labels[0] = [0, 1]
 
 def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices, img_size=512):
 
-    # full face gt 2d points -> sample where gt_seg is 0
     bsize = views_subset['skin_mask'].shape[0]
 
     gt_segs = views_subset['skin_mask'] # Shape of B, H, W, 6
 
-    # # save segs image to debug. 
-    # face_and_head_seg = gt_segs[..., 0]
-    # background = gt_segs[..., 1]
-    # for b in range(bsize):
-    #     face_and_head_seg[b] = torch.clamp(face_and_head_seg[b], 0, 1)
-    #     background[b] = torch.clamp(background[b], 0, 1)
-    #     import cv2
-    #     import numpy as np
-    #     cv2.imwrite(f'debug/face_and_head_seg_{b}.png', np.uint8(face_and_head_seg[b].detach().cpu().numpy() * 255))
-    #     cv2.imwrite(f'debug/background_{b}.png', np.uint8(background[b].detach().cpu().numpy() * 255))
-    #     cv2.imwrite(f'debug/input_{b}.png', np.uint8(views_subset['img'][b].detach().cpu().numpy() * 255))
-    # # print(face_and_head_seg.shape, background.shape)
-    # exit()
+    canonical_positions = gbuffers['canonical_position'] * gbuffers["mask"].detach().sum(dim=-1, keepdim=True)
 
-
-    # rendered_segs = gbuffers['vertex_labels'] # Shape of B, H, W, 9
-    # print(gt_segs.shape, rendered_segs.shape)
-    canonical_positions = gbuffers['canonical_position'] * views_subset["skin_mask"][..., :1].sum(dim=-1, keepdim=True)
-
-    vertices_on_clip_space = gbuffers['deformed_verts_clip_space'].clone()
-    vertices_on_clip_space = vertices_on_clip_space[..., :3] / torch.clamp(vertices_on_clip_space[..., 3:], min=1e-8)
+    deformed_verts_clip_space_ = gbuffers['deformed_verts_clip_space'].clone()
+    deformed_verts_clip_space = deformed_verts_clip_space_[..., :3] / deformed_verts_clip_space_[..., 3:]
 
     seman_losses = torch.tensor(0.0, device=gt_segs.device)
     stat_losses = torch.tensor(0.0, device=gt_segs.device)
+    
     for b, gt_seg in enumerate(gt_segs):
-        # sample 2d pixel positions where gt_segs==i
         seman_loss = torch.tensor(0.0, device=gt_seg.device)
         stat_loss = torch.tensor(0.0, device=gt_seg.device)
 
         with torch.no_grad():
-            # canonical_positions = gbuffers['canonical_position'][b] * views_subset["skin_mask"][b, ..., :5].sum(dim=-1, keepdim=True)
-            nonzero_rows = torch.abs(canonical_positions[b].view(-1, 3)).sum(dim=1) > 0
-            valid_canonical_positions = canonical_positions[b].view(-1, 3)[nonzero_rows]
-            valid_canonical_positions = torch.unique(valid_canonical_positions, dim=0)
+            temp = canonical_positions[b].view(-1, 3)
+            nonzero_rows = torch.abs(temp).sum(dim=1) > 0
+            valid_canonical_positions = temp[nonzero_rows]
 
             _, valid_idx, _ = knn_points(valid_canonical_positions[None], canonical_vertices[None], K=1, return_nn=False)
             valid_idx = torch.unique(valid_idx)
-            # print(valid_idx.shape)
-
-        # for i in range(len(seg_map_to_vertex_labels)):
+            
         for i in seg_map_to_vertex_labels.keys():
+
             gt_seg_pixels = (torch.nonzero(gt_seg[:,:,i]) / (img_size - 1)) * 2 - 1
 
             part_index = list(range(11248))
             
-            # for n in seg_map_to_vertex_labels[i]:
-            #     part_index += parts_indices[n]
-            #     print(n, len(parts_indices[n]))
-            # print(len(part_index))
-            # part index should be intersection of valid_idx and part index
-            # part_index = list(set(part_index) & set(valid_idx.cpu().numpy().tolist()))
-            # part_index = list(set(part_index) & set(valid_idx.cpu().numpy().tolist()))
-
             if len(gt_seg_pixels) == 0 or len(part_index) == 0:
                 continue
 
-            seg_pixels_on_clip_space = vertices_on_clip_space[b, part_index, :2]
-            # print(i, gt_seg_pixels.shape, rendered_seg_pixels.shape)
-            # calculate chamfer distance
+            valid_indices = list(set(valid_idx.cpu().numpy().tolist()) & set(part_index))
+            seg_pixels_on_clip_space = deformed_verts_clip_space[b, valid_indices, :2]
+            
             cd_loss, _ = chamfer_distance(gt_seg_pixels[None], seg_pixels_on_clip_space[None])
-            # cd_loss, _ = chamfer_distance(gt_seg_pixels[None], seg_pixels_on_clip_space[None], batch_reduction=None, point_reduction=None)
-            # cd_loss = cd_loss[0].pow(2).mean() + cd_loss[1].pow(2).mean()
+            # print(cd_loss.shape)
             seman_loss += cd_loss
-            # print(batch_loss)
-            # additionally, get mean and std of them and add to loss
+
             gt_seg_pixels_mean = gt_seg_pixels.mean(dim=0)
             rendered_seg_pixels_mean = seg_pixels_on_clip_space.mean(dim=0)
 
@@ -108,7 +78,7 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
 
         seman_losses += (seman_loss / float(len(seg_map_to_vertex_labels)))
         stat_losses += (stat_loss / float(len(seg_map_to_vertex_labels)))
-    # exit()
+
     return seman_losses/bsize, stat_losses/bsize
  
 

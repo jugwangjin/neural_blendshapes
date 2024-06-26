@@ -50,7 +50,7 @@ class NeuralShader(torch.nn.Module):
 
         print(disentangle_network_params)
 
-        self.light_mlp = FC(3+3, 1, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation, bias=True).to(self.device) 
+        self.light_mlp = FC(3+3, 1, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) 
         self.dir_enc_func = generate_ide_fn(deg_view=3, device=self.device)
 
 

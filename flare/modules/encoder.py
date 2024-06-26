@@ -9,7 +9,21 @@ HALF_PI = torch.pi / 2
 
 import pytorch3d.transforms as p3dt
 
-
+class mygroupnorm(nn.Module):
+    def __init__(self, num_groups, num_channels):
+        super().__init__()
+        self.num_groups = num_groups
+        self.num_channels = num_channels
+        self.groupnorm = nn.GroupNorm(num_groups, num_channels)
+    def forward(self, x):
+        if len(x.shape) == 3:
+            b, v, c = x.shape
+            x = x.reshape(b*v, c)
+            x = self.groupnorm(x)
+            x = x.reshape(b, v, c)
+            return x
+        else:
+            return self.groupnorm(x)
 def initialize_weights(m, gain=0.1):
 
     # iterate over layers, apply if it is nn.Linear
@@ -32,86 +46,86 @@ class ResnetEncoder(nn.Module):
         super(ResnetEncoder, self).__init__()
         self.ict_facekit = ict_facekit
 
-        self.tail = nn.Sequential(nn.Linear(7 + 68*2, 64),
-                                    nn.PReLU(),
-                                    nn.Linear(64, 64),
-                                    nn.PReLU(),
-                                    nn.Linear(64, 64),
-                                    nn.PReLU(),
-                                    nn.Linear(64, 64),
-                                    nn.PReLU(),
-                                    nn.Linear(64, 7))
+        self.tail = nn.Sequential(nn.Linear(7 + 478*3 + 53 + 68*2, 128),
+                                    mygroupnorm(num_groups=16, num_channels=128),
+                                    nn.LeakyReLU(),
+                                    nn.Linear(128, 128),
+                                    mygroupnorm(num_groups=16, num_channels=128),
+                                    nn.LeakyReLU(),
+                                    nn.Linear(128, 128),
+                                    mygroupnorm(num_groups=16, num_channels=128),
+                                    nn.LeakyReLU(),
+                                    nn.Linear(128, 128),
+                                    mygroupnorm(num_groups=16, num_channels=128),
+                                    nn.LeakyReLU(),
+                                    nn.Linear(128, 128),
+                                    mygroupnorm(num_groups=16, num_channels=128),
+                                    nn.LeakyReLU(),
+                                    nn.Linear(128, 53 + 7))
 
         initialize_weights(self.tail, gain=0.01)
+        self.tail[-1].weight.data.zero_()
+        self.tail[-1].bias.data.zero_()
             
-        # set weights of self.tail as identity
-        # self.tail.weight.data = torch.eye(7)
-        # self.tail.bias.data.zero_()
-
-
-        # self.tail.weight.data[3:6] *= 0.01
-        # self.tail.weight.data[1:3] *= -1
-# tensor([[ 0.1578, -0.4291, -0.0902],                                                                                        [145/1969]
-#         [ 0.1215,  0.8031,  0.1064],                                                                                                  
-#         [ 0.1357,  0.4502,  0.0228],                                                                                                  
-#         [ 0.1256,  0.7359,  0.0285],                                                                                                  
-#         [-0.0401,  0.0417,  0.0136]], device='cuda:0')    
-
-
-# tensor([[-0.1578, -0.4291, -0.0902],                                                                                                  
-#         [-0.1215,  0.8031,  0.1064],                                                                                                  
-#         [-0.1357,  0.4502,  0.0228],                                                                                                  
-#         [-0.1256,  0.7359,  0.0285],                                                                                                  
-#         [ 0.0401,  0.0417,  0.0136]], device='cuda:0')        
-
-        self.blendshapes_multiplier = torch.nn.Parameter(torch.zeros(53))
-        self.blendshapes_bias = torch.nn.Parameter(torch.zeros(53))
         self.softplus = nn.Softplus(beta=torch.log(torch.tensor(2.)))
-        
-        # self.blendshapes = nn.Linear(53+7+16, 53)
-        # self.blendshapes.weight.data.zero_()
-        # self.blendshapes.bias.data.zero_()
-        # self.blendshapes.weight.data[:53, :53] = torch.eye(53)
-
         self.scale = torch.nn.Parameter(torch.zeros(1))
+        self.global_translation = nn.Parameter(torch.zeros(3))
+        self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
+
 
 
     def forward(self, views):
-        blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53) * self.softplus(self.blendshapes_multiplier)
-        
+        blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
+        mp_landmark = views['mp_landmark'].reshape(-1, 478*3).detach()
+        transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
+        detected_landmarks = views['landmark'].clone().detach()[:, :, :2].reshape(-1, 68*2).detach()
 
-        transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4)
-
-        detected_landmarks = views['landmark'].clone().detach()[:, :, :2].reshape(-1, 68*2)
-
-        # calculate scale, translation, rotation from transform matrix
-        # assume scale is the same for all axes
         scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
         translation = transform_matrix[:, :3, 3]
         rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
-        # indexing = [0,2,1]
-        # rotation_matrix = rotation_matrix[:, indexing]
 
-        # rotation_matrix[:, 1:2] *= -1
-        # rotation_matrix[:, 2:3] *= -1
-        # rotation_matrix[:, :1] *= -1
+        '''
+        debugging
+        '''
+        # print(torch.norm(transform_matrix[:, :3, :3], dim=-1))
+        
+        # print(transform_matrix)
+        # print(scale, translation, rotation_matrix)
+
+        # # print(euler_angle.shape, translation.shape, scale.shape)
+        
+        # rot_mat = rotation_matrix.clone()
+
+        # import pytorch3d.transforms as pt3d
+        # euler_angle = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
+        # euler_angle[:, :3] *= -1
+        # rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle, convention = 'XYZ')
+
+        # print(rot_mat[:, :3] * -1, rotation_matrix)
+        # exit()
+        # print(rotation_matrix)
+
+        '''
+        debugging block end
+        '''
+        rotation_matrix[:, 2:3] *= -1
+        rotation_matrix[:, :, 2:3] *= -1
+
         rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
         # print(rotation)
-        rotation[:, 1:3] *= -1
-        # print(rotation, translation, scale)
-        features = self.tail(torch.cat([detected_landmarks, rotation, translation, scale], dim=-1))
-        translation = translation * 0
+        # to radians
+        # rotation[:, :3] *= -1
+        translation = translation / 256.
+        features = self.tail(torch.cat([blendshape, mp_landmark, detected_landmarks, rotation, translation, scale], dim=-1))
 
-        features += torch.cat([rotation, translation, scale], dim=-1)
-
-        # bshapes_input = torch.cat([views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53), transform_matrix.reshape(-1, 16), features], dim=-1)
-        # blendshape = self.blendshapes(bshapes_input)
+        out_features = torch.zeros_like(features)
+        out_features[:, :53] = blendshape * self.softplus(features[:, :53])
+        out_features[:, 53:] = torch.cat([rotation, translation, scale], dim=-1) + features[:, 53:]
         
-        features[:, 5] = 0
-        features[:, 6] = torch.ones_like(features[:, 6]) * self.softplus(self.scale)
-        features = torch.cat([blendshape, features], dim=-1) # shape of features: (batch_size, 60)
+        out_features[:, -2] = 0
+        out_features[:, -1] = torch.ones_like(out_features[:, 6]) * self.softplus(self.scale)
 
-        return features
+        return out_features
 
     def save(self, path):
         data = {

@@ -49,13 +49,13 @@ def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, de
     return_dict = neural_blendshapes(views["img"].to(device), views)
     # print(return_dict['features'][:, 53:])
 
-    deformed_vertices = return_dict['full_deformed_mesh']
+    deformed_vertices = return_dict['deformed_mesh']
     
     d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
     ## ============== Rasterize ==============================
     gbuffers = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
                         channels=channels_gbuffer, with_antialiasing=True, 
-                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh, vertex_labels=ict_facekit.vertex_labels)
+                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
     
     ## ============== predict color ==============================
     rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffers, views, mesh, args.finetune_color, lgt)
@@ -68,13 +68,13 @@ def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, de
 def run_relight(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt_list, images_save_path):
     return_dict = neural_blendshapes(views["img"].to(device), views)
 
-    deformed_vertices = return_dict['full_deformed_mesh']
+    deformed_vertices = return_dict['deformed_mesh']
 
     d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
     ## ============== Rasterize ==============================
     gbuffers = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
                         channels=channels_gbuffer, with_antialiasing=True, 
-                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh, vertex_labels=ict_facekit.vertex_labels)
+                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
     
     ## ============== predict color ==============================
     relit_imgs, cbuffers, gbuffer_mask = shader.relight(gbuffers, views, mesh, args.finetune_color, lgt_list)
