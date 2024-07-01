@@ -143,6 +143,19 @@ class NeuralShader(torch.nn.Module):
 
         return color, material, light
 
+    def get_mask(self, gbuffer, views, mesh, finetune_color, lgt):
+        
+        positions = gbuffer["canonical_position"]
+        batch_size, H, W, ch = positions.shape
+
+        ### !! we mask directly with alpha values from the rasterizer !! ###
+        pred_color_masked = torch.lerp(torch.zeros((batch_size, H, W, 1)).to(self.device), 
+                                    torch.ones((batch_size, H, W, 1)).to(self.device), gbuffer["mask"].float())
+
+        ### we antialias the final color here (!)
+        pred_color_masked = dr.antialias(pred_color_masked.contiguous(), gbuffer["rast"], gbuffer["deformed_verts_clip_space"], mesh.indices.int())
+
+        return None, None, pred_color_masked[..., -1:]
 
     # ==============================================================================================
     # prepare the final color output

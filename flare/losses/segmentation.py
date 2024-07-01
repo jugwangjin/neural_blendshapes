@@ -37,7 +37,7 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
 
     canonical_positions = gbuffers['canonical_position'] * gbuffers["mask"].detach().sum(dim=-1, keepdim=True)
 
-    deformed_verts_clip_space_ = gbuffers['deformed_verts_clip_space'].clone()
+    deformed_verts_clip_space_ = gbuffers['deformed_verts_clip_space']
     deformed_verts_clip_space = deformed_verts_clip_space_[..., :3] / deformed_verts_clip_space_[..., 3:]
 
     seman_losses = torch.tensor(0.0, device=gt_segs.device)
@@ -69,7 +69,7 @@ def segmentation_loss(views_subset, gbuffers, parts_indices, canonical_vertices,
             
             cd_loss, _ = chamfer_distance(gt_seg_pixels[None], seg_pixels_on_clip_space[None])
             # print(cd_loss.shape)
-            seman_loss += cd_loss
+            seman_loss += cd_loss.mean()
 
             gt_seg_pixels_mean = gt_seg_pixels.mean(dim=0)
             rendered_seg_pixels_mean = seg_pixels_on_clip_space.mean(dim=0)
