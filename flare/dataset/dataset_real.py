@@ -71,7 +71,7 @@ class DatasetLoader(Dataset):
         self.K[0, 2] = focal_cxcy[2] * self.resolution[0]
         self.K[1, 2] = focal_cxcy[3] * self.resolution[1]
 
-        self.face_alignment = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, flip_input=False, 
+        self.face_alignment = face_alignment.FaceAlignment(face_alignment.LandmarksType.THREE_D, flip_input=False, 
                                                             device='cuda' if torch.cuda.is_available() else 'cpu')
 
         BaseOptions = mp.tasks.BaseOptions
@@ -273,7 +273,7 @@ class DatasetLoader(Dataset):
             landmarks, scores, _ = self.face_alignment.get_landmarks_from_image(str(img_path), return_bboxes=True, return_landmark_score=True)
 
             if len(landmarks) == 0:
-                landmark = torch.zeros(68, 3)
+                landmark = torch.zeros(68, 4)
             else:
                 landmark = torch.tensor(landmarks[0], dtype=torch.float32)
                 # print(torch.amin(landmark, dim=0), torch.amax(landmark, dim=0))

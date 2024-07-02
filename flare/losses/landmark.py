@@ -11,8 +11,8 @@ closure_blocks = [list(range(48, 68))] # left eye, right eye, mouth
 # closure_blocks = [list(range(36, 42)), list(range(42, 48)), list(range(48, 68))] # left eye, right eye, mouth
 
 def closure_loss_block(gt, estimated, pairs):
-    gt_closure = gt[:, pairs[:, 0], :2] - gt[:, pairs[:, 1], :2]
-    estimated_closure = estimated[:, pairs[:, 0], :2] - estimated[:, pairs[:, 1], :2]
+    gt_closure = gt[:, pairs[:, 0], :3] - gt[:, pairs[:, 1], :3]
+    estimated_closure = estimated[:, pairs[:, 0], :3] - estimated[:, pairs[:, 1], :3]
     confidence = torch.minimum(gt[:, pairs[:, 0], -1:], gt[:, pairs[:, 1], -1:])
     
     closure_loss = ((estimated_closure - gt_closure).pow(2) * confidence).mean()
@@ -33,31 +33,39 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, use_jaw, device):
     """
     # Get the indices of landmarks used by the handle-based deformer
     landmark_indices = ict_facekit.landmark_indices
-    landmarks_on_clip_space = gbuffers['deformed_verts_clip_space'][:, landmark_indices]
-    landmarks_on_clip_space = landmarks_on_clip_space[..., :2] / torch.clamp(landmarks_on_clip_space[..., -1:], min=1e-8) 
+    landmarks_on_clip_space_ = gbuffers['deformed_verts_clip_space'][:, landmark_indices]
+    landmarks_on_clip_space = torch.zeros_like(landmarks_on_clip_space_)
+    landmarks_on_clip_space[..., :2] = landmarks_on_clip_space_[..., :2] / torch.clamp(landmarks_on_clip_space_[..., -1:], min=1e-8) 
+    landmarks_on_clip_space[..., 2:] = landmarks_on_clip_space_[..., 2:]
 
     detected_landmarks = views_subset['landmark'].clone().detach()
-    detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
+    detected_landmarks[..., :2] = detected_landmarks[..., :2] * 2 - 1
+    detected_landmarks[..., 2] = detected_landmarks[..., 2] * -2
+
+    # both landmark on clip space and detected landmarks, subtract by the minimum value on z axis
+    # to make the z axis value positive
+    landmarks_on_clip_space[..., 2] -= landmarks_on_clip_space[..., 2].min(dim=-1, keepdim=True)[0]
+    detected_landmarks[..., 2] -= detected_landmarks[..., 2].min(dim=-1, keepdim=True)[0]
 
     starting_index = 0 if use_jaw else 17
 
-    landmark_loss = ((detected_landmarks[:, starting_index:, :2] - landmarks_on_clip_space[:, starting_index:, :2]).pow(2) * detected_landmarks[:, starting_index:, -1:]).mean()
-    # landmark_loss = ((detected_landmarks[:, starting_index:, :2] - landmarks_on_clip_space[:, starting_index:, :2]).pow(2) * detected_landmarks[:, starting_index:, -1:]).mean()
+    landmark_loss = ((detected_landmarks[:, starting_index:, :3] - landmarks_on_clip_space[:, starting_index:, :3]).pow(2) * detected_landmarks[:, starting_index:, -1:]).mean()
+    # landmark_loss = ((detected_landmarks[:, starting_index:, :3] - landmarks_on_clip_space[:, starting_index:, :3]).pow(2) * detected_landmarks[:, starting_index:, -1:]).mean()
 
     closure_loss = 0
     for block in closure_blocks:
-        gt_closure = detected_landmarks[:, None, block, :2] - detected_landmarks[:, block, None, :2]
-        estimated_closure = landmarks_on_clip_space[:, None, block, :2] - landmarks_on_clip_space[:, block, None, :2]
+        gt_closure = detected_landmarks[:, None, block, :3] - detected_landmarks[:, block, None, :3]
+        estimated_closure = landmarks_on_clip_space[:, None, block, :3] - landmarks_on_clip_space[:, block, None, :3]
         confidence = torch.minimum(detected_landmarks[:, None, block, -1:], detected_landmarks[:, block, None, -1:])
 
         closure_loss += ((estimated_closure - gt_closure).pow(2) * confidence).mean()
         # closure_loss += ((estimated_closure - gt_closure).pow(2) * confidence).mean()
         
 
-    # gt_closure = detected_landmarks[:, None, starting_index:, :2] - detected_landmarks[:, starting_index:, None, :2] 
+    # gt_closure = detected_landmarks[:, None, starting_index:, :3] - detected_landmarks[:, starting_index:, None, :3] 
     # gt_closure_confidence = detected_landmarks[:, None, starting_index:, -1:] * detected_landmarks[:, starting_index:, None, -1:]
 
-    # estimated_closure = landmarks_on_clip_space[:, None, starting_index:, :2] - landmarks_on_clip_space[:, starting_index:, None, :2]
+    # estimated_closure = landmarks_on_clip_space[:, None, starting_index:, :3] - landmarks_on_clip_space[:, starting_index:, None, :3]
 
     # closure_loss = ((estimated_closure - gt_closure).pow(2) * gt_closure_confidence).mean()
 

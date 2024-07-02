@@ -145,7 +145,7 @@ def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images
     
 
     detected_landmarks = debug_view['landmark'].clone().detach()
-    detected_landmarks[..., :-1] = detected_landmarks[..., :-1] * 2 - 1
+    detected_landmarks[..., :2] = detected_landmarks[..., :2] * 2 - 1
     # detected_landmarks[..., 2] = detected_landmarks[..., 2] * -1
     
     org_images = debug_view['img'].clone().detach()
