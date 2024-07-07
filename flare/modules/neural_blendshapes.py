@@ -119,50 +119,54 @@ class NeuralBlendshapes(nn.Module):
         self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to('cuda')
         self.inp_size = self.fourier_feature_transform.n_output_dims
 
+        self.gradient_scaling = 128.0
+        self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+        self.inp_size = self.fourier_feature_transform.n_output_dims
+
         # self.fourier_feature_transform, self.inp_size = get_embedder(10, input_dims=3)
 
         # self.expression_deformer = nn.Sequential(nn.Linear(self.inp_size + 3 + self.inp_size + 3 + code_dim + 9, 256),
-        self.expression_deformer = nn.Sequential(nn.Linear(self.inp_size + 3 + code_dim + 9, 256),
-                                                #   mygroupnorm(num_groups=32, num_channels=256),
-                                                  nn.ReLU(),
+        self.expression_deformer = nn.Sequential(nn.Linear(self.inp_size + 3 + self.inp_size + 3, 256),
+                                                  mygroupnorm(num_groups=32, num_channels=256),
+                                                  nn.Softplus(),
                                                   nn.Linear(256, 256), 
-                                                #   mygroupnorm(num_groups=32, num_channels=256),
-                                                  nn.ReLU(),
+                                                  mygroupnorm(num_groups=32, num_channels=256),
+                                                  nn.Softplus(),
                                                   nn.Linear(256, 256),
-                                                #   mygroupnorm(num_groups=32, num_channels=256),
-                                                  nn.ReLU(),
+                                                  mygroupnorm(num_groups=32, num_channels=256),
+                                                  nn.Softplus(),
                                                   nn.Linear(256, 256),
-                                                #   mygroupnorm(num_groups=32, num_channels=256),
-                                                  nn.ReLU(),
+                                                  mygroupnorm(num_groups=32, num_channels=256),
+                                                  nn.Softplus(),
                                                   nn.Linear(256, 9))
         
-        self.template_deformer = nn.Sequential(nn.Linear(self.inp_size + 3 , 128),
-                                                #   mygroupnorm(num_groups=16, num_channels=128),
-                                                  nn.ReLU(),
+        self.template_deformer = nn.Sequential(nn.Linear(self.inp_size, 128),
+                                                  mygroupnorm(num_groups=16, num_channels=128),
+                                                  nn.Softplus(),
                                                   nn.Linear(128, 128), 
-                                                #   mygroupnorm(num_groups=16, num_channels=128),
-                                                  nn.ReLU(),
+                                                  mygroupnorm(num_groups=16, num_channels=128),
+                                                  nn.Softplus(),
                                                   nn.Linear(128, 128),
-                                                #   mygroupnorm(num_groups=16, num_channels=128),
-                                                  nn.ReLU(),
-                                                  nn.Linear(128, 9))
+                                                  mygroupnorm(num_groups=16, num_channels=128),
+                                                  nn.Softplus(),
+                                                  nn.Linear(128, 3))
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
-                    nn.ReLU(),
+                    nn.Softplus(),
                     nn.Linear(32, 32),
-                    nn.ReLU(),
+                    nn.Softplus(),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
 
         # last layer to all zeros, to make zero deformation as the default            
         initialize_weights(self.expression_deformer, gain=0.01)
-        self.expression_deformer[-1].weight.data.zero_()
+        # self.expression_deformer[-1].weight.data.zero_()
         self.expression_deformer[-1].bias.data.zero_()
 
         initialize_weights(self.template_deformer, gain=0.01)
-        self.template_deformer[-1].weight.data.zero_()
+        # self.template_deformer[-1].weight.data.zero_()
         self.template_deformer[-1].bias.data.zero_()
 
         # by default, weight to almost ones
@@ -190,8 +194,8 @@ class NeuralBlendshapes(nn.Module):
 
     def encode_position(self, coords):
         template = self.ict_facekit.canonical[0] # shape of V, 3
-        aabb_min = torch.min(template, dim=0)[0][None]
-        aabb_max = torch.max(template, dim=0)[0][None]
+        aabb_min = torch.min(template, dim=0)[0][None] * 1.2
+        aabb_max = torch.max(template, dim=0)[0][None] * 1.2
 
 
         unsqueezed = False
@@ -218,64 +222,40 @@ class NeuralBlendshapes(nn.Module):
         return_dict['features'] = features
     
         bsize = features.shape[0]
-        template = self.ict_facekit.canonical[0][:self.head_index]
+        template = self.ict_facekit.canonical[0]
 
         pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
 
         points = self.source_mesh.get_centroids_and_normals()
         encoded_points = self.encode_position(points[..., :3])
         encoded_points = torch.cat([encoded_points, points[..., 3:]], dim=-1)
+        template_deformation = self.template_deformer(self.encode_position(template[:self.head_index])) 
+        template_deformation = torch.cat([template_deformation, template_deformation[self.interior_displacement_index]], dim=0)
 
-        template_jacobian = self.source_mesh.jacobians_from_vertices(template[None])[0]
+        ict_mesh = self.ict_facekit(expression_weights = features[..., :53]) 
+        ict_mesh_w_temp = ict_mesh + template_deformation
+        ict_mesh_w_temp = ict_mesh_w_temp - torch.mean(ict_mesh_w_temp, dim=1, keepdim=True) + self.encoder.global_translation[None, None]
+        deformation = ict_mesh_w_temp[:, :self.head_index] - template[None, :self.head_index]
+        deformation = torch.cat([deformation, deformation[:, self.interior_displacement_index]], dim=1)
+        ict_mesh_w_temp = template[None] + deformation
 
-        # pose optimization
-        ict_mesh = self.ict_facekit(expression_weights = features[..., :53])
-        ict_jacobian = self.source_mesh.jacobians_from_vertices(ict_mesh[:, :self.head_index]) - template_jacobian[None]
-        # ict_mesh = self.deform_by_jacobian(ict_jacobian + template_jacobian[None])
-        # ict_mesh_posed = self.apply_deformation(ict_mesh, features, pose_weight)
-
-        # return_dict['ict_mesh'] = ict_mesh
-        # return_dict['ict_mesh_posed'] = ict_mesh_posed
-
-        # grad cut for features, pose_weight
-        # features = features.detach()
-        # pose_weight = pose_weight.detach()
-        # ict_mesh = ict_mesh.detach()
-        # ict_jacobian = ict_jacobian.detach()
-
-        # template optimization
-        template_deformation_jacobian = self.template_deformer(encoded_points).reshape(-1, 3, 3)
-
-        ict_mesh_w_temp = self.deform_by_jacobian(ict_jacobian + template_jacobian[None] + template_deformation_jacobian[None])
         ict_mesh_w_temp_posed = self.apply_deformation(ict_mesh_w_temp, features, pose_weight)
-
-        template_mesh = self.deform_by_jacobian(template_jacobian[None] + template_deformation_jacobian[None])[0]
+        
+        template_mesh = template + template_deformation
         
         return_dict['template_mesh'] = template_mesh
         return_dict['ict_mesh_w_temp'] = ict_mesh_w_temp
         return_dict['ict_mesh_w_temp_posed'] = ict_mesh_w_temp_posed
 
-        # grad cut for template_jacobian, template_deformation_jacobian
-        template_deformation_jacobian = template_deformation_jacobian.detach()
+        encoded_points_ict = self.source_mesh.get_centroids_from_vertices(ict_mesh_w_temp[:, :self.head_index])
+        encoded_points_ict = torch.cat([self.encode_position(encoded_points_ict[..., :3]), encoded_points_ict[..., 3:]], dim=-1)
 
-        # expression optimization
-        # ict_mesh_points = self.source_mesh.get_centroids_from_vertices(ict_mesh_w_temp)
-        # ict_mesh_encoded_points = torch.cat([self.encode_position(ict_mesh_points[..., :3]), \
-                                            # ict_mesh_points[..., 3:]], dim=-1)  
-        
         expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
-                                    #   ict_mesh_encoded_points, \
-                                        features[:, None, :53].repeat(1, ict_jacobian.shape[1], 1), \
-                                        ict_jacobian.reshape(bsize, -1, 9) + \
-                                        template_jacobian.reshape(-1, 9)[None].repeat(bsize, 1, 1) + \
-                                        template_deformation_jacobian.reshape(-1, 9)[None].repeat(bsize, 1, 1), \
+                                      encoded_points_ict, \
                                         ], \
                                     dim=2) # B V ? 
         expression_jacobian = self.expression_deformer(expression_input).reshape(bsize, -1, 3, 3)
-        expression_mesh = self.deform_by_jacobian(template_jacobian[None] + \
-                                                    ict_jacobian + \
-                                                    expression_jacobian + \
-                                                    template_deformation_jacobian[None])
+        expression_mesh = self.deform_by_jacobian(self.source_mesh.jacobians_from_vertices(ict_mesh_w_temp[:, :self.head_index]) + expression_jacobian)
         expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
 
         return_dict['expression_mesh'] = expression_mesh
