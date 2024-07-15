@@ -85,8 +85,8 @@ def run_relight(args, mesh, views, ict_facekit, neural_blendshapes, shader, rend
 # ==============================================================================================  
 def quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer,
                         experiment_dir, images_eval_save_path, lgt=None, save_each=False):
-
-    for it, views in enumerate(dataloader_validate):
+    import tqdm
+    for it, views in tqdm.tqdm(enumerate(dataloader_validate)):
         with torch.no_grad():
             rgb_pred, gbuffer, cbuffer = run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, 
                     channels_gbuffer, lgt=lgt)

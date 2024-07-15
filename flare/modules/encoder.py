@@ -47,17 +47,28 @@ class ResnetEncoder(nn.Module):
         self.ict_facekit = ict_facekit
 
         self.tail = nn.Sequential(nn.Linear(7 + 68*3, 128),
-                                    nn.ReLU(),
+                                    nn.Softplus(),
                                     nn.Linear(128, 128),
-                                    nn.ReLU(),
+                                    nn.Softplus(),
                                     nn.Linear(128, 128),
-                                    nn.ReLU(),
+                                    nn.Softplus(),
                                     nn.Linear(128, 6))
         
+        self.bshape_modulator = nn.Sequential(nn.Linear(478*3 + 53, 128),
+                                    nn.Softplus(),
+                                    nn.Linear(128, 128),
+                                    nn.Softplus(),
+                                    nn.Linear(128, 128),
+                                    nn.Softplus(),
+                                    nn.Linear(128, 53))
 
         initialize_weights(self.tail, gain=0.01)
         self.tail[-1].weight.data.zero_()
         self.tail[-1].bias.data.zero_()
+
+        initialize_weights(self.bshape_modulator, gain=0.01)
+        self.bshape_modulator[-1].weight.data.zero_()
+        self.bshape_modulator[-1].bias.data.zero_()
             
         self.softplus = nn.Softplus(beta=torch.log(torch.tensor(2.)))
         self.scale = torch.nn.Parameter(torch.zeros(1))
@@ -70,11 +81,13 @@ class ResnetEncoder(nn.Module):
 
         self.identity_code = nn.Parameter(torch.zeros(self.ict_facekit.num_identity))
 
+        # self.bshapes_multiplier = torch.nn.Parameter(torch.zeros(53))
+
         self.relu = nn.ReLU()
 
     def forward(self, views):
         blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
-        # mp_landmark = views['mp_landmark'].reshape(-1, 478*3).detach()
+        mp_landmark = views['mp_landmark'].reshape(-1, 478*3).detach()
         transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
         detected_landmarks = views['landmark'].clone().detach()[:, :, :3].reshape(-1, 68*3).detach()
 
@@ -82,19 +95,25 @@ class ResnetEncoder(nn.Module):
         translation = transform_matrix[:, :3, 3]
         rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
 
-        rotation_matrix[:, 2:3] *= -1
-        rotation_matrix[:, :, 2:3] *= -1
+        rotation_matrix[:, 1:3] *= -1
+        rotation_matrix[:, :, 1:3] *= -1
+
 
         rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
         features = self.tail(torch.cat([detected_landmarks, rotation, translation, scale], dim=-1))
         translation = translation / 256.
+
+        # blendshape = blendshape * self.softplus(self.bshapes_multiplier[None] * 5)
+
+        bshape_modulation = self.softplus(self.bshape_modulator(torch.cat([blendshape, mp_landmark], dim=-1)))
+        blendshape = blendshape * bshape_modulation
 
         out_features = torch.cat([blendshape, rotation, translation, scale], dim=-1)
 
         out_features[:, 53:56] = rotation * self.softplus(features[:, :3])
         out_features[:, 56:59] = translation + features[:, 3:6]
         
-        out_features[:, -2] = 0
+        # out_features[:, -2] = 0
         out_features[:, -1] = torch.ones_like(out_features[:, -1]) * self.softplus(self.scale)
 
         return out_features
