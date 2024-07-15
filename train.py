@@ -390,7 +390,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             #   1) template mesh close to canonical mesh. for face region.
             #   2) expression mesh close to ict mesh. for out of face region. 
             template_geometric_regularization = (ict_facekit.canonical[0, :9408] - return_dict['template_mesh'][:9408]).pow(2).mean()
-            expression_geometric_regularization = (return_dict['ict_mesh_w_temp'][:, 9409:11248] - return_dict['expression_mesh'][:, 9409:11248]).pow(2).mean() * 1e1
+            expression_geometric_regularization = (return_dict['ict_mesh_w_temp'] - return_dict['expression_mesh']).pow(2)
+            expression_geometric_regularization[:, 9409:11248] *= 1e1
+            expression_geometric_regularization = expression_geometric_regularization.mean()
+            
 
             pose_weight_geometric_regularization = (1 / args.weight_geometric_regularization) * (return_dict['pose_weight'][ict_facekit.landmark_indices] - 1).pow(2).mean()
 
