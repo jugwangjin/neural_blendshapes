@@ -169,7 +169,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     print("=="*50)
     print("Training Deformer")
 
-    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, exp_dir = experiment_dir, device=device) 
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, exp_dir = experiment_dir, lambda_=args.lambda_, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
 
     neural_blendshapes = neural_blendshapes.to(device)
@@ -247,7 +247,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         # "segmentation": args.weight_segmentation,
         "geometric_regularization": args.weight_geometric_regularization,
         # "semantic_stat": args.weight_semantic_stat,
-        "normal_laplacian": args.weight_normal_laplacian,
+        # "normal_laplacian": args.weight_normal_laplacian,
     }
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
     print(loss_weights)
@@ -330,6 +330,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             print("reduced lr of neural_blendshapes_optimizer by 10")
 
 
+            print("=="*50)
+            print("reduced lr of neural_blendshapes_optimizer by 10")
+
+
             importance = torch.ones(len(dataloader_train), device=device)
 
         for iter_, views_subset in tqdm(enumerate(dataloader_train)):
@@ -405,7 +409,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             pose_weight_geometric_regularization = (1 / args.weight_geometric_regularization) * (return_dict['pose_weight'][ict_facekit.landmark_indices] - 1).pow(2).mean()
 
-            normal_laplacian_regularization = normal_loss(expression_gbuffers, views_subset, expression_gbuffer_mask, device)
+            # normal_laplacian_regularization = normal_loss(expression_gbuffers, views_subset, expression_gbuffer_mask, device)
 
 
 
@@ -426,7 +430,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['feature_regularization'] = feature_regularization
             losses['geometric_regularization'] = template_geometric_regularization + expression_geometric_regularization + pose_weight_geometric_regularization
 
-            losses['normal_laplacian'] = normal_laplacian_regularization
+            # losses['normal_laplacian'] = normal_laplacian_regularization
 
             decay_keys = ['mask', 'landmark', 'closure']
             with torch.no_grad():

@@ -104,8 +104,9 @@ class ResnetEncoder(nn.Module):
         translation = transform_matrix[:, :3, 3]
         rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
 
-        rotation_matrix[:, 2:3] *= -1
-        rotation_matrix[:, :, 2:3] *= -1
+        rotation_matrix[:, 1:3] *= -1
+        rotation_matrix[:, :, 1:3] *= -1
+
 
         translation[:, 1] *= -1
 
@@ -119,13 +120,22 @@ class ResnetEncoder(nn.Module):
         bshape_modulation = self.elu(self.bshape_modulator(torch.cat([blendshape, mp_landmark], dim=-1))) + 1
         blendshape = blendshape * bshape_modulation
 
+        # blendshape = blendshape * self.softplus(self.bshapes_multiplier[None] * 5)
+
+        bshape_modulation = self.softplus(self.bshape_modulator(torch.cat([blendshape, mp_landmark], dim=-1)))
+        blendshape = blendshape * bshape_modulation
+
         out_features = torch.cat([blendshape, rotation, translation, scale], dim=-1)
 
         out_features[:, 53:56] = rotation + features[:, :3]
         out_features[:, 56:59] = translation + features[:, 3:6]
         
         # out_features[:, -2] = 0
+<<<<<<< HEAD
         out_features[:, -1] = torch.ones_like(out_features[:, -1]) * (self.elu(self.scale) + 1)
+=======
+        out_features[:, -1] = torch.ones_like(out_features[:, -1]) * self.softplus(self.scale)
+>>>>>>> 1b71a7be5d1dd173b29e13c9613c78426d1ae066
 
         return out_features
 

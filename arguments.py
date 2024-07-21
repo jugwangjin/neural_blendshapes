@@ -103,4 +103,5 @@ def config_parser():
     parser.add_argument('--skip_eval', action='store_true', help="skip eval")
     parser.add_argument('--skip_wandb', action='store_true', help="skip eval")
 
+    parser.add_argument('--lambda_', type=int, default=16, help="Total number of iterations")
     return parser

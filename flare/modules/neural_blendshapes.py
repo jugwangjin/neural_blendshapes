@@ -285,6 +285,9 @@ class NeuralBlendshapes(nn.Module):
         # print(expression_mesh_delta_u.min(), expression_mesh_delta_u.max(), expression_mesh_delta_u.mean(), expression_mesh_delta_u.std())
         expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
 
+        # print(template_deformation_jacobian.min().data, template_deformation_jacobian.max().data, expression_jacobian.min().data, expression_jacobian.max().data)
+        # print(template_jacobian.min().data, template_jacobian.max().data, ict_mesh_jacobian.min().data, ict_mesh_jacobian.max().data)
+
         return_dict['expression_mesh'] = expression_mesh
         return_dict['expression_mesh_posed'] = expression_mesh_posed
 
