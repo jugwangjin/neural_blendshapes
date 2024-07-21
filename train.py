@@ -43,6 +43,8 @@ import time
 from flare.utils.ict_model import ICTFaceKitTorch
 import open3d as o3d
 
+
+import matplotlib.pyplot as plt
 # from flare.modules.optimizer import torch.optim.Adam
 
 def compute_laplacian_uniform_filtered(mesh, head_index=11248):
@@ -125,7 +127,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
-    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
+    ict_canonical_mesh = Mesh(ict_facekit.neutral_mesh_canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
     ict_canonical_mesh.compute_connectivity()
 
     write_mesh(Path(meshes_save_path / "init_ict_canonical.obj"), ict_canonical_mesh.to('cpu'))
@@ -138,7 +140,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     head_index=11248
 
     # filter vertices by head_index
-    filtered_vertices = ict_facekit.canonical[0].cpu().data[:socket_index]
+    filtered_vertices = ict_facekit.neutral_mesh_canonical[0].cpu().data[:socket_index]
     filtered_faces = ict_facekit.faces.cpu().data
     # filter: 
     filtered_faces = filtered_faces[filtered_faces[:, 0] < socket_index]
@@ -187,7 +189,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     optimizer_neural_blendshapes = torch.optim.Adam([
                                                     {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer},
                                                     {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
-                                                    ],
+                                                    ], betas = (0.1, 0.2)
                                                     )
                                                      
     scheduler_milestones = [args.iterations*2]
@@ -242,10 +244,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "landmark": args.weight_landmark,
         "closure": args.weight_closure,
         "feature_regularization": args.weight_feature_regularization,
-        "segmentation": args.weight_segmentation,
-        "geometric_regularization": args.weight_geometric_regularization
+        # "segmentation": args.weight_segmentation,
+        "geometric_regularization": args.weight_geometric_regularization,
         # "semantic_stat": args.weight_semantic_stat,
-        # "normal_laplacian": args.weight_normal_laplacian,
+        "normal_laplacian": args.weight_normal_laplacian,
     }
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
     print(loss_weights)
@@ -287,6 +289,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     if 'debug' not in run_name and not args.skip_wandb:
         wandb_name = args.wandb_name if args.wandb_name is not None else run_name
         wandb.init(project="neural_jacobian_blendshape_largesteps", name=wandb_name, config=args)
+    else:
+        # define arrays to store the loss values
+        # losses_total = []
+        losses_keys = {}
+        for k in loss_weights:
+            losses_keys[k] = []
+        losses_keys['total_loss'] = []
+
     for epoch in progress_bar:
         
         if epoch == 3 * (epochs // 4) and args.fourier_features != "positional":
@@ -313,8 +323,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             scheduler_shader = torch.optim.lr_scheduler.MultiStepLR(optimizer_shader, milestones=scheduler_milestones, gamma=scheduler_gamma)
 
             # reduce lr of neural_blendshapes_optimizer by 10
-            for param_group in optimizer_neural_blendshapes.param_groups:
-                param_group['lr'] /= 10
+            # for param_group in optimizer_neural_blendshapes.param_groups:
+            #     param_group['lr'] /= 10
 
             print("=="*50)
             print("reduced lr of neural_blendshapes_optimizer by 10")
@@ -368,8 +378,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # regularizations
             # 1. laplacian regularization - every output mesh should have smooth mesh. using laplacian_loss_given_lap
             
-            template_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, ict_facekit.canonical[0], return_dict['template_mesh'], filtered_lap, )
-            expression_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, return_dict['ict_mesh_w_temp'], return_dict['expression_mesh'], filtered_lap, )
+            template_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, ict_facekit.neutral_mesh_canonical[0], return_dict['template_mesh'], filtered_lap, ) * 1e-1
+            expression_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, return_dict['ict_mesh_w_temp'].detach(), return_dict['expression_mesh'], filtered_lap, )
 
             # template_mesh_laplacian_regularization = laplacian_loss_given_lap(mesh, filtered_lap, return_dict['template_mesh'])
             # ict_mesh_laplacian_regularization = laplacian_loss_given_lap(mesh, filtered_lap, return_dict['ict_mesh'])
@@ -386,13 +396,18 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # 4. geometric regularization. 
             #   1) template mesh close to canonical mesh. for face region.
             #   2) expression mesh close to ict mesh. for out of face region. 
-            template_geometric_regularization = (ict_facekit.canonical[0, :9408] - return_dict['template_mesh'][:9408]).pow(2).mean()
-            expression_geometric_regularization = (return_dict['ict_mesh_w_temp'] - return_dict['expression_mesh']).pow(2) * 1e1
+            template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0, :9408] - return_dict['template_mesh'][:9408]).pow(2).mean()
+            expression_geometric_regularization = (return_dict['ict_mesh_w_temp'].detach() - return_dict['expression_mesh']).pow(2)
             expression_geometric_regularization[:, 9409:11248] *= 1e1
+            
             expression_geometric_regularization = expression_geometric_regularization.mean()
             
 
             pose_weight_geometric_regularization = (1 / args.weight_geometric_regularization) * (return_dict['pose_weight'][ict_facekit.landmark_indices] - 1).pow(2).mean()
+
+            normal_laplacian_regularization = normal_loss(expression_gbuffers, views_subset, expression_gbuffer_mask, device)
+
+
 
             losses['mask'] = ict_mesh_w_temp_mask_loss + expression_mask_loss \
                             + expression_mask_loss_segmentation + ict_mesh_w_temp_mask_loss_segmentation
@@ -411,13 +426,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['feature_regularization'] = feature_regularization
             losses['geometric_regularization'] = template_geometric_regularization + expression_geometric_regularization + pose_weight_geometric_regularization
 
+            losses['normal_laplacian'] = normal_laplacian_regularization
 
-            decay_keys = ['mask', 'segmentation', 'landmark', 'closure']
+            decay_keys = ['mask', 'landmark', 'closure']
             with torch.no_grad():
                 shading_decay = 0
                 for k in decay_keys:
                     shading_decay += losses[k].mean() * loss_weights[k]
-                shading_decay = torch.exp(-(shading_decay)).detach()
+                shading_decay = torch.exp(-(shading_decay * 3)).detach()
             losses['shading'] = losses['shading'] * shading_decay
             losses['perceptual_loss'] = losses['perceptual_loss'] * shading_decay
             torch.cuda.empty_cache()
@@ -435,7 +451,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             decay_value = 0
             for k in decay_keys:
                 decay_value += losses[k].mean() * loss_weights[k]
-            decay_value *= 2
+            decay_value *= 4
 
             for idx in views_subset['idx']:            
                 importance[idx] = ((1 - weight_decay_rate) * importance[idx] + weight_decay_rate * decay_value).clamp(min=1e-2).item()
@@ -452,9 +468,28 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 losses_to_log["total_loss"] = acc_total_loss / len(acc_losses)
                 if 'debug' not in run_name and not args.skip_wandb:
                     wandb.log({k: v.item() for k, v in losses_to_log.items()}, step=iteration)
+                    
+                    estim_bshape = return_dict['features'][0, ict_facekit.expression_names.tolist().index('jawOpen')]
+                    gt_bshape = views_subset['mp_blendshape'][0, ict_facekit.mediapipe_to_ict][ict_facekit.expression_names.tolist().index('jawOpen')]
+                    bshape_modulation = estim_bshape / gt_bshape
+                    
+                    wandb.log({"bshape_modulation": bshape_modulation.item()}, step=iteration)
+                else:
+                    for k, v in losses_to_log.items():
+                        losses_keys[k].append(v.item())
+                        plt.clf()
+                        plt.plot(losses_keys[k])
+                        plt.savefig(str(images_save_path / f"{k}.png"))
+
+                    # losses_total.append(acc_total_loss.item() / len(acc_losses))
+                    # plt.clf()
+                    # plt.plot(losses_total)
+                    # plt.savefig(str(images_save_path / "total_loss.png"))
 
                 acc_losses = []
                 acc_total_loss = 0
+
+
 
             if iteration % 100 == 1:
                 # bshapes = return_dict['features'][:, :53].detach().cpu().numpy()
@@ -468,12 +503,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 # print(bshapes)
 
                 print(return_dict['features'][0, 53:])
+                print(neural_blendshapes.encoder.transform_origin)
                 print("=="*50)
                 for k, v in losses.items():
                     # if k in losses_to_print:
                     v = v.mean()
                 # if v > 0:
                     print(f"{k}: {v.item() * loss_weights[k]}")
+
+                
                 print("=="*50)
 
                 dataset_sampler = torch.utils.data.WeightedRandomSampler(importance, dataset_train.len_img, replacement=True)
@@ -495,8 +533,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             
             if args.grad_scale and args.fourier_features == "hashgrid":
                 shader.fourier_feature_transform.params.grad /= 8.0
-            torch.nn.utils.clip_grad_norm_(shader.parameters(), 2.0)
-            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 2.0)
+            torch.nn.utils.clip_grad_norm_(shader.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 1.0)
 
             optimizer_neural_blendshapes.step()
             scheduler_neural_blendshapes.step()

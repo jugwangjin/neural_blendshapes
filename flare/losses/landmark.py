@@ -7,6 +7,7 @@ DIRECTION_PAIRS = torch.tensor([[36, 64],[45, 48]]).int()
 
 import pytorch3d.transforms as pt3d
 
+# closure_blocks = [list(range(68))] # left eye, right eye, mouth
 closure_blocks = [list(range(48, 68))] # left eye, right eye, mouth
 # closure_blocks = [list(range(36, 42)), list(range(42, 48)), list(range(48, 68))] # left eye, right eye, mouth
 
@@ -43,7 +44,7 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, use_jaw, device):
     detected_landmarks[..., 2] = detected_landmarks[..., 2] * -2
     # multiply by 0.25 for first 17 landmarks at the last axis of detected_landmarks
     # reduce the weight of the jaw landmarks
-    # detected_landmarks[:, :17, -1] *= 0.25
+    detected_landmarks[:, :17, -1] *= 0.25
 
     # both landmark on clip space and detected landmarks, subtract by the minimum value on z axis
     # to make the z axis value positive
