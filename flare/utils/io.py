@@ -80,6 +80,8 @@ def copy_sources(args, run_name):
     if sources_path.exists():
         try:
             shutil.rmtree(sources_path)
+        except:
+            pass
         sources_path.mkdir(parents=True, exist_ok=True)
 
     shutil.copytree(args.working_dir / "flare", sources_path / "flare")
