@@ -325,8 +325,8 @@ class NeuralBlendshapes(nn.Module):
         # self.source_mesh_tight_face.to(device)
         return self
 
-def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_facekit=None, exp_dir=None, device='cuda'):
-    neural_blendshapes = NeuralBlendshapes(vertex_parts, ict_facekit, exp_dir)
+def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_facekit=None, exp_dir=None, lambda_=16, device='cuda'):
+    neural_blendshapes = NeuralBlendshapes(vertex_parts, ict_facekit, exp_dir, lambda_ = lambda_)
     neural_blendshapes.to(device)
 
     import os

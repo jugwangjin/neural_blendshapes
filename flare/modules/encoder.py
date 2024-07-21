@@ -131,11 +131,7 @@ class ResnetEncoder(nn.Module):
         out_features[:, 56:59] = translation + features[:, 3:6]
         
         # out_features[:, -2] = 0
-<<<<<<< HEAD
         out_features[:, -1] = torch.ones_like(out_features[:, -1]) * (self.elu(self.scale) + 1)
-=======
-        out_features[:, -1] = torch.ones_like(out_features[:, -1]) * self.softplus(self.scale)
->>>>>>> 1b71a7be5d1dd173b29e13c9613c78426d1ae066
 
         return out_features
 
