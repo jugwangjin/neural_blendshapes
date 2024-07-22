@@ -47,23 +47,23 @@ class ResnetEncoder(nn.Module):
         self.ict_facekit = ict_facekit
 
         self.tail = nn.Sequential(nn.Linear(7 + 68*3, 256),
-                                    nn.LeakyReLU(),
+                                    nn.Softplus(),
                                     nn.Linear(256, 256),
-                                    nn.LeakyReLU(),
+                                    nn.Softplus(),
                                     nn.Linear(256, 256),
-                                    nn.LeakyReLU(),
+                                    nn.Softplus(),
                                     nn.Linear(256, 256),
-                                    nn.LeakyReLU(),
+                                    nn.Softplus(),
                                     nn.Linear(256, 6))
         
         self.bshape_modulator = nn.Sequential(nn.Linear(478*3 + 53, 256),
-                                    nn.LeakyReLU(),
+                                    nn.Softplus(),
                                     nn.Linear(256, 256),
-                                    nn.LeakyReLU(),
+                                    nn.Softplus(),
                                     nn.Linear(256, 256),
-                                    nn.LeakyReLU(),
+                                    nn.Softplus(),
                                     nn.Linear(256, 256),
-                                    nn.LeakyReLU(),
+                                    nn.Softplus(),
                                     nn.Linear(256, 53))
 
         initialize_weights(self.tail, gain=0.01)
@@ -117,8 +117,8 @@ class ResnetEncoder(nn.Module):
         translation[:, -1] = 0
         # blendshape = blendshape * self.softplus(self.bshapes_multiplier[None] * 5)
 
-        bshape_modulation = self.elu(self.bshape_modulator(torch.cat([blendshape, mp_landmark], dim=-1))) + 1
-        blendshape = blendshape * bshape_modulation
+        # bshape_modulation = self.elu(self.bshape_modulator(torch.cat([blendshape, mp_landmark], dim=-1))) + 1
+        # blendshape = blendshape * bshape_modulation
 
         # blendshape = blendshape * self.softplus(self.bshapes_multiplier[None] * 5)
 

@@ -200,7 +200,6 @@ class NeuralBlendshapes(nn.Module):
 
         return mesh
 
-
     def encode_position(self, coords):
         template = self.ict_facekit.canonical[0] # shape of V, 3
         aabb_min = torch.min(template, dim=0)[0][None] * 1.2
@@ -237,23 +236,21 @@ class NeuralBlendshapes(nn.Module):
 
         encoded_points = torch.cat([self.encode_position(template), template], dim=-1)
 
-        template_mesh_u = self.invert(neutral_template)
         ict_mesh = self.ict_facekit(expression_weights = features[..., :53])[:, :self.socket_index]
-        ict_mesh_u = self.invert(ict_mesh) - template_mesh_u[None]
-
-        # ict_delta = ict_mesh - neutral_template[None]
-        # ict_delta_scale = ict_delta.norm(dim=-1, keepdim=False)
-        # ict_delta_scale has shape of B, V
-        # make it have value rage of [0, 1] for V axis
-        # ict_delta_scale = (ict_delta_scale / (torch.amax(ict_delta_scale, dim=-1, keepdim=True) + 1e-5)).clamp(1e-1, 1)
-        
-
+    
         template_mesh_u_delta = self.template_deformer(encoded_points) * 5
 
-        ict_mesh_w_temp = self.deform_by_jacobian(template_mesh_u[None] + template_mesh_u_delta[None] + ict_mesh_u)
+        template_mesh_delta = self.solve(template_mesh_u_delta)
+
+        ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
+        deformation = ict_mesh_w_temp - neutral_template
+        deformation = torch.cat([deformation, deformation[:, self.interior_displacement_index]], dim=1)
+        ict_mesh_w_temp = self.ict_facekit.neutral_mesh_canonical + deformation
+
         ict_mesh_w_temp_posed = self.apply_deformation(ict_mesh_w_temp, features, pose_weight)
 
-        template_mesh = self.deform_by_jacobian(template_mesh_u[None] + template_mesh_u_delta[None])[0]
+        deformation = torch.cat([template_mesh_delta, template_mesh_delta[self.interior_displacement_index]], dim=0)
+        template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + deformation
         
         return_dict['template_mesh'] = template_mesh
         return_dict['ict_mesh_w_temp'] = ict_mesh_w_temp
@@ -264,30 +261,22 @@ class NeuralBlendshapes(nn.Module):
         expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
                                     #   ict_mesh_encoded_points, \
                                         features[:, None, :53].repeat(1, encoded_points.shape[0], 1), \
-                                        (template_mesh_u[None] + \
-                                        template_mesh_u_delta[None] + \
-                                        ict_mesh_u)
+                                        ict_mesh_w_temp[:, :self.socket_index], \
                                         ], \
                                     dim=2) # B V ? 
         
-        expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, 53, encoded_points.shape[0], 3)
+        expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize * 53, encoded_points.shape[0], 3)
+        expression_mesh_delta = self.solve(expression_mesh_delta_u).reshape(bsize, 53, encoded_points.shape[0], 3)
+        expression_mesh_delta = expression_mesh_delta * self.ict_facekit.expression_shape_modes_norm[None, :, :self.socket_index, None]
+        expression_mesh_delta = expression_mesh_delta.sum(dim=1)
 
-        expression_mesh_delta_u = expression_mesh_delta_u * self.ict_facekit.expression_shape_modes_norm[None, :, :self.socket_index, None]
+        expression_mesh = ict_mesh_w_temp[:, :self.socket_index] + expression_mesh_delta
+        deformation = expression_mesh - neutral_template
+        deformation = torch.cat([deformation, deformation[:, self.interior_displacement_index]], dim=1)
+        
+        expression_mesh = self.ict_facekit.neutral_mesh_canonical + deformation
 
-        expression_mesh_delta_u = expression_mesh_delta_u.sum(dim=1) 
-
-        # expression_mesh_delta_u = expression_mesh_delta_u * ict_delta_scale[..., None]
-
-        expression_mesh = self.deform_by_jacobian(template_mesh_u[None] + \
-                                                template_mesh_u_delta[None] + \
-                                                ict_mesh_u + \
-                                                expression_mesh_delta_u)
-        # print(expression_mesh_delta_u.min(), expression_mesh_delta_u.max(), expression_mesh_delta_u.mean(), expression_mesh_delta_u.std())
         expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
-
-        # print(template_deformation_jacobian.min().data, template_deformation_jacobian.max().data, expression_jacobian.min().data, expression_jacobian.max().data)
-        # print(template_jacobian.min().data, template_jacobian.max().data, ict_mesh_jacobian.min().data, ict_mesh_jacobian.max().data)
-
         return_dict['expression_mesh'] = expression_mesh
         return_dict['expression_mesh_posed'] = expression_mesh_posed
 
