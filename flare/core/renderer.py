@@ -187,17 +187,32 @@ class Renderer:
             b, h, w, c=  canonical_positions.shape
             canonical_positions = canonical_positions.reshape(b, h*w, c)
             _, valid_idx, _ = knn_points(canonical_positions, canonical_verts_batch, K=1, return_nn=False)
-            valid_idx = valid_idx[:, :, 0] # shape of N, P1, K -> b, h*w
+            valid_idx = valid_idx[:, :, 0].reshape(b, h, w)[..., None] # shape of N, P1, K -> b, h*w
+
+            # zero tensor size of b, h*w, 1
+            # fill ones on valid_idx < 11248
+            valid_idx_tensor = torch.zeros(b, h, w, 1).to(self.device)
+            valid_idx_tensor[valid_idx < 11248] = 1.
+            valid_idx_tensor = valid_idx_tensor
 
             # segmentation will be the intersection of valid_idx < 11248 and mask > 0
-            mask = gbuffer['mask']
-            mask = mask.reshape(b, h*w, 1).squeeze(-1)
+            mask = (rast[..., -1:] > 0.).float()
+            # mask = mask.reshape(b, h*w, 1).squeeze(-1)
             # 11248: face, head / exclude: eye/mouth sockets, eyeballs, ... 
             # for eye closure / jaw components learning
-            segmentation = torch.logical_and(mask > 0, valid_idx < 11248).float()
-            segmentation = segmentation.unsqueeze(-1).reshape(b, h, w, 1)
+            # segmentation is the multiplication of mask and valid_idx_tensor
+            segmentation = mask * valid_idx_tensor
+            # gbuffer['segmentation'] = segmentation
+
+            ### !! we mask directly with alpha values from the rasterizer !! ###
+            segmentation = torch.lerp(torch.zeros((batch_size, h, w, 1)).to(self.device), 
+                                        torch.ones((batch_size, h, w, 1)).to(self.device), segmentation.float())
+
+            ### we antialias the final color here (!)
             segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
             gbuffer['segmentation'] = segmentation
+
+
 
         uv_coordinates, _ = dr.interpolate(canonical_uv, rast, idx, rast_db=rast_out_db, diff_attrs='all')
         gbuffer["uv_coordinates"] = dr.antialias(uv_coordinates, rast, deformed_vertices_clip_space, idx) if with_antialiasing else uv_coordinates

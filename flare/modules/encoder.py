@@ -46,7 +46,7 @@ class ResnetEncoder(nn.Module):
         super(ResnetEncoder, self).__init__()
         self.ict_facekit = ict_facekit
 
-        self.tail = nn.Sequential(nn.Linear(7 + 68*3, 256),
+        self.tail = nn.Sequential(nn.Linear(53 + 7 + 68*3, 256),
                                     nn.Softplus(),
                                     nn.Linear(256, 256),
                                     nn.Softplus(),
@@ -112,7 +112,7 @@ class ResnetEncoder(nn.Module):
 
         rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
         translation = translation / 32.
-        features = self.tail(torch.cat([detected_landmarks, rotation, translation, scale], dim=-1))
+        features = self.tail(torch.cat([blendshape, detected_landmarks, rotation, translation, scale], dim=-1))
         
         translation[:, -1] = 0
         # blendshape = blendshape * self.softplus(self.bshapes_multiplier[None] * 5)
@@ -122,7 +122,8 @@ class ResnetEncoder(nn.Module):
 
         # blendshape = blendshape * self.softplus(self.bshapes_multiplier[None] * 5)
 
-        bshape_modulation = self.softplus(self.bshape_modulator(torch.cat([blendshape, mp_landmark], dim=-1)))
+        bshape_modulation = self.elu(self.bshape_modulator(torch.cat([blendshape, mp_landmark], dim=-1))) + 1
+        # bshape_modulation = self.softplus(self.bshape_modulator(torch.cat([blendshape, mp_landmark], dim=-1)))
         blendshape = blendshape * bshape_modulation
 
         out_features = torch.cat([blendshape, rotation, translation, scale], dim=-1)

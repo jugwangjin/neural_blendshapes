@@ -155,6 +155,7 @@ class NeuralShader(torch.nn.Module):
         ### we antialias the final color here (!)
         pred_color_masked = dr.antialias(pred_color_masked.contiguous(), gbuffer["rast"], gbuffer["deformed_verts_clip_space"], mesh.indices.int())
 
+
         return None, None, pred_color_masked[..., -1:]
 
     # ==============================================================================================

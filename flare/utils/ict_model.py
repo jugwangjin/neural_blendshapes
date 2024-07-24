@@ -72,7 +72,7 @@ class ICTFaceKitTorch(torch.nn.Module):
         expression_shape_modes_norm = torch.norm(torch.tensor(expression_shape_modes, dtype=torch.float32), dim=-1) # shape of (num_expression, num_vertices)
         expression_shape_modes_norm = expression_shape_modes_norm / (torch.amax(expression_shape_modes_norm, dim=1, keepdim=True) + 1e-8) # shape of (num_expression, num_vertices)
 
-        self.register_buffer('expression_shape_modes_norm', expression_shape_modes_norm.clamp(1e-4, 1))
+        self.register_buffer('expression_shape_modes_norm', expression_shape_modes_norm.clamp(1e-6, 1))
 
         jaw_index = self.expression_names.tolist().index('jawOpen')
         self.jaw_index = jaw_index

@@ -1,4 +1,4 @@
-run_name = large_steps_scale_on_x_v3
+run_name = large_steps_scale_on_x_v4_no_seg
 
 input_dir = /data1/gwangjin/flare/marcel
 train_dir = ["MVI_1797", "MVI_1801"]
