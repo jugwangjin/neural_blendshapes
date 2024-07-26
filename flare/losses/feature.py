@@ -9,10 +9,14 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, facs_weigh
 
     latent_regularization = torch.pow(scale - 1, 2).mean() 
 
-    facs_reg = (facs - gt_facs).pow(2).mean() * 1e2
+    facs_reg = (facs - gt_facs).pow(2).mean() 
  
+    z_reg = torch.pow(translation[:, -1], 2).mean()
+
+    pseudo_l0_reg = (facs).clamp(min=1e-3).pow(0.5).mean()
+
     # loss =  latent_regularization  
-    loss =  latent_regularization  + facs_reg
+    loss =  latent_regularization  + facs_reg + z_reg + pseudo_l0_reg
     
     if facs_weight > 0:
         return loss + (torch.pow(facs - gt_facs, 2)).mean() * facs_weight

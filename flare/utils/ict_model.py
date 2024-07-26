@@ -72,6 +72,20 @@ class ICTFaceKitTorch(torch.nn.Module):
         expression_shape_modes_norm = torch.norm(torch.tensor(expression_shape_modes, dtype=torch.float32), dim=-1) # shape of (num_expression, num_vertices)
         expression_shape_modes_norm = expression_shape_modes_norm / (torch.amax(expression_shape_modes_norm, dim=1, keepdim=True) + 1e-8) # shape of (num_expression, num_vertices)
 
+        # import open3d as o3d
+        # mesh = o3d.geometry.TriangleMesh()
+        # mesh.vertices = o3d.utility.Vector3dVector(neutral_mesh)
+        # mesh.triangles = o3d.utility.Vector3iVector(faces)
+        
+        # for nn in range(expression_shape_modes_norm.shape[0]):
+        #     colors = np.zeros_like(neutral_mesh)
+        #     colors[:, 0] = expression_shape_modes_norm[nn]
+        #     colors[:, 2] = 1 - expression_shape_modes_norm[nn]
+        #     mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+        #     o3d.io.write_triangle_mesh(f'./debug/norm_{nn}_{self.expression_names[nn]}.obj', mesh)
+        # exit()
+
+
         self.register_buffer('expression_shape_modes_norm', expression_shape_modes_norm.clamp(1e-6, 1))
 
         jaw_index = self.expression_names.tolist().index('jawOpen')
@@ -140,8 +154,8 @@ class ICTFaceKitTorch(torch.nn.Module):
         # print(self.neutral_mesh.shape, self.expression_shape_modes.shape, self.identity_shape_modes.shape)
         # Compute the deformed mesh by applying expression and identity shape modes to the neutral mesh
         deformed_mesh = self.neutral_mesh + \
-                        torch.einsum('bn, bnmd -> bmd', expression_weights, self.expression_shape_modes.repeat(bsize, 1, 1, 1)) + \
-                        torch.einsum('bn, bnmd -> bmd', identity_weights, self.identity_shape_modes.repeat(bsize, 1, 1, 1))
+                        torch.einsum('bn, bnmd -> bmd', expression_weights, self.expression_shape_modes.repeat(bsize, 1, 1, 1))
+                        # torch.einsum('bn, bnmd -> bmd', identity_weights, self.identity_shape_modes.repeat(bsize, 1, 1, 1))
 
         if to_canonical:
             # Transform the deformed mesh to canonical space

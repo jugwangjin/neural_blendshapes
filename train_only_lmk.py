@@ -285,7 +285,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     acc_losses = []
     acc_total_loss = 0
 
-    weight_decay_rate = 0.2
+    weight_decay_rate = 0.05
 
     filtered_lap = compute_laplacian_uniform_filtered(ict_canonical_mesh, head_index=socket_index)
 
@@ -326,9 +326,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             scheduler_shader = torch.optim.lr_scheduler.MultiStepLR(optimizer_shader, milestones=scheduler_milestones, gamma=scheduler_gamma)
 
-            # reduce lr of neural_blendshapes_optimizer by 10
-            # for param_group in optimizer_neural_blendshapes.param_groups:
-            #     param_group['lr'] /= 10
 
             print("=="*50)
             print("reduced lr of neural_blendshapes_optimizer by 10")
@@ -337,8 +334,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             print("=="*50)
             print("reduced lr of neural_blendshapes_optimizer by 10")
 
-        # 
-        if epoch % 5 == 0:
+
             importance = torch.ones(len(dataloader_train), device=device)
 
         for iter_, views_subset in tqdm(enumerate(dataloader_train)):
@@ -349,11 +345,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             use_jaw = True
 
             input_image = views_subset["img"].permute(0, 3, 1, 2).to(device)
-            
             return_dict = neural_blendshapes(input_image, views_subset)
             mesh = ict_canonical_mesh.with_vertices(ict_canonical_mesh.vertices)
 
-            pretrain = iteration < args.iterations // 4
+            pretrain = iteration < args.iterations // 8
 
             # template optimization
             ict_mesh_w_temp_posed = return_dict['ict_mesh_w_temp_posed']
@@ -367,100 +362,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             ict_mesh_w_temp_mask_loss = mask_loss(views_subset["mask"], ict_mesh_w_temp_gbuffers_mask)
             ict_mesh_w_temp_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., :1], ict_mesh_w_temp_gbuffers['segmentation'])
 
-            if not pretrain:
-                # expression optimization
-                expression_mesh_posed = return_dict['expression_mesh_posed']
-                d_normals = mesh.fetch_all_normals(expression_mesh_posed, mesh)
-                expression_gbuffers = renderer.render_batch(views_subset['camera'], expression_mesh_posed.contiguous(), d_normals,
-                                        channels=channels_gbuffer + ['segmentation'], with_antialiasing=True, 
-                                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh)
-                pred_color_masked, expression_cbuffers, expression_gbuffer_mask = shader.shade(expression_gbuffers, views_subset, mesh, args.finetune_color, lgt)
-
-                expression_landmark_loss, expression_closure_loss = landmark_loss(ict_facekit, expression_gbuffers, views_subset, use_jaw, device)
-                expression_mask_loss = mask_loss(views_subset["mask"], expression_gbuffer_mask)
-                expression_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., :1], expression_gbuffers['segmentation'])
-
-                expression_shading_loss, pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
-                expression_perceptual_loss = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
-
-            # regularizations
-            # 1. laplacian regularization - every output mesh should have smooth mesh. using laplacian_loss_given_lap
-            
-            # template_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, ict_facekit.neutral_mesh_canonical[0], return_dict['template_mesh'], filtered_lap, ) * 1e-1
-            # expression_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, return_dict['ict_mesh_w_temp'].detach(), return_dict['expression_mesh'], filtered_lap, )
-
-            # 2. normal regularization - template mesh should have similar normal with canonical mesh. using normal_reg_loss
-            # template_mesh_normal_regularization = normal_reg_loss(mesh, ict_canonical_mesh, ict_canonical_mesh.with_vertices(return_dict['template_mesh']))
-
-            # 3. feature regularization - feature should be similar with neural blendshapes. using feature_regularization_loss
-            feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                neural_blendshapes, facs_weight=0)
-
-            # 4. geometric regularization. 
-            #   1) template mesh close to canonical mesh. for face region.
-            #   2) expression mesh close to ict mesh. for out of face region. 
-            # template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0, :9408] - return_dict['template_mesh'][:9408]).pow(2).mean()
-
-            with torch.no_grad():
-                bsize = views_subset['img'].shape[0]
-                random_facs = torch.zeros(bsize, 53, device=device)
-                for b in range(bsize):
-                    weights = torch.tensor([1/torch.log(torch.tensor(i+1, dtype=torch.float32)) for i in range(1, 53)])
-                    # weights = torch.tensor([1/i for i in range(1, 53)])
-                    random_integer = torch.multinomial(weights, 1).item() + 1
-                    random_indices = torch.randint(0, 53, (random_integer,))
-                    if torch.rand(1) > 0.5:
-                        random_indices = torch.cat([random_indices, torch.tensor([10])])
-                    if torch.rand(1) > 0.5:
-                        random_indices = torch.cat([random_indices, torch.tensor([11])])
-                    random_indices = random_indices.unique()
-                    # sample 0 to 1 for each indices
-                    random_facs[b, random_indices] = torch.rand_like(random_facs[b, random_indices])
-
-            
-            # if not pretrain:
-            expression_geometric_regularization = (return_dict['ict_mesh_w_temp'].detach() * 10 - return_dict['expression_mesh'] * 10).pow(2)
-
-
-            random_return_dict = neural_blendshapes(input_image, views_subset, features=random_facs)
-
-            random_geometric_regularization = (random_return_dict['ict_mesh_w_temp'].detach() * 10 - random_return_dict['expression_mesh'] * 10).pow(2)
-            
-            # expression_geometric_regularization[:, 9409:11248] *= 1e1
-            
-            # expression_geometric_regularization = expression_geometric_regularization.mean()
-            
-
-            # pose_weight_geometric_regularization = (1 / args.weight_geometric_regularization) * (return_dict['pose_weight'][ict_facekit.landmark_indices] - 1).pow(2).mean()
-
-            # normal_laplacian_regularization = normal_loss(expression_gbuffers, views_subset, expression_gbuffer_mask, device)
-
-
-
-            losses['mask'] = ict_mesh_w_temp_mask_loss +  ict_mesh_w_temp_mask_loss_segmentation
+            losses['mask'] = (ict_mesh_w_temp_mask_loss \
+                            + ict_mesh_w_temp_mask_loss_segmentation) / 2
             losses['landmark'] = ict_mesh_w_temp_landmark_loss
             losses['closure'] = ict_mesh_w_temp_closure_loss
-            # losses['laplacian_regularization'] = template_mesh_laplacian_regularization + expression_mesh_laplacian_regularization
-            # losses['normal_regularization'] = template_mesh_normal_regularization
-            losses['feature_regularization'] = feature_regularization
-            losses['geometric_regularization'] = random_geometric_regularization + expression_geometric_regularization
-            if not pretrain:
-                losses['mask'] += expression_mask_loss_segmentation + expression_mask_loss
-                losses['landmark'] += expression_landmark_loss
-                losses['closure'] += expression_closure_loss
-                losses['shading'] = expression_shading_loss
-                losses['perceptual_loss'] = expression_perceptual_loss
-                # losses['geometric_regularization'] += expression_geometric_regularization
-            # losses['geometric_regularization'] = template_geometric_regularization + expression_geometric_regularization + pose_weight_geometric_regularization
 
             decay_keys = ['mask', 'landmark', 'closure']
-            # with torch.no_grad():
-            #     shading_decay = 0
-            #     for k in decay_keys:
-            #         shading_decay += losses[k].mean() * loss_weights[k]
-            #     shading_decay = torch.exp(-(shading_decay * 3)).detach()
-            # losses['shading'] = losses['shading'] * shading_decay
-            # losses['perceptual_loss'] = losses['perceptual_loss'] * shading_decay
             torch.cuda.empty_cache()
 
             loss = torch.tensor(0., device=device) 
