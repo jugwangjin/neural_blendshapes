@@ -38,6 +38,19 @@ def initialize_weights(m, gain=0.1):
             nn.init.xavier_uniform_(l.weight, gain=gain)
             l.bias.data.zero_()
 
+
+class ModulationActivation(nn.Module):
+    def __init__(self, alpha=None):
+        super().__init__()
+
+        self.elu = nn.ELU(alpha=alpha if alpha is not None else 1.0)
+        
+    def forward(self, x):
+        # for elements where x>0, torch.log1p(x). For elements where x<0, self.elu(x)
+        ret = torch.where(x > 0, torch.log1p(x), self.elu(x))
+        return ret
+        
+
 class GaussianActivation(nn.Module):
     def __init__(self, a=1., trainable=True):
         super().__init__()
@@ -54,16 +67,16 @@ class ResnetEncoder(nn.Module):
         self.tail = nn.Sequential(
                     nn.Linear(7 + 68*3, 256),
                     mygroupnorm(num_groups=4, num_channels=256),
-                    GaussianActivation(),
+                    nn.LeakyReLU(),
                     nn.Linear(256, 256),
                     mygroupnorm(num_groups=4, num_channels=256),
-                    GaussianActivation(),
+                    nn.LeakyReLU(),
                     nn.Linear(256, 256),
                     mygroupnorm(num_groups=4, num_channels=256),
-                    GaussianActivation(),
+                    nn.LeakyReLU(),
                     nn.Linear(256, 256),
                     mygroupnorm(num_groups=4, num_channels=256),
-                    GaussianActivation(),
+                    nn.LeakyReLU(),
                     nn.Linear(256, 6)
         )
         
@@ -71,16 +84,16 @@ class ResnetEncoder(nn.Module):
                     nn.Linear(68*3 + 53, 256),
                     # nn.Linear(68*3 + 478*3 + 53, 256),
                     mygroupnorm(num_groups=4, num_channels=256),
-                    GaussianActivation(),
+                    nn.LeakyReLU(),
                     nn.Linear(256, 256),
                     mygroupnorm(num_groups=4, num_channels=256),
-                    GaussianActivation(),
+                    nn.LeakyReLU(),
                     nn.Linear(256, 256),
                     mygroupnorm(num_groups=4, num_channels=256),
-                    GaussianActivation(),
+                    nn.LeakyReLU(),
                     nn.Linear(256, 256),
                     mygroupnorm(num_groups=4, num_channels=256),
-                    GaussianActivation(),
+                    nn.LeakyReLU(),
                     nn.Linear(256, 53)
         )
 
@@ -102,7 +115,8 @@ class ResnetEncoder(nn.Module):
         self.leaky_relu = nn.LeakyReLU(0.01)
 
         # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.40, -0.20]))
-        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.40, -0.20]))
+        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
+        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.30, -0.15]))
         # self.transform_origin.data = torch.tensor([0., -0.40, -0.20])
         # self.register_buffer('transform_origin', torch.tensor([0., -0.40, -0.20]))
 
@@ -113,6 +127,8 @@ class ResnetEncoder(nn.Module):
         self.tanh = nn.Tanh()
 
         self.relu = nn.ReLU()
+
+        self.modulation_activation = ModulationActivation()
 
     def forward(self, views):
         blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
@@ -138,8 +154,8 @@ class ResnetEncoder(nn.Module):
         
         translation[:, -1] = 0
 
-        bshape_modulation = self.leaky_relu(self.bshape_modulator(torch.cat([blendshape, detected_landmarks], dim=-1)))
-        blendshape = blendshape + bshape_modulation
+        bshape_modulation = self.modulation_activation(self.bshape_modulator(torch.cat([blendshape, detected_landmarks], dim=-1)))
+        blendshape = blendshape + bshape_modulation * blendshape
 
         scale = torch.ones_like(bshape_modulation[:, -1:]) * (self.elu(self.scale) + 1)
 

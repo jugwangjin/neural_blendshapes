@@ -127,16 +127,16 @@ class NeuralBlendshapes(nn.Module):
             nn.Linear(self.inp_size + 3 + 53, 256),
             # nn.Linear(self.inp_size + 3 + 3 + 53, 256),
             mygroupnorm(num_groups=4, num_channels=256),
-            GaussianActivation(),
+            nn.LeakyReLU(),
             nn.Linear(256, 256),
             mygroupnorm(num_groups=4, num_channels=256),
-            GaussianActivation(),
+            nn.LeakyReLU(),
             nn.Linear(256, 256),
             mygroupnorm(num_groups=4, num_channels=256),
-            GaussianActivation(),
+            nn.LeakyReLU(),
             nn.Linear(256, 256),
             mygroupnorm(num_groups=4, num_channels=256),
-            GaussianActivation(),
+            nn.LeakyReLU(),
             nn.Linear(256, 53*3)
         )
         
@@ -144,16 +144,16 @@ class NeuralBlendshapes(nn.Module):
             nn.Linear(self.inp_size + 3, 128),
             # nn.Linear(self.inp_size + 3, 128),
             mygroupnorm(num_groups=4, num_channels=128),
-            GaussianActivation(),
+            nn.LeakyReLU(),
             nn.Linear(128, 128),
             mygroupnorm(num_groups=4, num_channels=128),
-            GaussianActivation(),
+            nn.LeakyReLU(),
             nn.Linear(128, 128),
             mygroupnorm(num_groups=4, num_channels=128),
-            GaussianActivation(),
+            nn.LeakyReLU(),
             nn.Linear(128, 128),
             mygroupnorm(num_groups=4, num_channels=128),
-            GaussianActivation(),
+            nn.LeakyReLU(),
             nn.Linear(128, 3)
         )
 
@@ -280,7 +280,8 @@ class NeuralBlendshapes(nn.Module):
         # features = features.detach()
 
         features = features.detach()
-        # ict_mesh_w_temp = ict_mesh_w_temp.detach()
+        ict_mesh_w_temp = ict_mesh_w_temp.detach()
+        pose_weight = pose_weight.detach()
 
         expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
                                     #   ict_mesh_encoded_points, \
@@ -294,11 +295,12 @@ class NeuralBlendshapes(nn.Module):
         # expression_mesh_delta = expression_mesh_delta * self.ict_facekit.expression_shape_modes_norm[None, :, :self.socket_index, None]
         # expression_mesh_delta = expression_mesh_delta.sum(dim=1)
         expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, 53, template.shape[0], 3)
+        expression_mesh_delta_u = expression_mesh_delta_u * features[:, :53, None, None]
         expression_mesh_delta_u = expression_mesh_delta_u * self.ict_facekit.expression_shape_modes_norm[None, :, :self.socket_index, None]
         expression_mesh_delta_u = expression_mesh_delta_u.sum(dim=1)
         expression_mesh_delta = self.solve(expression_mesh_delta_u)
 
-        expression_mesh = neutral_template[None] + template_mesh_delta[None].detach() + expression_mesh_delta
+        expression_mesh = ict_mesh_w_temp[:, :self.socket_index] + expression_mesh_delta
         deformation = expression_mesh - neutral_template[None]
         deformation = torch.cat([deformation, deformation[:, self.interior_displacement_index]], dim=1)
         
@@ -322,10 +324,13 @@ class NeuralBlendshapes(nn.Module):
         if weights is None:
             weights = torch.ones_like(vertices[..., :1])
 
+        transform_origin = torch.cat([torch.zeros(1, device=vertices.device), self.encoder.transform_origin[1:]], dim=0)
+        # transform_origin[0] = 0 # no translation in x
+
         B, V, _ = vertices.shape
         rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle[:, None].repeat(1, V, 1) * weights, convention = 'XYZ')
-        local_coordinate_vertices = (vertices  - self.encoder.transform_origin[None, None]) * scale[:, None]
-        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + self.encoder.transform_origin[None, None] 
+        local_coordinate_vertices = (vertices  - transform_origin[None, None]) * scale[:, None]
+        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + transform_origin[None, None] 
         # deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] * weights + self.encoder.transform_origin[None, None] 
 
         return deformed_mesh

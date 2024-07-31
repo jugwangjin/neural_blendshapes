@@ -189,7 +189,7 @@ class NeuralShader(torch.nn.Module):
         pred_color_masked = dr.antialias(pred_color_masked.contiguous(), gbuffer["rast"], gbuffer["deformed_verts_clip_space"], mesh.indices.int())
         
         cbuffers = {}
-        # cbuffers['material'] = material
+        cbuffers['material'] = material
         cbuffers['light'] = light
 
         return pred_color_masked[..., :3], cbuffers, pred_color_masked[..., -1:]
