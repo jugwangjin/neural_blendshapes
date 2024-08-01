@@ -56,7 +56,7 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, use_jaw, device):
 
 
     landmark_loss = ((detected_landmarks[:, starting_index:, :-1] - landmarks_on_clip_space[:, starting_index:, :-1]).pow(2) * detected_landmarks[:, starting_index:, -1:])
-    landmark_loss[..., -1] *= 0.25
+    # landmark_loss[..., -1] *= 0.25
     landmark_loss = landmark_loss.mean()
 
     # landmark_loss = ((detected_landmarks[:, starting_index:, :3] - landmarks_on_clip_space[:, starting_index:, :3]).pow(2) * detected_landmarks[:, starting_index:, -1:]).mean()

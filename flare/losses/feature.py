@@ -26,4 +26,6 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, facs_weigh
         return loss + (torch.pow(facs - gt_facs, 2)).mean() * facs_weight
     return loss
 
-
+
+
+ 

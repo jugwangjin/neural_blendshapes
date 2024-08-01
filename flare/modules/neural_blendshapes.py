@@ -124,8 +124,11 @@ class NeuralBlendshapes(nn.Module):
 
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(self.inp_size + 3 + 53, 256),
+            nn.Linear(self.inp_size + 3, 256),
             # nn.Linear(self.inp_size + 3 + 3 + 53, 256),
+            mygroupnorm(num_groups=4, num_channels=256),
+            nn.LeakyReLU(),
+            nn.Linear(256, 256),
             mygroupnorm(num_groups=4, num_channels=256),
             nn.LeakyReLU(),
             nn.Linear(256, 256),
@@ -263,12 +266,14 @@ class NeuralBlendshapes(nn.Module):
 
         template_mesh_delta = self.solve(template_mesh_u_delta)
 
+        # ict_mesh_w_temp = None
         ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
         deformation = ict_mesh_w_temp - neutral_template[None]
         deformation = torch.cat([deformation, deformation[:, self.interior_displacement_index]], dim=1)
         ict_mesh_w_temp = self.ict_facekit.neutral_mesh_canonical + deformation
 
-        ict_mesh_w_temp_posed = self.apply_deformation(ict_mesh_w_temp, features, pose_weight)
+        ict_mesh_w_temp_posed = None
+        # ict_mesh_w_temp_posed = self.apply_deformation(ict_mesh_w_temp, features, pose_weight)
 
         deformation = torch.cat([template_mesh_delta, template_mesh_delta[self.interior_displacement_index]], dim=0)
         template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + deformation
@@ -279,13 +284,13 @@ class NeuralBlendshapes(nn.Module):
 
         # features = features.detach()
 
-        features = features.detach()
-        ict_mesh_w_temp = ict_mesh_w_temp.detach()
-        pose_weight = pose_weight.detach()
+        # features = features.detach()
+        # ict_mesh_w_temp = ict_mesh_w_temp.detach()
+        # pose_weight = pose_weight.detach()
 
         expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
                                     #   ict_mesh_encoded_points, \
-                                        features[:, None, :53].repeat(1, template.shape[0], 1), \
+                                        # features[:, None, :53].repeat(1, template.shape[0], 1), \
                                         # ict_mesh_w_temp[:, :self.socket_index], \
                                         ], \
                                     dim=2) # B V ? 

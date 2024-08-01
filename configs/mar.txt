@@ -33,7 +33,7 @@ weight_geometric_regularization = 1e-3
 weight_normal = 0.25
 weight_normal_laplacian = 1e-1
 weight_landmark = 20
-weight_closure = 500
+weight_closure = 20
 
 weight_segmentation = 1e-0
 weight_semantic_stat = 1e-0
