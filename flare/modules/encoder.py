@@ -116,7 +116,7 @@ class ResnetEncoder(nn.Module):
 
         # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.40, -0.20]))
         # self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
-        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.30, -0.15]))
+        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.20, -0.16]))
         # self.transform_origin.data = torch.tensor([0., -0.40, -0.20])
         # self.register_buffer('transform_origin', torch.tensor([0., -0.40, -0.20]))
 

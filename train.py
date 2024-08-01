@@ -253,6 +253,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         # "semantic_stat": args.weight_semantic_stat,
         # "normal_laplacian": args.weight_normal_laplacian,
         "material_regularization": 1e-3,
+        "linearity_regularization": 1e-1,
     }
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
     print(loss_weights)
@@ -389,12 +390,30 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
                                                                 neural_blendshapes, facs_weight=0)
 
+
+            # linearity regularization
+            # sample blendshapes and check if the output is linear
+            # random_blendshapes
+            random_blendshapes = torch.rand(views_subset['mp_blendshape'].shape[0], 53, device=device)
+            zero_blendshapes = torch.zeros_like(random_blendshapes)
+
+            expression_delta_zero = neural_blendshapes.get_expression_delta(blendshapes=zero_blendshapes)
+            expression_delta_random = neural_blendshapes.get_expression_delta(blendshapes=random_blendshapes)
+            expresssion_delta_random_half = neural_blendshapes.get_expression_delta(blendshapes=random_blendshapes * 0.5)
+
+            # linearity regularization
+            zero_delta_regularization = expression_delta_zero.pow(2).mean()
+            linearity_regularization = (expression_delta_random - 2 * expresssion_delta_random_half).pow(2).mean()
+
+            # l1 regularization on deltas
+            l1_regularization = expression_delta_random.abs().mean() * 1e-3
+
             # 4. geometric regularization. 
             #   1) template mesh close to canonical mesh. for face region.
             #   2) expression mesh close to ict mesh. for out of face region. 
             template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
 
-            losses['laplacian_regularization'] = template_mesh_laplacian_regularization + expression_mesh_laplacian_regularization
+            losses['laplacian_regularization'] = template_mesh_laplacian_regularization + expression_mesh_laplacian_regularization 
             losses['normal_regularization'] = template_mesh_normal_regularization 
             losses['feature_regularization'] = feature_regularization
             # losses['geometric_regularization'] = random_geometric_regularization + expression_geometric_regularization
@@ -405,6 +424,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['closure'] += expression_closure_loss
             losses['shading'] = expression_shading_loss
             losses['perceptual_loss'] = expression_perceptual_loss
+
+            losses['linearity_regularization'] = linearity_regularization + zero_delta_regularization + l1_regularization
 
             decay_keys = ['mask', 'landmark', 'closure']
             
