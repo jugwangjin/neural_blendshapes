@@ -32,6 +32,7 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, use_jaw, device):
     Returns:
         torch.Tensor: The calculated landmark loss.
     """
+
     # Get the indices of landmarks used by the handle-based deformer
     landmark_indices = ict_facekit.landmark_indices
     landmarks_on_clip_space_ = gbuffers['deformed_verts_clip_space'][:, landmark_indices]
@@ -55,16 +56,17 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, use_jaw, device):
     starting_index = 0 if use_jaw else 17
 
 
-    landmark_loss = ((detected_landmarks[:, starting_index:, :-1] - landmarks_on_clip_space[:, starting_index:, :-1]).pow(2) * detected_landmarks[:, starting_index:, -1:])
+    landmark_loss = ((detected_landmarks[:, starting_index:, :3] - landmarks_on_clip_space[:, starting_index:, :3]).pow(2) * detected_landmarks[:, starting_index:, -1:])
     # landmark_loss[..., -1] *= 0.25
+    landmark_loss[:, :17] *= 0.1
     landmark_loss = landmark_loss.mean()
 
     # landmark_loss = ((detected_landmarks[:, starting_index:, :3] - landmarks_on_clip_space[:, starting_index:, :3]).pow(2) * detected_landmarks[:, starting_index:, -1:]).mean()
 
     closure_loss = 0
     for block in closure_blocks:
-        gt_closure = torch.norm(detected_landmarks[:, None, block, :-1] - detected_landmarks[:, block, None, :-1], dim=-1)
-        estimated_closure = torch.norm(landmarks_on_clip_space[:, None, block, :-1] - landmarks_on_clip_space[:, block, None, :-1], dim=-1)
+        gt_closure = torch.norm(detected_landmarks[:, None, block, :3] - detected_landmarks[:, block, None, :3], dim=-1)
+        estimated_closure = torch.norm(landmarks_on_clip_space[:, None, block, :3] - landmarks_on_clip_space[:, block, None, :3], dim=-1)
         confidence = torch.minimum(detected_landmarks[:, None, block, -1], detected_landmarks[:, block, None, -1])
 
         closure_loss_ = ((estimated_closure - gt_closure).pow(2) * confidence)
@@ -73,7 +75,7 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, use_jaw, device):
         # closure_loss += ((estimated_closure - gt_closure).pow(2) * confidence).mean()
         
 
-    # gt_closure = detected_landmarks[:, None, starting_index:, :3] - detected_landmarks[:, starting_index:, None, :3] 
+    # gt_closure = detected_landmarks[:, None, starting_index:, :2] - detected_landmarks[:, starting_index:, None, :2] 
     # gt_closure_confidence = detected_landmarks[:, None, starting_index:, -1:] * detected_landmarks[:, starting_index:, None, -1:]
 
     # estimated_closure = landmarks_on_clip_space[:, None, starting_index:, :3] - landmarks_on_clip_space[:, starting_index:, None, :3]

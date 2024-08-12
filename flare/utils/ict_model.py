@@ -20,6 +20,14 @@ class ICTFaceKitTorch(torch.nn.Module):
         identity_shape_modes = model_dict['identity_shape_modes']
 
         self.landmark_indices = model_dict['landmark_indices']
+        # self.landmark_indices = [1278, 1272, 12, 1834, 243, 781, 2199, 1447, 3661, 4390, 3022, 2484, 4036, 2253, 3490, 3496,
+        #                  3496, 268, 493, 1914, 
+        #                          2044, 1401, 3615, 4240, 4114, 2734, 2509, 978, 4527, 4942, 
+        #                          4857, 1140, 2075, 1147, 4269, 3360, 1507, 1542, 1537, 1528, 
+        #                          1518, 1511, 3742, 3751, 3756, 3721, 3725, 3732, 5708, 5695, 
+        #                          2081, 0, 4275, 6200, 6213, 6346, 6461, 5518, 5957, 5841, 5702, 
+        #                          5711, 5533, 6216, 6207, 6470, 5517, 5966]
+
         self.face_indices = model_dict['face_indices']
         self.not_face_indices = model_dict['not_face_indices']
         self.eyeball_indices = model_dict['eyeball_indices']
@@ -87,14 +95,14 @@ class ICTFaceKitTorch(torch.nn.Module):
         
         # for nn in range(expression_shape_modes_norm.shape[0]):
         #     colors = np.zeros_like(neutral_mesh)
-        #     colors[:, 0] = expression_shape_modes_norm[nn]
-        #     colors[:, 2] = 1 - expression_shape_modes_norm[nn]
+        #     colors[:, 0] = expression_shape_modes_norm.clamp(1e-2, 1).pow(0.5)[nn]
+        #     colors[:, 2] = 1 - expression_shape_modes_norm.clamp(1e-2, 1).pow(0.5)[nn]
         #     mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
-        #     o3d.io.write_triangle_mesh(f'./debug/norm_{nn}_{self.expression_names[nn]}.obj', mesh)
+        #     o3d.io.write_triangle_mesh(f'./debug/new_norm_{nn}_{self.expression_names[nn]}.obj', mesh)
         # exit()
 
 
-        self.register_buffer('expression_shape_modes_norm', expression_shape_modes_norm.clamp(1e-2, 1).pow(0.5))
+        self.register_buffer('expression_shape_modes_norm', expression_shape_modes_norm.clamp(1e-4, 1).pow(0.5))
 
         jaw_index = self.expression_names.tolist().index('jawOpen')
         self.jaw_index = jaw_index

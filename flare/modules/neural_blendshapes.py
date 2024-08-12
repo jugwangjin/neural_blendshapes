@@ -124,47 +124,47 @@ class NeuralBlendshapes(nn.Module):
 
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(self.inp_size + 3 + 53, 256),
+            nn.Linear(self.inp_size + 3 + 53 + 3, 256),
             # nn.Linear(self.inp_size + 3 + 3 + 53, 256),
             mygroupnorm(num_groups=4, num_channels=256),
-            nn.LeakyReLU(),
+            nn.PReLU(),
             nn.Linear(256, 256),
             mygroupnorm(num_groups=4, num_channels=256),
-            nn.LeakyReLU(),
+            nn.PReLU(),
             nn.Linear(256, 256),
             mygroupnorm(num_groups=4, num_channels=256),
-            nn.LeakyReLU(),
+            nn.PReLU(),
             nn.Linear(256, 256),
             mygroupnorm(num_groups=4, num_channels=256),
-            nn.LeakyReLU(),
-            nn.Linear(256, 256),
-            mygroupnorm(num_groups=4, num_channels=256),
-            nn.LeakyReLU(),
+            nn.PReLU(),
             nn.Linear(256, 53*3)
         )
         
-        self.template_deformer = nn.Sequential(
-            nn.Linear(self.inp_size + 3, 128),
-            # nn.Linear(self.inp_size + 3, 128),
-            mygroupnorm(num_groups=4, num_channels=128),
-            nn.LeakyReLU(),
-            nn.Linear(128, 128),
-            mygroupnorm(num_groups=4, num_channels=128),
-            nn.LeakyReLU(),
-            nn.Linear(128, 128),
-            mygroupnorm(num_groups=4, num_channels=128),
-            nn.LeakyReLU(),
-            nn.Linear(128, 128),
-            mygroupnorm(num_groups=4, num_channels=128),
-            nn.LeakyReLU(),
-            nn.Linear(128, 3)
-        )
+        # self.template_deformer = nn.Sequential(
+        #     nn.Linear(self.inp_size + 3 , 128),
+        #     # nn.Linear(self.inp_size + 3, 128),
+        #     mygroupnorm(num_groups=4, num_channels=128),
+        #     nn.PReLU(),
+        #     nn.Linear(128, 128),
+        #     mygroupnorm(num_groups=4, num_channels=128),
+        #     nn.PReLU(),
+        #     nn.Linear(128, 128),
+        #     mygroupnorm(num_groups=4, num_channels=128),
+        #     nn.PReLU(),
+        #     nn.Linear(128, 128),
+        #     mygroupnorm(num_groups=4, num_channels=128),
+        #     nn.PReLU(),
+        #     nn.Linear(128, 3)
+        # )
+        
+        self.template_deformer = 
+        neutral_template = self.ict_facekit.neutral_mesh_canonical[0][:self.socket_index]
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
-                    nn.LeakyReLU(),
+                    nn.PReLU(),
                     nn.Linear(32, 32),
-                    nn.LeakyReLU(),
+                    nn.PReLU(),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
@@ -238,6 +238,32 @@ class NeuralBlendshapes(nn.Module):
         if unsqueezed:
             encoded_coords = encoded_coords[0]
         return encoded_coords
+    
+
+    def initialize_forward(self, image=None, views=None, features=None, image_input=True):
+        bshape=None
+        if features is not None:
+            bshape = features
+        return_dict = {} 
+        features = self.encoder(views)
+
+        if bshape is not None:
+            features[:, :53] = bshape
+
+        return_dict['features'] = features
+    
+        pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
+
+        ict_mesh = self.ict_facekit(expression_weights = features[..., :53])
+
+        ict_mesh_posed = self.apply_deformation(ict_mesh, features, pose_weight)
+        
+        return_dict['ict_mesh'] = ict_mesh
+        return_dict['ict_mesh_posed'] = ict_mesh_posed
+
+        return_dict['pose_weight'] = pose_weight
+
+        return return_dict
 
 
     def forward(self, image=None, views=None, features=None, image_input=True):
@@ -260,52 +286,43 @@ class NeuralBlendshapes(nn.Module):
 
         encoded_points = torch.cat([self.encode_position(template), template], dim=-1)
 
-        ict_mesh = self.ict_facekit(expression_weights = features[..., :53])[:, :self.socket_index]
-    
-        template_mesh_u_delta = self.template_deformer(encoded_points) 
-
+        template_mesh_u_delta = self.template_deformer(encoded_points)
         template_mesh_delta = self.solve(template_mesh_u_delta)
 
-        # ict_mesh_w_temp = None
+        deformation = template_mesh_delta
+        deformation = torch.cat([deformation, deformation[self.interior_displacement_index]], dim=0)
+        template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + deformation
+
+        ict_mesh = self.ict_facekit(expression_weights = features[..., :53])[:, :self.socket_index]
+
         ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
         deformation = ict_mesh_w_temp - neutral_template[None]
         deformation = torch.cat([deformation, deformation[:, self.interior_displacement_index]], dim=1)
         ict_mesh_w_temp = self.ict_facekit.neutral_mesh_canonical + deformation
 
-        ict_mesh_w_temp_posed = None
-        # ict_mesh_w_temp_posed = self.apply_deformation(ict_mesh_w_temp, features, pose_weight)
+        ict_mesh_w_temp_posed = self.apply_deformation(ict_mesh_w_temp, features, pose_weight)
 
-        deformation = torch.cat([template_mesh_delta, template_mesh_delta[self.interior_displacement_index]], dim=0)
-        template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + deformation
-        
         return_dict['template_mesh'] = template_mesh
         return_dict['ict_mesh_w_temp'] = ict_mesh_w_temp
         return_dict['ict_mesh_w_temp_posed'] = ict_mesh_w_temp_posed
-
-        # features = features.detach()
 
         # features = features.detach()
         # ict_mesh_w_temp = ict_mesh_w_temp.detach()
         # pose_weight = pose_weight.detach()
 
         expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
-                                    #   ict_mesh_encoded_points, \
                                         features[:, None, :53].repeat(1, template.shape[0], 1), \
-                                        # ict_mesh_w_temp[:, :self.socket_index], \
+                                        ict_mesh_w_temp[:, :self.socket_index], \
                                         ], \
                                     dim=2) # B V ? 
         
-        # expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize * 53, encoded_points.shape[0], 3)
-        # expression_mesh_delta = self.solve(expression_mesh_delta_u).reshape(bsize, 53, encoded_points.shape[0], 3)
-        # expression_mesh_delta = expression_mesh_delta * self.ict_facekit.expression_shape_modes_norm[None, :, :self.socket_index, None]
-        # expression_mesh_delta = expression_mesh_delta.sum(dim=1)
         expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, 53, template.shape[0], 3)
-        # expression_mesh_delta_u = expression_mesh_delta_u * features[:, :53, None, None]
         expression_mesh_delta_u = expression_mesh_delta_u * self.ict_facekit.expression_shape_modes_norm[None, :, :self.socket_index, None]
         expression_mesh_delta_u = expression_mesh_delta_u.sum(dim=1)
         expression_mesh_delta = self.solve(expression_mesh_delta_u)
-
         expression_mesh = ict_mesh_w_temp[:, :self.socket_index] + expression_mesh_delta
+
+        # expression_mesh = expression_mesh_delta
         deformation = expression_mesh - neutral_template[None]
         deformation = torch.cat([deformation, deformation[:, self.interior_displacement_index]], dim=1)
         
@@ -321,17 +338,21 @@ class NeuralBlendshapes(nn.Module):
 
 
     def get_expression_delta(self, blendshapes):
-        # method for linearity regularization
         bsize = blendshapes.shape[0]
 
         template = self.ict_facekit.canonical[0][:self.socket_index]
         encoded_points = torch.cat([self.encode_position(template), template], dim=-1)
 
+        template_mesh_u_delta = self.template_deformer(encoded_points)
+        template_mesh_delta = self.solve(template_mesh_u_delta)
+
+        ict_mesh = self.ict_facekit(expression_weights = blendshapes)[:, :self.socket_index]
+
+        ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
 
         expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
-                                    #   ict_mesh_encoded_points, \
                                         blendshapes[:, None].repeat(1, template.shape[0], 1), \
-                                        # ict_mesh_w_temp[:, :self.socket_index], \
+                                        ict_mesh_w_temp[:, :self.socket_index], \
                                         ], \
                                     dim=2) # B V ? 
         expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, 53, template.shape[0], 3)
@@ -355,7 +376,7 @@ class NeuralBlendshapes(nn.Module):
 
         B, V, _ = vertices.shape
         rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle[:, None].repeat(1, V, 1) * weights, convention = 'XYZ')
-        local_coordinate_vertices = (vertices  - transform_origin[None, None]) * scale[:, None]
+        local_coordinate_vertices = (vertices - transform_origin[None, None]) * scale[:, None]
         deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + transform_origin[None, None] 
         # deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] * weights + self.encoder.transform_origin[None, None] 
 

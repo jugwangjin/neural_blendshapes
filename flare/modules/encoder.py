@@ -65,7 +65,7 @@ class ResnetEncoder(nn.Module):
 
         self.ict_facekit = ict_facekit
         self.tail = nn.Sequential(
-                    nn.Linear(7 + 68*3, 256),
+                    nn.Linear(7 + 68*3 + 53, 256),
                     mygroupnorm(num_groups=4, num_channels=256),
                     nn.LeakyReLU(),
                     nn.Linear(256, 256),
@@ -116,13 +116,14 @@ class ResnetEncoder(nn.Module):
 
         # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.40, -0.20]))
         # self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
-        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.20, -0.16]))
+        self.register_buffer('transform_origin', torch.tensor([0., -0.15, -0.30]))
+        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.15, -0.30]))
         # self.transform_origin.data = torch.tensor([0., -0.40, -0.20])
         # self.register_buffer('transform_origin', torch.tensor([0., -0.40, -0.20]))
 
         self.identity_code = nn.Parameter(torch.zeros(self.ict_facekit.num_identity))
 
-        # self.bshapes_multiplier = torch.nn.Parameter(torch.zeros(53))
+        self.bshapes_multiplier = torch.nn.Parameter(torch.zeros(53))
 
         self.tanh = nn.Tanh()
 
@@ -130,9 +131,12 @@ class ResnetEncoder(nn.Module):
 
         self.modulation_activation = ModulationActivation()
 
+        
+
     def forward(self, views):
         blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
         mp_landmark = views['mp_landmark'].reshape(-1, 478*3).detach()
+
         transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
         # print(transform_matrix)
         # exit()
@@ -149,18 +153,28 @@ class ResnetEncoder(nn.Module):
         translation[:, 1] *= -1
 
         rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
-        translation = translation / 32.
-        features = self.tail(torch.cat([detected_landmarks, rotation, translation, scale], dim=-1))
-        
-        translation[:, -1] = 0
+        # print(translation)
 
-        # bshape_modulation = self.modulation_activation(self.bshape_modulator(torch.cat([blendshape, detected_landmarks], dim=-1)))
-        # blendshape = blendshape + bshape_modulation * blendshape
+        # translation = translation / 32.
+        translation[:, -1] += 28
+        translation *= 0
+        # translation = translation / 32.
+
+        features = self.tail(torch.cat([detected_landmarks, rotation, translation, scale, blendshape], dim=-1))
+        
+
+        bshape_modulation = self.elu(self.bshape_modulator(torch.cat([blendshape, detected_landmarks], dim=-1)))
+        blendshape = blendshape + bshape_modulation * blendshape
+        # blendshape = blendshape * (self.elu(self.bshapes_multiplier) + 1)
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
         rotation = rotation + features[:, :3]
-        translation = translation + features[:, 3:6]
+        # translation = features[:, 3:6]
+        translation = features[:, 3:6]
+
+        # translation[:, -1] = 0
+        # translation *= 0
 
         out_features = torch.cat([blendshape, rotation, translation, scale], dim=-1)
 
