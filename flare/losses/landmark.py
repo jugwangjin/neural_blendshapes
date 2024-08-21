@@ -39,26 +39,29 @@ def landmark_loss(ict_facekit, gbuffers, views_subset, use_jaw, device):
     landmarks_on_clip_space = torch.zeros_like(landmarks_on_clip_space_)
     landmarks_on_clip_space[..., :2] = landmarks_on_clip_space_[..., :2] / torch.clamp(landmarks_on_clip_space_[..., -1:], min=1e-8) 
     landmarks_on_clip_space[..., 2:] = landmarks_on_clip_space_[..., 2:]
-
-    detected_landmarks = views_subset['landmark'].clone().detach()
-    detected_landmarks[..., :2] = detected_landmarks[..., :2] * 2 - 1
-    detected_landmarks[..., 2] = detected_landmarks[..., 2] * -2
     # multiply by 0.25 for first 17 landmarks at the last axis of detected_landmarks
     # reduce the weight of the jaw landmarks
     # detected_landmarks[:, :17, -1] *= 0.25
     
     # Align detected_landmarks to landmarks_on_clip_space
-    min_z_landmarks_on_clip_space = landmarks_on_clip_space[..., 2].min(dim=-1, keepdim=True)[0]
-    min_z_detected_landmarks = detected_landmarks[..., 2].min(dim=-1, keepdim=True)[0]
-    detected_landmarks[..., 2] += min_z_landmarks_on_clip_space - min_z_detected_landmarks
+    with torch.no_grad():
+        detected_landmarks = views_subset['landmark'].clone().detach()
+        detected_landmarks[..., :2] = detected_landmarks[..., :2] * 2 - 1
+        detected_landmarks[..., 2] = detected_landmarks[..., 2] * -2
+        min_z_landmarks_on_clip_space = landmarks_on_clip_space[..., 2].min(dim=-1, keepdim=True)[0]
+        min_z_detected_landmarks = detected_landmarks[..., 2].min(dim=-1, keepdim=True)[0]
+        detected_landmarks[..., 2] += min_z_landmarks_on_clip_space - min_z_detected_landmarks
 
     
     starting_index = 0 if use_jaw else 17
 
 
     landmark_loss = ((detected_landmarks[:, starting_index:, :3] - landmarks_on_clip_space[:, starting_index:, :3]).pow(2) * detected_landmarks[:, starting_index:, -1:])
+    if use_jaw:
+        landmark_loss[:, :17] *= 0.2
     # landmark_loss[..., -1] *= 0.25
-    landmark_loss[:, :17] *= 0.1
+    
+    # landmark_loss[:, :17] *= 0.1
     landmark_loss = landmark_loss.mean()
 
     # landmark_loss = ((detected_landmarks[:, starting_index:, :3] - landmarks_on_clip_space[:, starting_index:, :3]).pow(2) * detected_landmarks[:, starting_index:, -1:]).mean()

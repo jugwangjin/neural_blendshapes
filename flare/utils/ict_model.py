@@ -170,8 +170,8 @@ class ICTFaceKitTorch(torch.nn.Module):
         # print(self.neutral_mesh.shape, self.expression_shape_modes.shape, self.identity_shape_modes.shape)
         # Compute the deformed mesh by applying expression and identity shape modes to the neutral mesh
         deformed_mesh = self.neutral_mesh + \
-                        torch.einsum('bn, bnmd -> bmd', expression_weights, self.expression_shape_modes.repeat(bsize, 1, 1, 1))
-                        # torch.einsum('bn, bnmd -> bmd', identity_weights, self.identity_shape_modes.repeat(bsize, 1, 1, 1))
+                        torch.einsum('bn, bnmd -> bmd', expression_weights, self.expression_shape_modes.repeat(bsize, 1, 1, 1)) + \
+                        torch.einsum('bn, bnmd -> bmd', identity_weights, self.identity_shape_modes.repeat(bsize, 1, 1, 1))
 
         if to_canonical:
             # Transform the deformed mesh to canonical space

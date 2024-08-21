@@ -26,6 +26,8 @@ import os
 
 import mediapipe as mp
 
+from PIL import Image
+
 
 # Select the device
 device = torch.device('cpu')
@@ -34,7 +36,8 @@ if torch.cuda.is_available() and devices >= 0:
     device = torch.device(f'cuda:{devices}')
 
 class DatasetLoader(Dataset):
-    def __init__(self, args, train_dir, sample_ratio, pre_load):
+    def __init__(self, args, train_dir, sample_ratio, pre_load, train=False):
+        self.train = train
         self.args = args
         self.train_dir = train_dir
         self.base_dir = args.working_dir / args.input_dir
@@ -115,6 +118,8 @@ class DatasetLoader(Dataset):
             print("loaded {:d} views".format(self.len_img))
         else:
             self.loaded = {}
+            self.loaded[True] = {}
+            self.loaded[False] = {}
 
         self._compute_importance()
 
@@ -155,10 +160,13 @@ class DatasetLoader(Dataset):
             landmark = self.all_landmarks[itr % self.len_img]
             normal = self.all_normals[itr % self.len_img]
         else:
+            flip = False
+            # if self.train and torch.rand(1) > 0.5:
+                # flip = True
             local_itr = itr % self.len_img
-            if local_itr not in self.loaded:
-                self.loaded[local_itr] = self._parse_frame_single(local_itr)
-            img, mask, skin_mask, camera, frame_name, landmark, mp_landmark, mp_blendshape, mp_transform_matrix, normal = self.loaded[local_itr]
+            if local_itr not in self.loaded[flip]:
+                self.loaded[flip][local_itr] = self._parse_frame_single(local_itr, flip)
+            img, mask, skin_mask, camera, frame_name, landmark, mp_landmark, mp_blendshape, mp_transform_matrix, normal = self.loaded[flip][local_itr]
 
         # facs = (facs / self.facs_range).clamp(0, 1)
 
@@ -207,12 +215,18 @@ class DatasetLoader(Dataset):
         # importance = importance / torch.amax(importance) 
         # self.importance = list(importance.cpu().data.numpy())
 
-    def _parse_frame_single(self, idx):
+    def _parse_frame_single(self, idx, flip=False):
         json_dict = self.all_img_path[idx % self.len_img]
 
         img_path = self.base_dir / json_dict["dir"] / Path(json_dict["file_path"] + ".png")
         
-        mp_image = mp.Image.create_from_file(str(img_path))
+        mp_image = Image.open(img_path)
+        if flip:
+            mp_image = mp_image.transpose(Image.FLIP_LEFT_RIGHT)
+        
+        # print(mp_image, mp_image.size, np.asarray(mp_image).shape, np.asarray(mp_image).dtype)  
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.asarray(mp_image))
+
         face_landmarker_result = self.mediapipe.detect(mp_image)
         mp_landmark, mp_blendshape, mp_transform_matrix = parse_mediapipe_output(face_landmarker_result)
 
@@ -260,6 +274,14 @@ class DatasetLoader(Dataset):
         # black bg because we have perceptual loss  
         img = img * mask 
         
+        if flip: 
+            # horizontal flip
+            img = torch.fliplr(img)
+            mask = torch.fliplr(mask)
+            semantic = torch.fliplr(semantic)
+            normal = torch.fliplr(normal)
+            
+
         # ================ flame and camera params =======================
         # flame params
         camera = Camera(self.K, self.fixed_cam['R'], self.fixed_cam['t'], device=device)
@@ -270,7 +292,11 @@ class DatasetLoader(Dataset):
         frame_name = img_path.stem
 
         with torch.no_grad():
-            landmarks, scores, _ = self.face_alignment.get_landmarks_from_image(str(img_path), return_bboxes=True, return_landmark_score=True)
+            fa_img = get_image(str(img_path))
+            if flip:
+                fa_img = np.fliplr(fa_img)
+
+            landmarks, scores, _ = self.face_alignment.get_landmarks_from_image(fa_img, return_bboxes=True, return_landmark_score=True)
 
             if len(landmarks) == 0:
                 landmark = torch.zeros(68, 4)
@@ -287,3 +313,30 @@ class DatasetLoader(Dataset):
                 camera, frame_name, landmark[None, ...], \
                 mp_landmark[None, ...], mp_blendshape[None, ...], mp_transform_matrix[None, ...], normal[None, ...]
                     # Add batch dimension
+
+from skimage import io
+from skimage import color
+
+def get_image(image_or_path):
+    """Reads an image from file or array/tensor and converts it to RGB (H,W,3).
+
+    Arguments:
+        tensor {Sstring, numpy.array or torch.tensor} -- [the input image or path to it]
+    """
+    if isinstance(image_or_path, str):
+        try:
+            image = io.imread(image_or_path)
+        except IOError:
+            print("error opening file :: ", image_or_path)
+            return None
+    elif isinstance(image_or_path, torch.Tensor):
+        image = image_or_path.detach().cpu().numpy()
+    else:
+        image = image_or_path
+
+    if image.ndim == 2:
+        image = color.gray2rgb(image)
+    elif image.ndim == 4:
+        image = image[..., :3]
+
+    return image

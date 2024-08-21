@@ -120,7 +120,8 @@ def _load_semantic(fn):
 
     # tight face area : skin + nose + left eyebwow + right eyebrow + upper lip + lower lip 
     semantics[:, :, 0] = ((img == 1) + (img == 2) + (img == 3) + (img == 10) + (img == 12) + (img == 13)\
-                        + (img == 17) + (img == 16) + (img == 15) + (img == 14) + (img==7) + (img==8) + (img==9)) >= 1 # skin, nose, ears, neck, lips
+                        + (img == 17) + (img == 16) + (img == 15) + (img == 14) + (img==7) + (img==8) + (img==9)\
+                            ) >= 1 # skin, nose, ears, neck, lips
     # semantics[:, :, 0] = ((img == 1) + (img == 2) + (img == 3) + (img == 10) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
     # left eyeball
     # semantics[:, :, 1] = (img == 4) >= 1
@@ -132,7 +133,7 @@ def _load_semantic(fn):
 
     # except hair, neck, ....
     semantics[:, :, 1] = ((img == 1) + (img == 2) + (img == 3) + (img == 10) + (img == 12) + (img == 13)
-                        ) >= 1 # skin, nose, ears, neck, lips
+                        ) >= 1 # skin, brows, nose, lips
 
 
     # hair and neck

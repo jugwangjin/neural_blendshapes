@@ -213,7 +213,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     optimizer_neural_blendshapes = torch.optim.Adam([
                                                     {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer},
                                                     {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e1},
+                                                    {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e2},
                                                     ], betas=(0.05, 0.1)
                                                     )
                                                      
@@ -345,7 +345,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             
             
-    epochs = 0
+    epochs = 1
     progress_bar = tqdm(range(epochs))
     start = time.time()
 
@@ -517,7 +517,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             pretrain = iteration < args.iterations // 2
             # pretrain = False
 
-            use_jaw = True
+            use_jaw = False
             # use_jaw = iteration < args.iterations // 20
             
 
@@ -638,18 +638,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                             + ict_mesh_w_temp_mask_loss_segmentation + ict_mesh_w_temp_mask_loss
             losses['landmark'] += expression_landmark_loss + ict_mesh_w_temp_landmark_loss
             losses['closure'] += expression_closure_loss + ict_mesh_w_temp_closure_loss
-
-            # decay mask loss by landmark, closure
-            
-            decay_keys = ['landmark', 'closure']
-            with torch.no_grad():
-                mask_decay_value = 0
-                for k in decay_keys:
-                    mask_decay_value += losses[k].mean() * loss_weights[k]
-                
-                mask_decay_value = torch.exp(-mask_decay_value)
-            
-
             losses['shading'] = expression_shading_loss
             losses['perceptual_loss'] = expression_perceptual_loss
 
@@ -667,7 +655,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 
                 shading_decay_value = torch.exp(-shading_decay_value)
 
-            losses['mask'] = losses['mask'] * mask_decay_value
             losses['shading'] = losses['shading'] * shading_decay_value
             losses['perceptual_loss'] = losses['perceptual_loss'] * shading_decay_value
             losses['normal_laplacian'] = losses['normal_laplacian'] * shading_decay_value

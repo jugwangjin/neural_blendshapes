@@ -50,7 +50,7 @@ class NeuralShader(torch.nn.Module):
 
         print(disentangle_network_params)
 
-        self.light_mlp = FC(3+3, 1, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) 
+        # self.light_mlp = FC(3+3, 1, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) 
         self.dir_enc_func = generate_ide_fn(deg_view=3, device=self.device)
 
 
@@ -108,6 +108,7 @@ class NeuralShader(torch.nn.Module):
             self.gradient_scaling = 128.0
             self.material_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
 
+        self.light_mlp = FC(3+3, 1, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) 
 
     def forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None):
         bz, h, w, ch = position.shape
