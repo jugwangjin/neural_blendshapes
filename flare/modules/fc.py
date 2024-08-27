@@ -155,11 +155,12 @@ class FC(nn.Module):
             layer.apply(lambda module: first_layer_init(module=module, n=in_features))
         layers.append(layer)
 
-        for i in range(len(hidden_features)):
+        for i in range(len(hidden_features)-1):
             n = hidden_features[i]
+            next_n = hidden_features[i+1]
 
             # Initialize the layer right away
-            layer = FullyConnectedBlock(n, n, bias=bias, activation=activation_fn)
+            layer = FullyConnectedBlock(n, next_n, bias=bias, activation=activation_fn)
             layer.apply(lambda module: weight_init(module=module, n=n, omega=hidden_omega))
             layers.append(layer)
 

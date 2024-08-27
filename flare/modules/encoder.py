@@ -104,6 +104,7 @@ class ResnetEncoder(nn.Module):
             
         self.softplus = nn.Softplus(beta=torch.log(torch.tensor(2.)))
         self.elu = nn.ELU()
+        # self.register_buffer('scale', torch.zeros(1))
         self.scale = torch.nn.Parameter(torch.zeros(1))
         global_translation = torch.zeros(3)
         self.register_buffer('global_translation', global_translation)
@@ -113,8 +114,8 @@ class ResnetEncoder(nn.Module):
 
         # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.40, -0.20]))
         # self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
-        self.register_buffer('transform_origin', torch.tensor([0., -0.15, -0.40]))
-        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.15, -0.30]))
+        self.register_buffer('transform_origin', torch.tensor([0., -0.10, -0.30]))
+        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.10, -0.30]))
         # self.transform_origin.data = torch.tensor([0., -0.40, -0.20])
         # self.register_buffer('transform_origin', torch.tensor([0., -0.40, -0.20]))
 
@@ -129,70 +130,59 @@ class ResnetEncoder(nn.Module):
         self.modulation_activation = ModulationActivation()
         self.silu = nn.SiLU()
 
+        # self.register_buffer('identity_weights', torch.zeros(self.ict_facekit.num_identity, device='cuda'))
+        # self.identity_weights.register_hook(lambda grad: grad*0.25)
         self.identity_weights = nn.Parameter(torch.zeros(self.ict_facekit.num_identity, device='cuda'))
-        self.identity_weights.register_hook(lambda grad: grad*0.25)
+        # self.identity_weights.register_hook(lambda grad: grad*0.25)
 
         
 
     def forward(self, views):
-        blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
-        mp_landmark = views['mp_landmark'].reshape(-1, 478*3).detach()
-
-        transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
-        # print(transform_matrix)
-        # exit()
-        detected_landmarks = views['landmark'].clone().detach()[:, :, :3].reshape(-1, 68*3).detach()
 
         with torch.no_grad():
+            blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
+            # mp_landmark = views['mp_landmark'].reshape(-1, 478*3).detach()
+            transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
+
+
+            detected_landmarks = views['landmark'].clone().detach()[:, :, :3]
+            detected_landmarks[..., :-1] = detected_landmarks[..., :-1] - 0.5 # center
+            detected_landmarks[..., -1] *= -1 
+            detected_landmarks = detected_landmarks.reshape(-1, 68*3).detach()
+
             square_indices = [39, 42, 35, 31, 27, 33]
-            fixed_square = views['landmark'][:, square_indices, :3]
-            square_target = torch.tensor([[-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0], [0, -0.5, 0], [0, 0.5, 0]], device='cuda')[None].repeat(detected_landmarks.shape[0], 1, 1)
-            # print(fixed_square.shape, square_target.shape)
-            # print(fixed_square, square_target)
+            fixed_square = detected_landmarks.reshape(-1, 68, 3)[:, square_indices, :3]
+            square_target = torch.tensor([[-0.1, -0.1, 0], [0.1, -0.1, 0], [0.1, 0.1, 0], [-0.1, 0.1, 0], [0, -0.1, 0], [0, 0.1, 0]], device='cuda')[None].repeat(detected_landmarks.shape[0], 1, 1)
+
             alignment = p3do.corresponding_points_alignment(fixed_square, square_target, estimate_scale = True)
-            # print(alignment.R, alignment.T)
-            aligned_landmarks = alignment.s[:, None, None] * torch.einsum('bdk, bkl->bdl', views['landmark'].clone().detach()[:, :, :3], alignment.R) + alignment.T[:, None]
+            aligned_landmarks = alignment.s[:, None, None] * torch.einsum('bdk, bkl->bdl', detected_landmarks.reshape(-1, 68, 3).clone().detach(), alignment.R) + alignment.T[:, None]
 
-        scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
-        translation = transform_matrix[:, :3, 3]
-        rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
-
-        rotation_matrix[:, 2:3] *= -1
-        rotation_matrix[:, :, 2:3] *= -1
+            align_rotation = p3dt.matrix_to_euler_angles(alignment.R, convention='XYZ')
+            align_info = torch.cat([alignment.s[:, None]*0, align_rotation, alignment.T], dim=-1)
 
 
-        translation[:, 1] *= -1
+            scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
+            translation = transform_matrix[:, :3, 3]
+            rotation_matrix = transform_matrix[:, :3, :3]
+            rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
 
-        rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
-        # print(translation)
-
-        # translation = translation / 32.
-        translation[:, -1] += 28
-        translation *= 0
-        # translation = translation / 32.
-
-        align_rotation = p3dt.matrix_to_euler_angles(alignment.R, convention='XYZ')
-        align_info = torch.cat([alignment.s[:, None], align_rotation, alignment.T], dim=-1)
+            rotation_matrix = rotation_matrix.permute(0, 2, 1)
+            rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
+            
+            translation[:, -1] += 28
+            translation *= 0
 
         features = self.tail(torch.cat([detected_landmarks, rotation, translation, scale, align_info], dim=-1))
         
-
-        # bshape_modulation = self.modulation_activation(self.bshape_modulator(torch.cat([blendshape, aligned_landmarks.reshape(-1, 68*3)], dim=-1)))
         bshape_modulation = (self.bshape_modulator(torch.cat([blendshape, aligned_landmarks.reshape(-1, 68*3)], dim=-1)))
         blendshape = blendshape + bshape_modulation
-        # blendshape = blendshape + bshape_modulation * blendshape
-        # blendshape = blendshape * (self.elu(self.bshapes_multiplier) + 1)
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
-        rotation = features[:, :3] * PI
-        # rotation = rotation + features[:, :3]
-        # translation = features[:, 3:6]
+        rotation = rotation + features[:, :3]
         translation = features[:, 3:6] 
+        # translation[..., -1] *= 0.1
         before_translation = features[:, 6:9]
-
-        # translation[:, -1] = 0
-        # translation *= 0
 
         out_features = torch.cat([blendshape, rotation, translation, scale, before_translation], dim=-1)
 

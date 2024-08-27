@@ -94,7 +94,69 @@ def laplacian_uniform(verts, faces):
     return torch.sparse_coo_tensor(idx, values, (V,V)).coalesce()
 
 
-def compute_matrix(verts, faces, lambda_, alpha=None, cotan=False):
+def laplacian_density(verts, faces):
+    """
+    Compute the uniform laplacian
+
+    Parameters
+    ----------
+    verts : torch.Tensor
+        Vertex positions.
+    faces : torch.Tensor
+        array of triangle faces.
+    """
+    V = verts.shape[0]
+    F = faces.shape[0]
+
+    # Neighbor indices
+    ii = faces[:, [1, 2, 0]].flatten()
+    jj = faces[:, [2, 0, 1]].flatten()
+    adj = torch.stack([torch.cat([ii, jj]), torch.cat([jj, ii])], dim=0).unique(dim=1)
+    # fill adj_values with the edge lengths
+    adj_values = (verts[adj[0]] - verts[adj[1]]).norm(dim=1)
+    adj_values = adj_values / torch.amax(adj_values)
+    # adj_values = 1 / adj_values
+    adj_values = torch.exp(-adj_values)
+
+    # print statistics of adj_values, mean, std, max, min
+    # print(adj_values.mean(), adj_values.std(), adj_values.max(), adj_values.min())
+    # exit()
+
+    # adj_values = torch.ones(adj.shape[1], device='cuda', dtype=torch.float)
+    diag_idx = adj[0]
+
+    L = torch.sparse_coo_tensor(adj, adj_values, (V,V)).coalesce()
+
+    # Make it symmetric; this means we are also setting
+    # L[v2, v1] = cota
+    # L[v0, v2] = cotb
+    # L[v1, v0] = cotc
+    # L += L.t()
+
+    # Add the diagonal indices
+    vals = torch.sparse.sum(L, dim=-1).to_dense()
+    indices = torch.arange(V, device='cuda')
+    idx = torch.stack([indices, indices], dim=0)
+    L = torch.sparse_coo_tensor(idx, vals, (V, V)).coalesce() - L
+    return L
+
+
+    # Diagonal indices
+    diag_idx = adj[0]
+
+    vals = torch.sparse.sum(L, dim=0).to_dense()
+    # Build the sparse matrix
+    idx = torch.cat((adj, torch.stack((diag_idx, diag_idx), dim=0)), dim=1)
+    diag_values = torch.sparse.sum(torch.sparse.FloatTensor(idx, adj_values, (V,V)), dim=1).to_dense()
+    values = torch.cat((-adj_values, adj_values))
+
+    # The coalesce operation sums the duplicate indices, resulting in the
+    # correct diagonal
+    return torch.sparse_coo_tensor(idx, values, (V,V)).coalesce()
+
+
+
+def compute_matrix(verts, faces, lambda_, alpha=None, cotan=False, density=False,):
     """
     Build the parameterization matrix.
 
@@ -120,6 +182,8 @@ def compute_matrix(verts, faces, lambda_, alpha=None, cotan=False):
     """
     if cotan:
         L = laplacian_cot(verts, faces)
+    elif density:
+        L = laplacian_density(verts, faces)
     else:
         L = laplacian_uniform(verts, faces)
 

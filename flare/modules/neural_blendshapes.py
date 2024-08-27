@@ -11,7 +11,7 @@ import pytorch3d.ops as pt3o
 import os
 
 
-from .geometry import compute_matrix, laplacian_uniform
+from .geometry import compute_matrix, laplacian_uniform, laplacian_density
 from .solvers import CholeskySolver, solve
 from .parameterize import to_differential, from_differential
 
@@ -79,7 +79,7 @@ class NeuralBlendshapes(nn.Module):
         self.head_index = 14062
 
         self.socket_index = 11248
-        self.socket_index = 14062
+        # self.socket_index = 14062
 
         interior_vertices = ict_facekit.canonical[0, self.socket_index:]
         exterior_vertices = ict_facekit.canonical[0, :self.socket_index]
@@ -95,13 +95,17 @@ class NeuralBlendshapes(nn.Module):
         faces = faces[faces[:, 1] < self.socket_index]
         faces = faces[faces[:, 2] < self.socket_index]
 
-        self.register_buffer('L', laplacian_uniform(torch.from_numpy(vertices[:self.socket_index]).to('cuda'), torch.from_numpy(faces).to('cuda')))
+        self.register_buffer('L', laplacian_density(torch.from_numpy(vertices[:self.socket_index]).to('cuda'), torch.from_numpy(faces).to('cuda')))
 
-        alpha = 1 - 1 / float(lambda_)
+        alpha = 1 - 1 / float(lambda_) if lambda_ > 0 else None
 
-        self.register_buffer('M', compute_matrix(torch.from_numpy(vertices[:self.socket_index]).to('cuda'), torch.from_numpy(faces).to('cuda'), lambda_, alpha=None))
+        self.register_buffer('M', compute_matrix(torch.from_numpy(vertices[:self.socket_index]).to('cuda'), torch.from_numpy(faces).to('cuda'), lambda_, alpha=alpha, density=True))
 
         code_dim = 53
+
+# 
+        # self.fourier_feature_transform, channels = get_embedder(multires=9)
+        # self.inp_size = channels
 
         desired_resolution = 4096
         base_grid_resolution = 16
@@ -119,14 +123,17 @@ class NeuralBlendshapes(nn.Module):
         self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to('cuda')
         self.inp_size = self.fourier_feature_transform.n_output_dims
 
-        self.gradient_scaling = 128.
-        self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
-        self.inp_size = self.fourier_feature_transform.n_output_dims
+        # self.gradient_scaling = 128.
+        # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+        # self.inp_size = self.fourier_feature_transform.n_output_dims
 
 
         self.expression_deformer = nn.Sequential(
             nn.Linear(self.inp_size + 3 + 53 + 3, 256),
             # nn.Linear(self.inp_size + 3 + 3 + 53, 256),
+            # mygroupnorm(num_groups=4, num_channels=256),
+            nn.PReLU(),
+            nn.Linear(256, 256),
             # mygroupnorm(num_groups=4, num_channels=256),
             nn.PReLU(),
             nn.Linear(256, 256),
@@ -168,7 +175,7 @@ class NeuralBlendshapes(nn.Module):
                     nn.Linear(32, 32),
                     nn.PReLU(),
                     nn.Linear(32,1),
-                    nn.Tanh()
+                    nn.Sigmoid()
         )
 
         # last layer to all zeros, to make zero deformation as the default            
@@ -303,7 +310,6 @@ class NeuralBlendshapes(nn.Module):
         neutral_ict_mesh_delta = self.ict_facekit(expression_weights = torch.zeros_like(features[:1, :53]), identity_weights = self.encoder.identity_weights[None])[0, :self.socket_index] - neutral_template
 
         template_mesh_u_delta = self.template_deformer
-        # template_mesh_u_delta = self.template_deformer(encoded_points)
         template_mesh_delta = self.solve(template_mesh_u_delta) + neutral_ict_mesh_delta
 
         deformation = template_mesh_delta
@@ -327,21 +333,23 @@ class NeuralBlendshapes(nn.Module):
         if pretrain:
             return return_dict
 
-        # features = features.detach()
-        # ict_mesh_w_temp = ict_mesh_w_temp.detach()
-        # pose_weight = pose_weight.detach()
-
         expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
                                         features[:, None, :53].repeat(1, template.shape[0], 1), \
                                         ict_mesh_w_temp[:, :self.socket_index], \
                                         ], \
                                     dim=2) # B V ? 
-        
-        expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, 53, template.shape[0], 3)
-        expression_mesh_delta_u = expression_mesh_delta_u * self.ict_facekit.expression_shape_modes_norm[None, :, :self.socket_index, None]
+        # print(expression_input.shape)        
+        expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 53, 3).permute(0, 2, 1, 3)
+        # print(expression_mesh_delta_u.shape)
+        expression_mesh_delta_u = expression_mesh_delta_u 
+        # expression_mesh_delta_u = expression_mesh_delta_u * self.ict_facekit.expression_shape_modes_norm[None, :, :self.socket_index, None]
+        # print(expression_mesh_delta_u.shape, self.ict_facekit.expression_shape_modes_norm.shape)
         expression_mesh_delta_u = expression_mesh_delta_u.sum(dim=1)
+        # print(expression_mesh_delta_u.shape)
         expression_mesh_delta = self.solve(expression_mesh_delta_u)
+        # print(expression_mesh_delta_u.shape)
         expression_mesh = ict_mesh_w_temp[:, :self.socket_index] + expression_mesh_delta
+        # print(expression_mesh.shape, ict_mesh_w_temp.shape, expression_mesh_delta.shape)
 
         # expression_mesh = expression_mesh_delta
         deformation = expression_mesh - neutral_template[None]
@@ -377,8 +385,9 @@ class NeuralBlendshapes(nn.Module):
                                         ict_mesh_w_temp[:, :self.socket_index], \
                                         ], \
                                     dim=2) # B V ? 
-        expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, 53, template.shape[0], 3)
-        expression_mesh_delta_u = expression_mesh_delta_u * self.ict_facekit.expression_shape_modes_norm[None, :, :self.socket_index, None]
+        expression_mesh_delta_u = self.expression_deformer(expression_input)
+        # expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, 53, template.shape[0], 3)
+        # expression_mesh_delta_u = expression_mesh_delta_u * self.ict_facekit.expression_shape_modes_norm[None, :, :self.socket_index, None]
 
         return expression_mesh_delta_u
 
@@ -395,15 +404,12 @@ class NeuralBlendshapes(nn.Module):
         if weights is None:
             weights = torch.ones_like(vertices[..., :1])
 
-        # transform_origin = torch.cat([torch.zeros(1, device=vertices.device), self.encoder.transform_origin[1:]], dim=0)
-        transform_origin[:, 0] = 0 # no translation in x
+        transform_origin = torch.cat([torch.zeros(1, device=vertices.device), self.encoder.transform_origin[1:]], dim=0)
 
         B, V, _ = vertices.shape
         rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle[:, None].repeat(1, V, 1) * weights, convention = 'XYZ')
-        local_coordinate_vertices = (vertices - transform_origin[:, None]) * scale[:, None]
-        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + self.encoder.transform_origin[None, None]
-        # deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + transform_origin[None, None] 
-        # deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] * weights + self.encoder.transform_origin[None, None] 
+        local_coordinate_vertices = (vertices - transform_origin[None, None,]) * scale[:, None]
+        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + transform_origin[None, None]
 
         return deformed_mesh
 

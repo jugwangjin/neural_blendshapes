@@ -191,9 +191,9 @@ class Renderer:
 
             # zero tensor size of b, h*w, 1
             # fill ones on valid_idx < 11248
-            # valid_idx_tensor = torch.zeros(b, h, w, 1).to(self.device)
-            # valid_idx_tensor[valid_idx < 11248] = 1.
-            # valid_idx_tensor = valid_idx_tensor
+            valid_idx_tensor = torch.zeros(b, h, w, 1).to(self.device)
+            valid_idx_tensor[valid_idx < 11248] = 1.
+            valid_idx_tensor = valid_idx_tensor
 
             # segmentation will be the intersection of valid_idx < 11248 and mask > 0
             mask = (rast[..., -1:] > 0.).float()
@@ -201,31 +201,32 @@ class Renderer:
             # 11248: face, head / exclude: eye/mouth sockets, eyeballs, ... 
             # for eye closure / jaw components learning
             # segmentation is the multiplication of mask and valid_idx_tensor
-            # segmentation = mask * valid_idx_tensor
+            segmentation = mask * valid_idx_tensor
             # gbuffer['segmentation'] = segmentation
 
             ### !! we mask directly with alpha values from the rasterizer !! ###
-            # segmentation = torch.lerp(torch.zeros((batch_size, h, w, 1)).to(self.device), 
-                                        # torch.ones((batch_size, h, w, 1)).to(self.device), segmentation.float())
-
-            ### we antialias the final color here (!)
-            # segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
-            # gbuffer['segmentation'] = segmentation
-            
-            
-            # zero tensor size of b, h*w, 1
-            # fill ones on valid_idx < 11248
-            valid_idx_tensor = torch.zeros(b, h, w, 1).to(self.device)
-            valid_idx_tensor[valid_idx < 6706] = 1.
-            valid_idx_tensor = valid_idx_tensor
-
-            segmentation = mask * valid_idx_tensor
             segmentation = torch.lerp(torch.zeros((batch_size, h, w, 1)).to(self.device), 
                                         torch.ones((batch_size, h, w, 1)).to(self.device), segmentation.float())
 
             ### we antialias the final color here (!)
             segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
-            gbuffer['narrow_face'] = segmentation
+            gbuffer['segmentation'] = segmentation
+            
+            
+            # zero tensor size of b, h*w, 1
+            # fill ones on valid_idx < 11248
+
+            # valid_idx_tensor = torch.zeros(b, h, w, 1).to(self.device)
+            # valid_idx_tensor[valid_idx < 6706] = 1.
+            # valid_idx_tensor = valid_idx_tensor
+
+            # segmentation = mask * valid_idx_tensor
+            # segmentation = torch.lerp(torch.zeros((batch_size, h, w, 1)).to(self.device), 
+            #                             torch.ones((batch_size, h, w, 1)).to(self.device), segmentation.float())
+
+            # ### we antialias the final color here (!)
+            # segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
+            # gbuffer['narrow_face'] = segmentation
 
 
 

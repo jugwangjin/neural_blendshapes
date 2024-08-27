@@ -213,7 +213,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     optimizer_neural_blendshapes = torch.optim.Adam([
                                                     {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer},
                                                     {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e1},
+                                                    {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
                                                     ], betas=(0.05, 0.1)
                                                     )
                                                      
@@ -275,7 +275,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "normal_laplacian": args.weight_normal_laplacian,
         "material_regularization": 1e-3,
         "linearity_regularization": 1e-1,
-        "identity_weight_regularization": 1e-2,
+        "identity_weight_regularization": 1e-3,
     }
 
     # loss_weights = {
@@ -345,17 +345,19 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             
             
-    epochs = 0
+    epochs = 3
     progress_bar = tqdm(range(epochs))
     start = time.time()
 
+    # dataset_train_flip    = DatasetLoader(args, train_dir=args.train_dir, sample_ratio=args.sample_idx_ratio, pre_load=False, train=True, flip=True)
+    # dataloader_train_flip    = torch.utils.data.DataLoader(dataset_train_flip, batch_size=args.batch_size, collate_fn=dataset_train.collate, drop_last=True, sampler=dataset_sampler)
 
     iteration = 0
     for epoch in progress_bar:
         for iter_, views_subset in tqdm(enumerate(dataloader_train)):
             iteration += 1
 
-            use_jaw = epoch<1
+            use_jaw = True
 
             input_image = views_subset["img"].permute(0, 3, 1, 2).to(device)
             
@@ -372,8 +374,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # _, _, ict_mesh_gbuffers_mask = shader.get_mask(ict_mesh_gbuffers, views_subset, mesh, args.finetune_color, lgt)
 
             ict_mesh_landmark_loss, ict_mesh_closure_loss = landmark_loss(ict_facekit, ict_mesh_gbuffers, views_subset, use_jaw, device)
-            ict_mesh_mask_loss = torch.tensor(0., device=device)
-            ict_mesh_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., 1:2], ict_mesh_gbuffers['narrow_face'])
+            # ict_mesh_mask_loss = torch.tensor(0., device=device)
+            ict_mesh_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., :1], ict_mesh_gbuffers['segmentation'])
+            # ict_mesh_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., 1:2], ict_mesh_gbuffers['narrow_face'])
 
             feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
                                                                 neural_blendshapes, facs_weight=0)
@@ -381,18 +384,19 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             loss = torch.tensor(0., device=device)
             loss += ict_mesh_landmark_loss * loss_weights['landmark']
             loss += ict_mesh_closure_loss * loss_weights['closure'] 
-            loss += ict_mesh_mask_loss * loss_weights['mask']
-            loss += ict_mesh_mask_loss_segmentation * loss_weights['mask']
+            # loss += ict_mesh_mask_loss * loss_weights['mask']
+            loss += ict_mesh_mask_loss_segmentation * loss_weights['mask'] * 1e-1
             loss += neural_blendshapes.encoder.identity_weights.pow(2).mean() * loss_weights["identity_weight_regularization"]
             loss += feature_regularization * loss_weights['feature_regularization']
                     
-            # wandb.log({'landmark_loss': ict_mesh_landmark_loss.item(),
-            #            'closure_loss': ict_mesh_closure_loss.item(),
-            #            'mask_loss': ict_mesh_mask_loss.item(),
-            #            'mask_loss_segmentation': ict_mesh_mask_loss_segmentation.item(),
-            #            'identity_weight_regularization_loss': neural_blendshapes.encoder.identity_weights.pow(2).mean().item(),
-            #            'feature_regularization_loss': feature_regularization.item()}, step=iteration)
-            
+            # wandb.log({'landmark_loss': ict_mesh_landmark_loss.item() * loss_weights['landmark'],
+            #            'closure_loss': ict_mesh_closure_loss.item() * loss_weights['closure'],
+            #         #    'mask_loss': ict_mesh_mask_loss.item(),
+            #            'mask_loss_segmentation': ict_mesh_mask_loss_segmentation.item() * loss_weights['mask'],
+            #            'identity_weight_regularization_loss': neural_blendshapes.encoder.identity_weights.pow(2).mean().item() * loss_weights["identity_weight_regularization"], 
+            #            'feature_regularization_loss': feature_regularization.item() * loss_weights['feature_regularization']
+            #            }, step=iteration)
+            loss = loss * 10
             neural_blendshapes.zero_grad()
             optimizer_neural_blendshapes.zero_grad()
 
@@ -423,6 +427,20 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     ## ============== visualize ==============================
                     # visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration, ict_facekit=ict_facekit)
 
+                    return_dict_ = neural_blendshapes(views_subset['img'], views_subset)
+                    debug_gbuffer = renderer.render_batch(views_subset['camera'], return_dict_['expression_mesh_posed'].contiguous(), mesh.fetch_all_normals(return_dict_['expression_mesh_posed'], mesh),
+                                            channels=channels_gbuffer + ['segmentation'], with_antialiasing=True, 
+                                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh)
+                    debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, views_subset, mesh, args.finetune_color, lgt)
+                    visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, views_subset, images_save_path, iteration, ict_facekit=ict_facekit, save_name='a_init_training')
+                    
+                    fname = str(images_save_path / "grid" / f'grid_{iteration}_a_init_training.png')
+                    rename = str(images_save_path / "grid" / f'a_init_training_grid_{iteration}.png')
+                    os.rename(fname, rename)
+
+                    
+
+
                     return_dict_ = neural_blendshapes(debug_views['img'], debug_views)
 
                     bshapes = return_dict_['features'][:, :53].detach().cpu().numpy()
@@ -431,6 +449,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     eyeblink_l = bshapes[:, ict_facekit.expression_names.tolist().index('eyeBlink_L')]
                     eyeblink_r = bshapes[:, ict_facekit.expression_names.tolist().index('eyeBlink_R')]
                     print(f"JawOpen: {jawopen}, EyeBlink_L: {eyeblink_l}, EyeBlink_R: {eyeblink_r}")
+                    print(return_dict['features'][0, 53:])
 
 
                     debug_gbuffer = renderer.render_batch(debug_views['camera'], return_dict_['expression_mesh_posed'].contiguous(), mesh.fetch_all_normals(return_dict_['expression_mesh_posed'], mesh),
@@ -443,14 +462,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     rename = str(images_save_path / "grid" / f'a_init_grid_{iteration}.png')
                     os.rename(fname, rename)
 
-                    
 
                     for ith in range(debug_views['img'].shape[0]):
                         # seg = debug_gbuffer['segmentation'][ith, ..., 0]
                         # seg = seg * 255
                         # seg = seg.cpu().numpy().astype(np.uint8)
                         # cv2.imwrite(str(images_save_path / "grid" / f'grid_{iteration}_seg_{ith}.png'), seg)
-                        seg = debug_gbuffer['narrow_face'][ith, ..., 0]
+                        seg = debug_gbuffer['segmentation'][ith, ..., 0]
+                        # seg = debug_gbuffer['narrow_face'][ith, ..., 0]
                         seg = seg * 255
                         seg = seg.cpu().numpy().astype(np.uint8)
                         cv2.imwrite(str(images_save_path / "grid" / f'a_init_grid_{iteration}_seg_narrow_{ith}.png'), seg)
@@ -515,7 +534,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
 
             pretrain = iteration < args.iterations // 2
-            # pretrain = False
+            pretrain = False
 
             use_jaw = True
             # use_jaw = iteration < args.iterations // 20
@@ -537,8 +556,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             ict_mesh_w_temp_landmark_loss, ict_mesh_w_temp_closure_loss = landmark_loss(ict_facekit, ict_mesh_w_temp_gbuffers, views_subset, use_jaw, device)
             ict_mesh_w_temp_mask_loss = mask_loss(views_subset["mask"], ict_mesh_w_temp_gbuffers_mask)
-            # ict_mesh_w_temp_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., :1], ict_mesh_w_temp_gbuffers['segmentation']) + \
-            ict_mesh_w_temp_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., 1:2], ict_mesh_w_temp_gbuffers['narrow_face'])
+            ict_mesh_w_temp_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., :1], ict_mesh_w_temp_gbuffers['segmentation'])
+            # ict_mesh_w_temp_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., 1:2], ict_mesh_w_temp_gbuffers['narrow_face'])
 
 
             if not pretrain:
@@ -551,8 +570,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 expression_landmark_loss, expression_closure_loss = landmark_loss(ict_facekit, expression_gbuffers, views_subset, use_jaw, device)
                 expression_mask_loss = mask_loss(views_subset["mask"], expression_gbuffer_mask)
-                # expression_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., :1], expression_gbuffers['segmentation']) + \
-                expression_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., 1:2], expression_gbuffers['narrow_face'])
+                expression_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., :1], expression_gbuffers['segmentation']) 
+                # expression_mask_loss_segmentation = mask_loss(views_subset["skin_mask"][..., 1:2], expression_gbuffers['narrow_face'])
 
                 expression_shading_loss, pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
                 expression_perceptual_loss = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
@@ -622,9 +641,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # 4. geometric regularization. 
             #   1) template mesh close to canonical mesh. for face region.
             #   2) expression mesh close to ict mesh. for out of face region. 
-            template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
+            template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).abs().mean()
             if not pretrain:
-                expression_geometric_regularization = (return_dict['ict_mesh_w_temp'].detach() - return_dict['expression_mesh']).pow(2).mean() * 1e-2
+                expression_geometric_regularization = (return_dict['ict_mesh_w_temp'].detach() - return_dict['expression_mesh']).abs().mean() 
             else:
                 expression_geometric_regularization = torch.tensor(0., device=device)
 
@@ -632,7 +651,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['normal_regularization'] = template_mesh_normal_regularization 
             losses['feature_regularization'] = feature_regularization
             # losses['geometric_regularization'] = random_geometric_regularization + expression_geometric_regularization
-            losses['geometric_regularization'] = template_geometric_regularization + expression_geometric_regularization
+            losses['geometric_regularization'] = template_geometric_regularization + expression_geometric_regularization \
+                                            + neural_blendshapes.template_deformer.abs().mean()
 
             losses['mask'] += expression_mask_loss_segmentation + expression_mask_loss \
                             + ict_mesh_w_temp_mask_loss_segmentation + ict_mesh_w_temp_mask_loss
@@ -641,13 +661,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             # decay mask loss by landmark, closure
             
-            decay_keys = ['landmark', 'closure']
-            with torch.no_grad():
-                mask_decay_value = 0
-                for k in decay_keys:
-                    mask_decay_value += losses[k].mean() * loss_weights[k]
+            # decay_keys = ['landmark', 'closure']
+            # with torch.no_grad():
+                # mask_decay_value = 0
+                # for k in decay_keys:
+                    # mask_decay_value += losses[k].mean() * loss_weights[k]
                 
-                mask_decay_value = torch.exp(-mask_decay_value)
+                # mask_decay_value = torch.exp(-mask_decay_value)
             
 
             losses['shading'] = expression_shading_loss
@@ -667,7 +687,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 
                 shading_decay_value = torch.exp(-shading_decay_value)
 
-            losses['mask'] = losses['mask'] * mask_decay_value
+            # losses['mask'] = losses['mask'] * mask_decay_value
             losses['shading'] = losses['shading'] * shading_decay_value
             losses['perceptual_loss'] = losses['perceptual_loss'] * shading_decay_value
             losses['normal_laplacian'] = losses['normal_laplacian'] * shading_decay_value
@@ -743,8 +763,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 
                 print("=="*50)
 
-                dataset_sampler = torch.utils.data.WeightedRandomSampler(importance, dataset_train.len_img, replacement=True)
-                dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, collate_fn=dataset_train.collate, drop_last=True, sampler=dataset_sampler)
+                # dataset_sampler = torch.utils.data.WeightedRandomSampler(importance, dataset_train.len_img, replacement=True)
+                # dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, collate_fn=dataset_train.collate, drop_last=True, sampler=dataset_sampler)
 
 
             # ==============================================================================================
@@ -794,17 +814,27 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     ## ============== visualize ==============================
                     # visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration, ict_facekit=ict_facekit)
 
-                    convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
-                    for ith in range(views_subset['img'].shape[0]):
-                        # seg = debug_gbuffer['segmentation'][ith, ..., 0]
-                        # seg = seg * 255
-                        # seg = seg.cpu().numpy().astype(np.uint8)
-                        # cv2.imwrite(str(images_save_path / "grid" / f'grid_{iteration}_seg_{ith}.png'), seg)
-                        seg = ict_mesh_w_temp_gbuffers['narrow_face'][ith, ..., 0]
-                        seg = seg * 255
-                        seg = seg.cpu().numpy().astype(np.uint8)
-                        cv2.imwrite(str(images_save_path / "grid" / f'grid_{iteration}_training_narrow_{ith}.png'), seg)
-                        cv2.imwrite(str(images_save_path / "grid" / f'grid_{iteration}_training_narrow_{ith}_gt.png'), convert_uint(views_subset['img'][ith]).cpu().numpy())
+                    # convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
+                    # for ith in range(views_subset['img'].shape[0]):
+                    #     # seg = debug_gbuffer['segmentation'][ith, ..., 0]
+                    #     # seg = seg * 255
+                    #     # seg = seg.cpu().numpy().astype(np.uint8)
+                    #     # cv2.imwrite(str(images_save_path / "grid" / f'grid_{iteration}_seg_{ith}.png'), seg)
+                    #     seg = ict_mesh_w_temp_gbuffers['segmentation'][ith, ..., 0]
+                    #     # seg = ict_mesh_w_temp_gbuffers['narrow_face'][ith, ..., 0]
+                    #     seg = seg * 255
+                    #     seg = seg.cpu().numpy().astype(np.uint8)
+                    #     cv2.imwrite(str(images_save_path / "grid" / f'grid_{iteration}_training_narrow_{ith}.png'), seg)
+                    #     cv2.imwrite(str(images_save_path / "grid" / f'grid_{iteration}_training_narrow_{ith}_gt.png'), convert_uint(views_subset['img'][ith]).cpu().numpy())
+
+
+                    return_dict_ = neural_blendshapes(views_subset['img'], views_subset)
+                    debug_gbuffer = renderer.render_batch(views_subset['camera'], return_dict_['expression_mesh_posed'].contiguous(), mesh.fetch_all_normals(return_dict_['expression_mesh_posed'], mesh),
+                                            channels=channels_gbuffer + ['segmentation'], with_antialiasing=True, 
+                                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh)
+                    debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, views_subset, mesh, args.finetune_color, lgt)
+                    visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, views_subset, images_save_path, iteration, ict_facekit=ict_facekit, save_name='training')
+                    
 
                     return_dict_ = neural_blendshapes(debug_views['img'], debug_views)
                     if iteration == 1:
@@ -816,7 +846,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                             # gt_seg = gt_seg * 255
                             # gt_seg = gt_seg.cpu().numpy().astype(np.uint8)
                             # cv2.imwrite(str(images_save_path / "grid" / f'gt_seg_{ith}.png'), gt_seg)
-                            gt_seg = gt_segs[ith, ..., 1]
+                            gt_seg = gt_segs[ith, ..., 0]
                             gt_seg = gt_seg * 255
                             gt_seg = gt_seg.cpu().numpy().astype(np.uint8)
                             cv2.imwrite(str(images_save_path / "grid" / f'gt_seg_narrow{ith}.png'), gt_seg)
@@ -861,7 +891,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                         # seg = seg * 255
                         # seg = seg.cpu().numpy().astype(np.uint8)
                         # cv2.imwrite(str(images_save_path / "grid" / f'grid_{iteration}_seg_{ith}.png'), seg)
-                        seg = debug_gbuffer['narrow_face'][ith, ..., 0]
+                        seg = debug_gbuffer['segmentation'][ith, ..., 0]
+                        # seg = debug_gbuffer['narrow_face'][ith, ..., 0]
                         seg = seg * 255
                         seg = seg.cpu().numpy().astype(np.uint8)
                         cv2.imwrite(str(images_save_path / "grid" / f'grid_{iteration}_seg_narrow_{ith}.png'), seg)

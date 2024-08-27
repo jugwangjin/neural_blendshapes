@@ -103,5 +103,8 @@ def config_parser():
     parser.add_argument('--skip_eval', action='store_true', help="skip eval")
     parser.add_argument('--skip_wandb', action='store_true', help="skip eval")
 
+    parser.add_argument('--ghostbone', action='store_true', help="mlp for vertex displacements")
+    parser.add_argument('--no-ghostbone', dest='ghostbone', action='store_false')
+    parser.set_defaults(ghostbone=True)
     parser.add_argument('--lambda_', type=int, default=16, help="Total number of iterations")
     return parser

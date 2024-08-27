@@ -70,7 +70,7 @@ class NeuralShader(torch.nn.Module):
         # ==============================================================================================
         if fourier_features == 'positional':
             print("STAGE 1: Using positional encoding (NeRF) for intrinsic materials")
-            self.fourier_feature_transform, channels = get_embedder(multires=6)
+            self.fourier_feature_transform, channels = get_embedder(multires=9)
             self.inp_size = channels
         elif fourier_features == 'hashgrid':
             print("STAGE 2: Using hashgrid (tinycudann) for intrinsic materials")
@@ -108,7 +108,7 @@ class NeuralShader(torch.nn.Module):
             self.gradient_scaling = 128.0
             self.material_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
 
-        self.light_mlp = FC(3+3, 1, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) 
+        self.light_mlp = FC(3+3+3, 1, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) 
 
     def forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None):
         bz, h, w, ch = position.shape
@@ -133,7 +133,7 @@ class NeuralShader(torch.nn.Module):
         diffuse = material[..., :3]
         specular = material[..., 3:6]
         
-        light_mlp_input = torch.cat([uv_coordinates.view(-1, 3), reflvec.view(-1, 3)], dim=1)
+        light_mlp_input = torch.cat([uv_coordinates.view(-1, 3), normal_bend.view(-1, 3), reflvec.view(-1, 3)], dim=1)
         # light_mlp_input = torch.cat([view_dir.view(-1, 20), pe_input.view(-1, self.inp_size)], dim=1)
 
         light = self.light_mlp(light_mlp_input)

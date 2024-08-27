@@ -36,13 +36,15 @@ if torch.cuda.is_available() and devices >= 0:
     device = torch.device(f'cuda:{devices}')
 
 class DatasetLoader(Dataset):
-    def __init__(self, args, train_dir, sample_ratio, pre_load, train=False):
+    def __init__(self, args, train_dir, sample_ratio, pre_load, train=False, flip=False):
         self.train = train
         self.args = args
         self.train_dir = train_dir
         self.base_dir = args.working_dir / args.input_dir
         self.pre_load = pre_load
         self.subject = self.base_dir.stem
+
+        self.flip = flip
 
         self.fixed_cam = torch.load('./assets/fixed_cam.pt')
         
@@ -74,6 +76,8 @@ class DatasetLoader(Dataset):
         self.K[0, 2] = focal_cxcy[2] * self.resolution[0]
         self.K[1, 2] = focal_cxcy[3] * self.resolution[1]
 
+        self.shape_params = torch.tensor(json_data['shape_params']).float().unsqueeze(0)
+
         self.face_alignment = face_alignment.FaceAlignment(face_alignment.LandmarksType.THREE_D, flip_input=False, 
                                                             device='cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -96,12 +100,12 @@ class DatasetLoader(Dataset):
         if self.pre_load:
             self.all_images, self.all_masks, self.all_skin_mask, \
             self.all_camera, self.frames, self.all_landmarks,\
-            self.all_mp_landmarks, self.all_mp_blendshapes, self.all_mp_transform_matrix, self.all_normals = [], [], [], [], [], [], [], [], [], []
+            self.all_mp_landmarks, self.all_mp_blendshapes, self.all_mp_transform_matrix, self.all_normals, self.all_flame_expression = [], [], [], [], [], [], [], [], [], [], []
             
             print('loading all images from all_img_path')
             for i in tqdm(range(len(self.all_img_path))):
                 img, mask, skin_mask, camera, frame_name, landmark, \
-                    mp_landmark, mp_blendshape, mp_transform_matrix, normal = self._parse_frame_single(i)
+                    mp_landmark, mp_blendshape, mp_transform_matrix, normal, flame_expression = self._parse_frame_single(i)
                 self.all_images.append(img)
                 self.all_masks.append(mask)
                 self.all_skin_mask.append(skin_mask)
@@ -112,16 +116,49 @@ class DatasetLoader(Dataset):
                 self.all_mp_blendshapes.append(mp_blendshape)
                 self.all_mp_transform_matrix.append(mp_transform_matrix)
                 self.all_normals.append(normal)
+                self.all_flame_expression.append(flame_expression)
 
 
             self.len_img = len(self.all_images)    
             print("loaded {:d} views".format(self.len_img))
         else:
+            self.all_flame_expression = []
+            for i in range(len(self.all_img_path)):
+                self.all_flame_expression.append(self._parse_expression(i))
             self.loaded = {}
             self.loaded[True] = {}
             self.loaded[False] = {}
 
         self._compute_importance()
+
+
+    def get_mean_expression_train(self, train_dir):
+        all_expression = []
+        json_dict = {"frames": []}
+        for dir in train_dir: 
+            json_file = self.base_dir / dir / "merged_params.json"
+
+            with open(json_file, 'r') as f:
+                json_data = json.load(f)
+                for item in json_data["frames"]:
+                    # keep track of the subfolder
+                    item.update({"dir":dir})
+                json_dict["frames"].extend(json_data["frames"])    
+        for i in range(len(json_dict)):    
+            flame_expression = torch.tensor(json_dict["frames"][i]["expression"], dtype=torch.float32)
+            all_expression.append(flame_expression[None, ...])
+        return torch.mean(torch.cat(all_expression), 0, keepdim=True)
+
+    def get_mean_expression(self):
+        mean_expression = torch.mean(torch.cat(self.all_flame_expression), 0, keepdim=True)
+        return mean_expression
+        
+    def _parse_expression(self, idx):
+        json_dict = self.all_img_path[idx]
+        
+        flame_expression = torch.tensor(json_dict["expression"], dtype=torch.float32)
+        return flame_expression[None, ...] # Add batch dimension
+
 
     def get_camera_mat(self):
         '''
@@ -159,14 +196,15 @@ class DatasetLoader(Dataset):
             frame_name = self.frames[itr % self.len_img]
             landmark = self.all_landmarks[itr % self.len_img]
             normal = self.all_normals[itr % self.len_img]
+            flame_expression = self.all_flame_expression[itr % self.len_img]
         else:
             flip = False
-            # if self.train and torch.rand(1) > 0.5:
-                # flip = True
+            if self.flip and torch.rand(1) > 0.5:
+                flip = True
             local_itr = itr % self.len_img
             if local_itr not in self.loaded[flip]:
                 self.loaded[flip][local_itr] = self._parse_frame_single(local_itr, flip)
-            img, mask, skin_mask, camera, frame_name, landmark, mp_landmark, mp_blendshape, mp_transform_matrix, normal = self.loaded[flip][local_itr]
+            img, mask, skin_mask, camera, frame_name, landmark, mp_landmark, mp_blendshape, mp_transform_matrix, normal, flame_expression = self.loaded[flip][local_itr]
 
         # facs = (facs / self.facs_range).clamp(0, 1)
 
@@ -182,6 +220,7 @@ class DatasetLoader(Dataset):
             'mp_blendshape': mp_blendshape,
             'mp_transform_matrix': mp_transform_matrix,
             'normal': normal,
+            'flame_expression': flame_expression,
         }
 
 
@@ -222,6 +261,7 @@ class DatasetLoader(Dataset):
         
         mp_image = Image.open(img_path)
         if flip:
+            
             mp_image = mp_image.transpose(Image.FLIP_LEFT_RIGHT)
         
         # print(mp_image, mp_image.size, np.asarray(mp_image).shape, np.asarray(mp_image).dtype)  
@@ -232,6 +272,14 @@ class DatasetLoader(Dataset):
 
         # ignore frames where no face is detected, just re-route to the next frame
         if mp_landmark is None:
+            print(flip)
+            # save the mp_image, to debug folder 
+            mp_image = Image.open(img_path)
+            mp_image.save(f'./debug/no_face/{json_dict["dir"]}_{img_path.stem}_mp.png')
+            if flip:
+                mp_image = mp_image.transpose(Image.FLIP_LEFT_RIGHT)
+                mp_image.save(f'./debug/no_face/{json_dict["dir"]}_{img_path.stem}_mp_flip.png')
+            # raise ValueError('No face detected')
             return self._parse_frame_single(idx+1)
         
         # ================ semantics =======================
@@ -239,8 +287,6 @@ class DatasetLoader(Dataset):
         semantic_path = semantic_parent / (img_path.stem + ".png")
         semantic = _load_semantic(semantic_path)
     
-
-
         # ================ normal =======================
         normal_parent = img_path.parent.parent / "normal"
         normal_path = normal_parent / (img_path.stem + ".png")
@@ -254,7 +300,6 @@ class DatasetLoader(Dataset):
 
         # normal mask is zero where all normal values are zero
         normal_mask = (torch.sum(normal, dim=2) > 0).float()
-
 
         # concat normal_mask on semantic
         semantic = torch.cat([semantic, normal_mask[..., None]], dim=-1) # shape of 512, 512, 7
@@ -280,6 +325,9 @@ class DatasetLoader(Dataset):
             mask = torch.fliplr(mask)
             semantic = torch.fliplr(semantic)
             normal = torch.fliplr(normal)
+
+
+        flame_expression = torch.tensor(json_dict["expression"], dtype=torch.float32)
             
 
         # ================ flame and camera params =======================
@@ -300,10 +348,14 @@ class DatasetLoader(Dataset):
 
             if len(landmarks) == 0:
                 landmark = torch.zeros(68, 4)
+                raise ValueError('No face detected')
+                return self._parse_frame_single(idx+1)
             else:
                 landmark = torch.tensor(landmarks[0], dtype=torch.float32)
                 # print(torch.amin(landmark, dim=0), torch.amax(landmark, dim=0))
                 landmark = landmark / img.size(1)
+                if landmark.size(-1) == 3:
+                    landmark[..., 2] = landmark[..., 2] - torch.mean(landmark[..., 2], dim=0, keepdim=True)
                 score = torch.tensor(scores[0], dtype=torch.float32)
                 # print(landmark.shape, score.shape)
                 landmark = torch.cat([landmark, score[:, None]], dim=1).data
@@ -311,7 +363,7 @@ class DatasetLoader(Dataset):
 
         return img[None, ...], mask[None, ...], semantic[None, ...], \
                 camera, frame_name, landmark[None, ...], \
-                mp_landmark[None, ...], mp_blendshape[None, ...], mp_transform_matrix[None, ...], normal[None, ...]
+                mp_landmark[None, ...], mp_blendshape[None, ...], mp_transform_matrix[None, ...], normal[None, ...], flame_expression[None, ...]
                     # Add batch dimension
 
 from skimage import io

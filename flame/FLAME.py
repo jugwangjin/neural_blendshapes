@@ -38,6 +38,7 @@ class Struct(object):
     def __init__(self, **kwargs):
         for key, val in kwargs.items():
             setattr(self, key, val)
+            
 
 class FLAME(nn.Module):
     """
@@ -45,7 +46,7 @@ class FLAME(nn.Module):
     Given flame parameters this class generates a differentiable FLAME function
     which outputs the a mesh and 2D/3D facial landmarks
     """
-    def __init__(self, flame_model_path, n_shape, n_exp, shape_params, factor=4):
+    def __init__(self, flame_model_path, n_shape, n_exp, shape_params, factor=4, use_processed_faces=True):
         super(FLAME, self).__init__()
         print("creating the FLAME Decoder")
         with open(flame_model_path, 'rb') as f:
@@ -54,14 +55,20 @@ class FLAME(nn.Module):
 
         self.n_exp = n_exp
         self.dtype = torch.float32
-        _, faces, _ = load_obj(FLAME_MOUTH_MESH, load_textures=False)
-        self.register_buffer('faces_tensor', to_tensor(to_np(faces.verts_idx, dtype=np.int64), dtype=torch.long))
+        if use_processed_faces:
+            _, faces, _ = load_obj(FLAME_MOUTH_MESH, load_textures=False)
+            self.register_buffer('faces_tensor', to_tensor(to_np(faces.verts_idx, dtype=np.int64), dtype=torch.long))
+            self.register_buffer('faces_tensor_not_processed', to_tensor(to_np(flame_model.f, dtype=np.int64), dtype=torch.long))
+        else:
+            self.register_buffer('faces_tensor', to_tensor(to_np(flame_model.f, dtype=np.int64), dtype=torch.long))
+            # self.register_buffer('faces_tensor_not_processed', to_tensor(to_np(faces.verts_idx, dtype=np.int64), dtype=torch.long))
+
         self.register_buffer('v_template', to_tensor(to_np(flame_model.v_template) * factor, dtype=self.dtype))   
 
         # The shape components and expression
         shapedirs = to_tensor(to_np(flame_model.shapedirs), dtype=self.dtype)
         shape_blendshapes = shapedirs[:, :, :n_shape]
-        expression_blendshapes = shapedirs[:, :, 300:300+50]
+        expression_blendshapes = shapedirs[:, :, 300:300+n_exp]
         
         self.register_buffer('shapedirs_shape', shape_blendshapes * factor)
         self.register_buffer('shapedirs_expression', expression_blendshapes * factor)
@@ -81,6 +88,7 @@ class FLAME(nn.Module):
         parents = to_tensor(to_np(flame_model.kintree_table[0])).long(); parents[0] = -1
         self.register_buffer('parents', parents)
         self.register_buffer('lbs_weights', to_tensor(to_np(flame_model.weights), dtype=self.dtype))
+
         self.n_shape = n_shape
 
     # FLAME mesh morphing
@@ -159,3 +167,9 @@ class FLAME(nn.Module):
                     nearest_lbs_weights[idx_cloth, 0] = 1.0
 
         return nearest_shapedirs, nearest_posedirs, nearest_lbs_weights, flame_distances
+    
+    def c_pts_masked_to_indices(self, canonical_vertices, c_pts_masked):
+        _, idx_mouth_nearest, _ = ops.knn_points(c_pts_masked[0], canonical_vertices.unsqueeze(0), K=1, return_nn=True)
+        _, idx_cloth_nearest, _ = ops.knn_points(c_pts_masked[1], canonical_vertices.unsqueeze(0), K=1, return_nn=True)
+
+        return idx_mouth_nearest, idx_cloth_nearest
