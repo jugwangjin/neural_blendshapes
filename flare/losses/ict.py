@@ -57,7 +57,7 @@ def ict_loss(ict_facekit, return_dict, views_subset, neural_blendshapes, rendere
             random_facs[b, random_indices] = torch.rand_like(random_facs[b, random_indices])
         random_pose = torch.rand_like(random_facs) * torch.pi - HALF_PI
         random_features = torch.cat([random_facs[..., :53], random_pose[..., 53:]], dim=-1)
-    
+        
     random_ict = ict_facekit(expression_weights = random_features[..., :53], to_canonical = True)
     
     random_return_dict = neural_blendshapes(image_input=False, features=random_features)
