@@ -131,11 +131,12 @@ def main(args):
     # optimize ICT-FaceKit identity code
     # ================================================
 
-    flame_neutral_verts, _, _ = FLAMEServer(expression_params=torch.zeros(1, FLAMEServer.n_exp, device=device), full_pose=torch.zeros_like(FLAMEServer.canonical_pose))
+    flame_neutral_verts, _, _ = FLAMEServer(expression_params=torch.zeros(1, FLAMEServer.n_exp, device=device), full_pose=FLAMEServer.canonical_pose)
     flame_neutral_lmks = mesh_points_by_barycentric_coordinates(flame_neutral_verts[0].cpu().data.numpy(), FLAMEServer.faces_tensor.cpu().data.numpy(), lmk_face_idx, lmk_b_coords)
     flame_neutral_lmks = torch.from_numpy(np.array(flame_neutral_lmks).astype(np.float32)).to(device)
 
     idt_code = torch.nn.Parameter(torch.zeros(ICTmodel.num_identity).to(device))
+    jaw_open = torch.nn.Parameter(torch.zeros(1).to(device)+0.75)
 
     zero_exp = torch.zeros(ICTmodel.num_expression).to(device)
 
@@ -154,6 +155,7 @@ def main(args):
 
     idt_optimizer = torch.optim.AdamW([
         {'params': idt_code, 'lr': 1e-2},
+        {'params': jaw_open, 'lr': 1e-3},
         # {'params': [s, R, T], 'lr': 1e-4}
     ], weight_decay=1e-4)
 
@@ -163,8 +165,9 @@ def main(args):
         # purtube idt code and jaw weight until i == iteration//2
         # purturbation decreases as i increases
         # idt_code_p = idt_code + torch.randn_like(idt_code.data) * max(0, 1 - i/(iterations//3)) * 0.25
-
-        ict_mesh = ICTmodel(expression_weights=zero_exp[None], identity_weights=idt_code[None], to_canonical=False,)
+        exp = zero_exp.detach()
+        exp[ICTmodel.expression_names.tolist().index('jawOpen')] = jaw_open
+        ict_mesh = ICTmodel(expression_weights=exp[None], identity_weights=idt_code[None], to_canonical=False,)
         ict_lmk = ict_mesh[0, ICTmodel.landmark_indices][17:]
 
         ict_lmk_similarity_transform = ops.corresponding_points_alignment(ict_lmk[None], flame_neutral_lmks[None], estimate_scale=True)
@@ -195,8 +198,10 @@ def main(args):
         loss.backward()
         idt_optimizer.step()
     
+    exp = zero_exp.detach()
+    exp[ICTmodel.expression_names.tolist().index('jawOpen')] = jaw_open
     # save meshes at this point
-    ict_mesh = ICTmodel(expression_weights=zero_exp[None], identity_weights=idt_code[None], to_canonical=False,)
+    ict_mesh = ICTmodel(expression_weights=exp[None], identity_weights=idt_code[None], to_canonical=False,)
     ict_lmk = ict_mesh[0, ICTmodel.landmark_indices][17:]
 
     ict_lmk_similarity_transform = ops.corresponding_points_alignment(ict_lmk[None], flame_neutral_lmks[None], estimate_scale=True)

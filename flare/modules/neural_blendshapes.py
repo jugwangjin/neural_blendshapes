@@ -132,36 +132,36 @@ class NeuralBlendshapes(nn.Module):
             nn.Linear(self.inp_size + 3 + 53 + 3, 256),
             # nn.Linear(self.inp_size + 3 + 3 + 53, 256),
             # mygroupnorm(num_groups=4, num_channels=256),
-            nn.PReLU(),
+            nn.Softplus(),
             nn.Linear(256, 256),
             # mygroupnorm(num_groups=4, num_channels=256),
-            nn.PReLU(),
+            nn.Softplus(),
             nn.Linear(256, 256),
             # mygroupnorm(num_groups=4, num_channels=256),
-            nn.PReLU(),
+            nn.Softplus(),
             nn.Linear(256, 256),
             # mygroupnorm(num_groups=4, num_channels=256),
-            nn.PReLU(),
+            nn.Softplus(),
             nn.Linear(256, 53*3)
         )
 
-        # self.register_gradient_hooks()
+        self.register_gradient_hooks()
         
         
         # self.template_deformer = nn.Sequential(
         #     nn.Linear(self.inp_size + 3 , 128),
         #     # nn.Linear(self.inp_size + 3, 128),
         #     mygroupnorm(num_groups=4, num_channels=128),
-        #     nn.PReLU(),
+        #     nn.Softplus(),
         #     nn.Linear(128, 128),
         #     mygroupnorm(num_groups=4, num_channels=128),
-        #     nn.PReLU(),
+        #     nn.Softplus(),
         #     nn.Linear(128, 128),
         #     mygroupnorm(num_groups=4, num_channels=128),
-        #     nn.PReLU(),
+        #     nn.Softplus(),
         #     nn.Linear(128, 128),
         #     mygroupnorm(num_groups=4, num_channels=128),
-        #     nn.PReLU(),
+        #     nn.Softplus(),
         #     nn.Linear(128, 3)
         # )
         
@@ -171,15 +171,15 @@ class NeuralBlendshapes(nn.Module):
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
-                    nn.PReLU(),
+                    nn.Softplus(),
                     nn.Linear(32, 32),
-                    nn.PReLU(),
+                    nn.Softplus(),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
 
         # last layer to all zeros, to make zero deformation as the default            
-        initialize_weights(self.expression_deformer, gain=0.1)
+        initialize_weights(self.expression_deformer, gain=0.001)
         self.expression_deformer[-1].weight.data.zero_()
         self.expression_deformer[-1].bias.data.zero_()
 

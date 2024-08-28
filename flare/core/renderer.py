@@ -135,7 +135,22 @@ class Renderer:
         P_batch = gbuffers["P_batch"]
         return Renderer.transform_pos_batch(P_batch, vertices)
 
-    def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx, canonical_uv):
+
+    def get_vertices_clip_space_from_view(self, camera, vertices, resolution=(512, 512), n=None, f=None):
+        if n is None:
+            n = self.near
+        if f is None:
+            f = self.far
+
+        # batch_size = vertices.shape[0]
+
+        P_batch, Rt = Renderer.to_gl_camera_batch(camera, resolution, n=n, f=f)
+        deformed_vertices_clip_space = Renderer.transform_pos_batch(P_batch, vertices)
+
+        return deformed_vertices_clip_space
+
+
+    def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx, canonical_uv, deformed_vertices_clip_space=None):
         """ Render G-buffers from a set of views.
 
         Args:
@@ -147,7 +162,7 @@ class Renderer:
         P_batch, Rt = Renderer.to_gl_camera_batch(views, resolution, n=self.near, f=self.far)
 
         canonical_verts_batch = canonical_v.unsqueeze(0).repeat(batch_size, 1, 1)
-        deformed_vertices_clip_space = Renderer.transform_pos_batch(P_batch, deformed_vertices)
+        deformed_vertices_clip_space = Renderer.transform_pos_batch(P_batch, deformed_vertices) if deformed_vertices_clip_space is None else deformed_vertices_clip_space
         idx = canonical_idx.int()
         face_idx = deformed_normals["face_idx"].int()
         rast, rast_out_db = dr.rasterize(self.glctx, deformed_vertices_clip_space, idx, resolution=resolution)

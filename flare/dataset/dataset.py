@@ -45,4 +45,6 @@ class Dataset(torch.utils.data.Dataset):
             'mp_transform_matrix' : torch.cat(list([item['mp_transform_matrix'] for item in batch]), dim=0).to(device),
             'normal' : torch.cat(list([item['normal'] for item in batch]), dim=0).to(device),
             'flame_expression' : torch.cat(list([item['flame_expression'] for item in batch]), dim=0).to(device),
+            'flame_pose' : torch.cat(list([item['flame_pose'] for item in batch]), dim=0).to(device),
+            'flame_camera': list([item['flame_camera'] for item in batch]),
         }

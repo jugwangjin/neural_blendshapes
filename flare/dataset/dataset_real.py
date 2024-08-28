@@ -100,12 +100,13 @@ class DatasetLoader(Dataset):
         if self.pre_load:
             self.all_images, self.all_masks, self.all_skin_mask, \
             self.all_camera, self.frames, self.all_landmarks,\
-            self.all_mp_landmarks, self.all_mp_blendshapes, self.all_mp_transform_matrix, self.all_normals, self.all_flame_expression = [], [], [], [], [], [], [], [], [], [], []
+            self.all_mp_landmarks, self.all_mp_blendshapes, self.all_mp_transform_matrix, \
+            self.all_normals, self.all_flame_expression, self.all_flame_pose, self.all_flame_camera = [], [], [], [], [], [], [], [], [], [], [], [], []
             
             print('loading all images from all_img_path')
             for i in tqdm(range(len(self.all_img_path))):
                 img, mask, skin_mask, camera, frame_name, landmark, \
-                    mp_landmark, mp_blendshape, mp_transform_matrix, normal, flame_expression = self._parse_frame_single(i)
+                    mp_landmark, mp_blendshape, mp_transform_matrix, normal, flame_expression, flame_pose, flame_camera = self._parse_frame_single(i)
                 self.all_images.append(img)
                 self.all_masks.append(mask)
                 self.all_skin_mask.append(skin_mask)
@@ -117,6 +118,8 @@ class DatasetLoader(Dataset):
                 self.all_mp_transform_matrix.append(mp_transform_matrix)
                 self.all_normals.append(normal)
                 self.all_flame_expression.append(flame_expression)
+                self.all_flame_pose.append(flame_pose)
+                self.all_flame_camera.append(flame_camera)
 
 
             self.len_img = len(self.all_images)    
@@ -197,6 +200,8 @@ class DatasetLoader(Dataset):
             landmark = self.all_landmarks[itr % self.len_img]
             normal = self.all_normals[itr % self.len_img]
             flame_expression = self.all_flame_expression[itr % self.len_img]
+            flame_pose = self.all_flame_pose[itr % self.len_img]
+            flame_camera = self.all_flame_camera[itr % self.len_img]
         else:
             flip = False
             if self.flip and torch.rand(1) > 0.5:
@@ -204,7 +209,9 @@ class DatasetLoader(Dataset):
             local_itr = itr % self.len_img
             if local_itr not in self.loaded[flip]:
                 self.loaded[flip][local_itr] = self._parse_frame_single(local_itr, flip)
-            img, mask, skin_mask, camera, frame_name, landmark, mp_landmark, mp_blendshape, mp_transform_matrix, normal, flame_expression = self.loaded[flip][local_itr]
+            img, mask, skin_mask, camera, frame_name, landmark,\
+            mp_landmark, mp_blendshape, mp_transform_matrix, \
+            normal, flame_expression, flame_pose, flame_camera = self.loaded[flip][local_itr]
 
         # facs = (facs / self.facs_range).clamp(0, 1)
 
@@ -221,6 +228,8 @@ class DatasetLoader(Dataset):
             'mp_transform_matrix': mp_transform_matrix,
             'normal': normal,
             'flame_expression': flame_expression,
+            'flame_pose' : flame_pose,
+            'flame_camera': flame_camera
         }
 
 
@@ -327,12 +336,21 @@ class DatasetLoader(Dataset):
             normal = torch.fliplr(normal)
 
 
+        flame_pose = torch.tensor(json_dict["pose"], dtype=torch.float32)
         flame_expression = torch.tensor(json_dict["expression"], dtype=torch.float32)
             
 
         # ================ flame and camera params =======================
         # flame params
         camera = Camera(self.K, self.fixed_cam['R'], self.fixed_cam['t'], device=device)
+
+
+        world_mat = torch.tensor(_load_K_Rt_from_P(None, np.array(json_dict['world_mat']).astype(np.float32))[1], dtype=torch.float32)
+        # camera matrix to openGL format 
+        R = world_mat[:3, :3]
+        R *= -1 
+        t = world_mat[:3, 3]
+        flame_camera = Camera(self.K, R, t, device=device)
 
         # facs = torch.tensor(json_dict["facs"], dtype=torch.float32)
         # facs = torch.tensor(json_dict["facs"], dtype=torch.float32)
@@ -363,7 +381,8 @@ class DatasetLoader(Dataset):
 
         return img[None, ...], mask[None, ...], semantic[None, ...], \
                 camera, frame_name, landmark[None, ...], \
-                mp_landmark[None, ...], mp_blendshape[None, ...], mp_transform_matrix[None, ...], normal[None, ...], flame_expression[None, ...]
+                mp_landmark[None, ...], mp_blendshape[None, ...], mp_transform_matrix[None, ...], normal[None, ...], flame_expression[None, ...], flame_pose[None, ...], \
+                flame_camera
                     # Add batch dimension
 
 from skimage import io

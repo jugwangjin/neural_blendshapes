@@ -67,23 +67,25 @@ class ResnetEncoder(nn.Module):
         self.ict_facekit = ict_facekit
         self.tail = nn.Sequential(
                     nn.Linear(7 + 68*3 + 7, 256),
-                    nn.PReLU(),
+                    nn.Softplus(),
                     nn.Linear(256, 256),
-                    nn.PReLU(),
+                    nn.Softplus(),
                     nn.Linear(256, 256),
-                    nn.PReLU(),
+                    nn.Softplus(),
                     nn.Linear(256, 256),
-                    nn.PReLU(),
+                    nn.Softplus(),
                     nn.Linear(256, 9)
         )
         
         self.bshape_modulator = nn.Sequential(
                     nn.Linear(68*3 + 53, 256),
-                    nn.PReLU(),
+                    nn.Softplus(),
                     nn.Linear(256, 256),
-                    nn.PReLU(),
+                    nn.Softplus(),
                     nn.Linear(256, 256),
-                    nn.PReLU(),
+                    nn.Softplus(),
+                    nn.Linear(256, 256),
+                    nn.Softplus(),
                     nn.Linear(256, 53)
         )
 
@@ -130,9 +132,9 @@ class ResnetEncoder(nn.Module):
         self.modulation_activation = ModulationActivation()
         self.silu = nn.SiLU()
 
-        # self.register_buffer('identity_weights', torch.zeros(self.ict_facekit.num_identity, device='cuda'))
+        self.register_buffer('identity_weights', torch.zeros(self.ict_facekit.num_identity, device='cuda'))
         # self.identity_weights.register_hook(lambda grad: grad*0.25)
-        self.identity_weights = nn.Parameter(torch.zeros(self.ict_facekit.num_identity, device='cuda'))
+        # self.identity_weights = nn.Parameter(torch.zeros(self.ict_facekit.num_identity, device='cuda'))
         # self.identity_weights.register_hook(lambda grad: grad*0.25)
 
         
