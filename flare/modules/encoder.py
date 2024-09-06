@@ -67,33 +67,35 @@ class ResnetEncoder(nn.Module):
         self.ict_facekit = ict_facekit
         self.tail = nn.Sequential(
                     nn.Linear(7 + 68*3 + 7, 256),
-                    nn.Softplus(),
+                    mygroupnorm(num_groups=8, num_channels=256),
+                    nn.PReLU(),
                     nn.Linear(256, 256),
-                    nn.Softplus(),
+                    mygroupnorm(num_groups=8, num_channels=256),
+                    nn.PReLU(),
                     nn.Linear(256, 256),
-                    nn.Softplus(),
-                    nn.Linear(256, 256),
-                    nn.Softplus(),
+                    mygroupnorm(num_groups=8, num_channels=256),
+                    nn.PReLU(),
                     nn.Linear(256, 9)
         )
         
         self.bshape_modulator = nn.Sequential(
                     nn.Linear(68*3 + 53, 256),
-                    nn.Softplus(),
+                    mygroupnorm(num_groups=8, num_channels=256),
+                    nn.PReLU(),
                     nn.Linear(256, 256),
-                    nn.Softplus(),
+                    mygroupnorm(num_groups=8, num_channels=256),
+                    nn.PReLU(),
                     nn.Linear(256, 256),
-                    nn.Softplus(),
-                    nn.Linear(256, 256),
-                    nn.Softplus(),
+                    mygroupnorm(num_groups=8, num_channels=256),
+                    nn.PReLU(),
                     nn.Linear(256, 53)
         )
 
-        for layer in self.bshape_modulator:
-            if isinstance(layer, nn.Linear):
-                layer.weight.register_hook(lambda grad: grad * 0.1)
-                if layer.bias is not None:
-                    layer.bias.register_hook(lambda grad: grad * 0.1)
+        # for layer in self.bshape_modulator:
+        #     if isinstance(layer, nn.Linear):
+        #         layer.weight.register_hook(lambda grad: grad * 0.1)
+        #         if layer.bias is not None:
+        #             layer.bias.register_hook(lambda grad: grad * 0.1)
 
 
         initialize_weights(self.tail, gain=0.01)
@@ -116,8 +118,9 @@ class ResnetEncoder(nn.Module):
 
         # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.40, -0.20]))
         # self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
-        self.register_buffer('transform_origin', torch.tensor([0., -0.10, -0.30]))
-        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.10, -0.30]))
+        self.register_buffer('transform_origin', torch.tensor([0., -0.05, -0.25]))
+        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.05, -0.25]))
+        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.05, -0.25]))
         # self.transform_origin.data = torch.tensor([0., -0.40, -0.20])
         # self.register_buffer('transform_origin', torch.tensor([0., -0.40, -0.20]))
 
@@ -129,6 +132,8 @@ class ResnetEncoder(nn.Module):
 
         self.relu = nn.ReLU()
 
+        self.gelu = nn.GELU()
+
         self.modulation_activation = ModulationActivation()
         self.silu = nn.SiLU()
 
@@ -136,6 +141,8 @@ class ResnetEncoder(nn.Module):
         # self.identity_weights.register_hook(lambda grad: grad*0.25)
         # self.identity_weights = nn.Parameter(torch.zeros(self.ict_facekit.num_identity, device='cuda'))
         # self.identity_weights.register_hook(lambda grad: grad*0.25)
+
+        self.bshapes_multiplier = nn.Parameter(torch.zeros(53))
 
         
 
@@ -154,10 +161,13 @@ class ResnetEncoder(nn.Module):
 
             square_indices = [39, 42, 35, 31, 27, 33]
             fixed_square = detected_landmarks.reshape(-1, 68, 3)[:, square_indices, :3]
-            square_target = torch.tensor([[-0.1, -0.1, 0], [0.1, -0.1, 0], [0.1, 0.1, 0], [-0.1, 0.1, 0], [0, -0.1, 0], [0, 0.1, 0]], device='cuda')[None].repeat(detected_landmarks.shape[0], 1, 1)
+            square_target = torch.tensor([[-0.2, -0.2, 0], [0.2, -0.2, 0], [0.2, 0.2, 0], [-0.2, 0.2, 0], [0, -0.2, 0], [0, 0.2, 0]], device='cuda')[None].repeat(detected_landmarks.shape[0], 1, 1)
 
             alignment = p3do.corresponding_points_alignment(fixed_square, square_target, estimate_scale = True)
             aligned_landmarks = alignment.s[:, None, None] * torch.einsum('bdk, bkl->bdl', detected_landmarks.reshape(-1, 68, 3).clone().detach(), alignment.R) + alignment.T[:, None]
+
+            # print(torch.amin(aligned_landmarks.reshape(-1, 3), dim=0), torch.amax(aligned_landmarks.reshape(-1, 3), dim=0))
+            # print(torch.std(aligned_landmarks.reshape(-1, 3), dim=0), torch.mean(aligned_landmarks.reshape(-1, 3), dim=0))
 
             align_rotation = p3dt.matrix_to_euler_angles(alignment.R, convention='XYZ')
             align_info = torch.cat([alignment.s[:, None]*0, align_rotation, alignment.T], dim=-1)
@@ -174,16 +184,19 @@ class ResnetEncoder(nn.Module):
             translation[:, -1] += 28
             translation *= 0
 
+        # features = self.tail(torch.cat([rotation, translation, scale, align_info], dim=-1))
         features = self.tail(torch.cat([detected_landmarks, rotation, translation, scale, align_info], dim=-1))
         
         bshape_modulation = (self.bshape_modulator(torch.cat([blendshape, aligned_landmarks.reshape(-1, 68*3)], dim=-1)))
-        blendshape = blendshape + bshape_modulation
+        # blendshape = blendshape + bshape_modulation
+        # blendshape = blendshape * (1+self.gelu(self.bshapes_multiplier[None])) 
+        blendshape = blendshape * (1+self.gelu(self.bshapes_multiplier[None])) + bshape_modulation
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
         rotation = rotation + features[:, :3]
         translation = features[:, 3:6] 
-        # translation[..., -1] *= 0.1
+        translation[..., -1] *= 0.2
         before_translation = features[:, 6:9]
 
         out_features = torch.cat([blendshape, rotation, translation, scale, before_translation], dim=-1)

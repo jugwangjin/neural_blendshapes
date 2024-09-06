@@ -65,7 +65,7 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.model_config = model_dict['model_config']
 
         self.register_buffer('neutral_mesh', torch.tensor(neutral_mesh, dtype=torch.float32)[None])
-        self.register_buffer('uv_neutral_mesh', torch.tensor(uv_neutral_mesh, dtype=torch.float32)[None].clone().detach())
+        self.register_buffer('uv_neutral_mesh', uv_neutral_mesh[None].clone().detach())
 
 
         # print(torch.min(self.uv_neutral_mesh), torch.max(self.uv_neutral_mesh))

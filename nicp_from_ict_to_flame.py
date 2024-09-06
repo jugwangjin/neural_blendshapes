@@ -216,7 +216,7 @@ def main(args):
     # trimesh.registration.nricp_amberg(source_mesh, target_geometry, source_landmarks=None, target_positions=None, steps=None, distance_threshold=0.1, return_records=False, use_faces=True, use_vertex_normals=True, neighbors_count=8, face_pairs_type='vertex')
 
     # do same thing with trimesh.registration.nricp_amberg
-    registered_flame = trimesh.registration.nricp_amberg(source_mesh, target_geometry, source_landmarks, target_positions, steps=None, eps=0.0001, gamma=1, distance_threshold=0.1, return_records=False, use_faces=True, use_vertex_normals=True, neighbors_count=8)
+    registered_flame = trimesh.registration.nricp_amberg(source_mesh, target_geometry, source_landmarks, target_positions, steps=None, eps=0.00001, gamma=0.1, distance_threshold=0.1, return_records=False, use_faces=True, use_vertex_normals=True, neighbors_count=8)
     registered_flame_amberg = registered_flame
     # export it
     registered_flame_mesh = trimesh.Trimesh(vertices=registered_flame, faces=source_mesh.faces)
@@ -301,14 +301,62 @@ def main(args):
     # distance matrix
     difference = usable_vertices_ict[:, None] - usable_vertices_flame_[None]
     distance_matrix = torch.norm(difference, dim=-1)
-    
+
     # get (V) length of indices, as closest vertex indices
     closest_vertex_indices = torch.argmin(distance_matrix, dim=1)
+    flame_to_ict_closest_vertex_indices = torch.argmin(distance_matrix, dim=0)
     print(closest_vertex_indices)
     print(difference.shape, distance_matrix.shape, closest_vertex_indices.shape)
+
+
+    flame_closest_vertices = [[] for _ in range(usable_vertices_flame_.shape[0])]
+    for i in range(closest_vertex_indices.shape[0]):
+        flame_closest_vertices[closest_vertex_indices[i]].append(i) 
+    
+    closest_ict = []
+    closest_flame = []
+    num_non_empty = 0
+    # now make list of pair for non-empty flame_closest_vertices
+    for idx, li in enumerate(flame_closest_vertices):
+        if len(li) == 0:
+            continue
+        num_non_empty += 1
+        print(f"flame vertex {idx} is closest to ict vertices {li}")
+        # now find THE closest on in li 
+        min_dist = 1e9
+        min_idx = -1
+        for i in li:
+            dist = distance_matrix[i, idx]
+            # dist = torch.norm(usable_vertices_ict[i] - usable_vertices_flame[idx])
+            if dist < min_dist:
+                min_dist = dist
+                min_idx = i
+        closest_ict.append(min_idx)
+        closest_flame.append(idx)
+        print(f"flame vertex {idx} is closest to ict vertex {min_idx}")
+    # exit()
+    print(num_non_empty)
+    # to debug: save point cloud of each pair
+    flame_pcd = o3d.geometry.PointCloud()
+    flame_pcd.points = o3d.utility.Vector3dVector(usable_vertices_flame[closest_flame])
+    flame_pcd.colors = o3d.utility.Vector3dVector(np.array([[0.0, 0.0, 0.99] for _ in range(len(usable_vertices_flame))]))   
+    o3d.io.write_point_cloud('debug/flame_closest.ply', flame_pcd)
+
+    ict_pcd = o3d.geometry.PointCloud()
+    ict_pcd.points = o3d.utility.Vector3dVector(usable_vertices_ict[closest_ict].cpu().data.numpy())
+    ict_pcd.colors = o3d.utility.Vector3dVector(np.array([[0.0, 0.99, 0.0] for _ in range(len(usable_vertices_ict))]))
+    o3d.io.write_point_cloud('debug/ict_closest.ply', ict_pcd)
+
+
+
     usable_vertices_ict = usable_vertices_ict.cpu().data.numpy()
     usable_vertices_flame = usable_vertices_flame
     closest_vertex_indices = closest_vertex_indices.cpu().data.numpy()
+
+
+
+
+    
 
     # let's visualize this closest vertices. 
     # use o3d.geometry.LineSet
@@ -324,7 +372,16 @@ def main(args):
 
     # save the closest vertex indices as npy file 
     np.save('assets/ict_to_flame_closest_indices.npy', closest_vertex_indices)
+    # np.save('assets/flame_to_ict_closest_indices.npy', flame_to_ict_closest_vertex_indices.cpu().data.numpy())
+    closest_pair = np.array([closest_ict, closest_flame])
+    print(closest_pair[0])
+    print(closest_pair[1])
+    np.save('assets/ict_to_flame_closest_pair.npy', closest_pair)
+
     
+    # same thing for flame_to_ict_closest_indices.npy
+    
+
     # for every pair, there are overraping vertices in usable_vertices_flame. 
     # I want it to be unique, filter it by the closest pair .
 

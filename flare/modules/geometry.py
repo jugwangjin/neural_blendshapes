@@ -89,6 +89,21 @@ def laplacian_uniform(verts, faces):
     idx = torch.cat((adj, torch.stack((diag_idx, diag_idx), dim=0)), dim=1)
     values = torch.cat((-adj_values, adj_values))
 
+    
+    # L = torch.sparse_coo_tensor(idx, values, (V,V)).coalesce()
+    # L = L.to_dense()
+    # # how do I test if the matrix is symmetric?
+    # print(torch.allclose(L, L.t()))
+    # # how do I test the matrix is a proper laplacian matrix?
+    # print(torch.allclose(torch.sum(L, dim=-1), torch.zeros(V, device='cuda')))
+
+    # exit()
+
+    # print(torch.sparse_coo_tensor(idx, values, (V,V)).coalesce().sum(-1).to_dense())
+    # print(torch.sparse_coo_tensor(idx, values, (V,V)).coalesce().sum(-1).to_dense().abs().sum())
+    # exit()
+
+
     # The coalesce operation sums the duplicate indices, resulting in the
     # correct diagonal
     return torch.sparse_coo_tensor(idx, values, (V,V)).coalesce()
@@ -138,6 +153,21 @@ def laplacian_density(verts, faces):
     indices = torch.arange(V, device='cuda')
     idx = torch.stack([indices, indices], dim=0)
     L = torch.sparse_coo_tensor(idx, vals, (V, V)).coalesce() - L
+
+    # print(L.sum(-1).to_dense())
+    # print(L.sum(-1).to_dense().abs().sum())
+    # print(torch.allclose(L.to_dense(), L.to_dense().t()))
+    # exit()
+
+
+    # L = L.to_dense()
+    # # how do I test if the matrix is symmetric?
+    # print(torch.allclose(L, L.t()))
+    # # how do I test the matrix is a proper laplacian matrix?
+    # print(torch.allclose(torch.sum(L, dim=-1), torch.zeros(V, device='cuda')))
+
+    # exit()
+
     return L
 
 

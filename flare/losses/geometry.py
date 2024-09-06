@@ -81,7 +81,7 @@ def laplacian_loss_given_lap(mesh: Mesh, L, vertices, head_index=11248):
     return loss.mean()
 
 
-def laplacian_loss_two_meshes(mesh, vertices1, vertices2, L, head_index=11248):
+def laplacian_loss_two_meshes(mesh, vertices1, vertices2, L, head_index=14062):
     """ Compute the Laplacian term as the mean squared Euclidean norm of the differential coordinates.
 
     Args:
@@ -144,7 +144,7 @@ def laplacian_loss_single_mesh(mesh, vertices1):
     return torch.stack(total_loss).mean()
 
 
-def normal_reg_loss(mesh, mesh1, mesh2, head_index=11248):
+def normal_reg_loss(mesh, mesh1, mesh2, head_index=14062):
     loss = 1 - torch.cosine_similarity(mesh1.vertex_normals[:head_index], mesh2.vertex_normals[:head_index], dim=-1)
     loss = loss**2
     loss = loss.mean()

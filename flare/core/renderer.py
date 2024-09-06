@@ -244,7 +244,6 @@ class Renderer:
             # gbuffer['narrow_face'] = segmentation
 
 
-
         uv_coordinates, _ = dr.interpolate(canonical_uv, rast, idx, rast_db=rast_out_db, diff_attrs='all')
         gbuffer["uv_coordinates"] = dr.antialias(uv_coordinates, rast, deformed_vertices_clip_space, idx) if with_antialiasing else uv_coordinates
 
