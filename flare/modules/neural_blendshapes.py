@@ -159,8 +159,8 @@ class NeuralBlendshapes(nn.Module):
         if self.include_identity_on_encoding:
             self.inp_size += 3
 
-        # self.gradient_scaling = 128.
-        # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+        self.gradient_scaling = 128.
+        self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
         # self.inp_size = self.fourier_feature_transform.n_output_dims
 
         # print(self.inp_size)

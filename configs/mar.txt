@@ -38,7 +38,7 @@ weight_closure = 5
 weight_segmentation = 1e-0
 weight_semantic_stat = 1e-0
 
-weight_flame_regularization = 10
+weight_flame_regularization = 3
 
 
 

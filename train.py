@@ -207,7 +207,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
 
     neural_blendshapes = neural_blendshapes.to(device)
-    
+
     neural_blendshapes_params = list(neural_blendshapes.parameters())
     neural_blendshapes_expression_params = list(neural_blendshapes.expression_deformer.parameters())
     neural_blendshapes_template_params = list(neural_blendshapes.template_deformer.parameters())
@@ -322,7 +322,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             
     epochs = 5 if 'debug' not in run_name else 0
-    epochs = 5 
+    epochs = 2
     progress_bar = tqdm(range(epochs))
     start = time.time()
 
@@ -371,9 +371,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 # if pretrain:
             flame_loss = (ict_mesh_w_temp_vertices_on_clip_space[:, ict_pair_indices] - ict_gt)
 
-            flame_loss = flame_loss.pow(2).mean()
+            flame_loss = flame_loss.abs().mean()
 
-            flame_loss = flame_loss * 10
+            flame_loss = flame_loss * 2
             
             # print(ict_mesh_w_temp_vertices_on_clip_space.shape)
             # print(ict_mesh_w_temp_vertices_on_clip_space.dtype)
@@ -467,8 +467,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             
             if args.grad_scale and args.fourier_features == "hashgrid":
                 shader.fourier_feature_transform.params.grad /= 8.0
-            torch.nn.utils.clip_grad_norm_(shader.parameters(), 1.0)
-            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(shader.parameters(), 5.0)
+            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 5.0)
             
             optimizer_neural_blendshapes.step()
             scheduler_neural_blendshapes.step()
@@ -476,8 +476,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             optimizer_shader.step()
             scheduler_shader.step()
-
-            # print(neural_blendshapes.encoder.bshapes_multiplier)
 
             torch.cuda.empty_cache()
 
@@ -703,14 +701,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 if not pretrain:
                     flame_loss += (expression_gbuffers['deformed_verts_clip_space'][:, ict_pair_indices] - ict_gt)
                 if flame_loss_full_head:
-                    flame_loss = flame_loss.pow(2).mean()
+                    flame_loss = flame_loss.abs().mean()
                 else:
-                    flame_loss = flame_loss[:, :tight_face_index].pow(2).mean()
+                    flame_loss = flame_loss[:, :tight_face_index].abs().mean()
             else:
                 flame_loss = torch.tensor(0., device=device)
 
             if super_flame:
-                flame_loss = flame_loss * 1e1
+                flame_loss = flame_loss * 2
 
             losses['laplacian_regularization'] = template_mesh_laplacian_regularization + expression_mesh_laplacian_regularization 
             losses['normal_regularization'] = template_mesh_normal_regularization 
@@ -831,8 +829,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             
             if args.grad_scale and args.fourier_features == "hashgrid":
                 shader.fourier_feature_transform.params.grad /= 8.0
-            torch.nn.utils.clip_grad_norm_(shader.parameters(), 1.0)
-            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(shader.parameters(), 5.0)
+            torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), 5.0)
             
 
             # print(neural_blendshapes.expression_deformer[-1].weight.grad)

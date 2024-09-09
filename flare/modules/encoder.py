@@ -190,7 +190,7 @@ class ResnetEncoder(nn.Module):
         bshape_modulation = (self.bshape_modulator(torch.cat([blendshape, aligned_landmarks.reshape(-1, 68*3)], dim=-1)))
         # blendshape = blendshape + bshape_modulation
         # blendshape = blendshape * (1+self.gelu(self.bshapes_multiplier[None])) 
-        blendshape = blendshape * (1+self.gelu(self.bshapes_multiplier[None])) + bshape_modulation
+        blendshape = blendshape * (1+self.softplus(self.bshapes_multiplier[None])) + bshape_modulation
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
