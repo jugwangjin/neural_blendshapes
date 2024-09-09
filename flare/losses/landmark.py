@@ -19,7 +19,7 @@ def closure_loss_block(gt, estimated, pairs):
     closure_loss = ((estimated_closure - gt_closure).pow(2) * confidence).mean()
     return closure_loss
 
-def landmark_loss(ict_facekit, gbuffers, views_subset, use_jaw, device):
+def landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device):
     """
     Calculates the landmark loss by comparing the detected landmarks with the deformed landmarks.
 

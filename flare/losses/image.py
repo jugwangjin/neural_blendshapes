@@ -88,7 +88,7 @@ def image_loss_fn(img, target):
     return out, img, target
 
 
-def mask_loss(masks, gbuffers, loss_function = torch.nn.MSELoss()):
+def mask_loss_function(masks, gbuffers, loss_function = torch.nn.MSELoss()):
     """ Compute the mask term as the mean difference between the original masks and the rendered masks.
     
     Args:

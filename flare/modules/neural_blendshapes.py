@@ -217,9 +217,9 @@ class NeuralBlendshapes(nn.Module):
         )
 
         # last layer to all zeros, to make zero deformation as the default            
-        # initialize_weights(self.expression_deformer, gain=0.01)
-        # self.expression_deformer[-1].weight.data.zero_()
-        # self.expression_deformer[-1].bias.data.zero_()
+        initialize_weights(self.expression_deformer, gain=0.01)
+        self.expression_deformer[-1].weight.data.zero_()
+        self.expression_deformer[-1].bias.data.zero_()
 
         # initialize_weights(self.template_deformer, gain=0.01)
         # self.template_deformer[-1].weight.data.zero_()

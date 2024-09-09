@@ -54,8 +54,73 @@ def normal_loss(gbuffers, views_subset, gbuffer_mask, device):
 
     # normal_loss = torch.sum(torch.pow(gt_normal - estimated_normal, 2) * mask) / (num_valid_pixel + 1e-6)
     # normal_loss = torch.sum(torch.abs(gt_normal - estimated_normal) * mask) / (num_valid_pixel + 1e-6)
-    normal_laplacian_loss = torch.sum(torch.pow(gt_normal_laplacian - estimated_normal_laplacian, 2) * mask) / (num_valid_pixel + 1e-6)
+    normal_laplacian_loss = torch.mean(torch.pow(gt_normal_laplacian - estimated_normal_laplacian, 2) * mask)
     # normal_laplacian_loss = torch.sum(torch.abs(gt_normal_laplacian - estimated_normal_laplacian) * mask) / (num_valid_pixel + 1e-6)
 
     return normal_laplacian_loss 
     # return normal_loss, normal_laplacian_loss 
+
+
+def inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
+    # get camera space normal
+    camera = views_subset["camera"] # list of cameras.
+
+    position = gbuffers["position"]
+    normal = gbuffers["normal"] # shape of B, H, W, 3
+
+    # camera space normal
+    camera = torch.stack([c.R.T for c in camera], dim=0).to(device)
+    R = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], device=device, dtype=torch.float32)
+
+    normal = torch.einsum('bhwc, cj->bhwj', torch.einsum('bhwc, bcj->bhwj', normal, camera), R.T) # shape of B, H, W, 3
+
+    # for where z negative
+    # deformed_verts_clip_space should move to its world coordinate normal direction 
+    with torch.no_grad():
+        mask = (normal[..., 2] < -1e-2).float()
+        mask = mask[..., None] * gbuffer_mask
+        target_position = position + gbuffers["normal"] * 0.05
+
+    loss = torch.mean(torch.abs(position - target_position) * mask)
+    return loss
+
+    # save z component
+    import cv2
+    normal_ = (normal[..., 2] * 2).clamp(0)
+    normal_ = normal_.cpu().data.numpy()
+    normal_ = normal_ * 127
+    normal_ = normal_.astype("uint8")
+    for i in range(normal_.shape[0]):
+        cv2.imwrite(f"debug/normal_{i}_axis_2.png", normal_[i])
+
+    normal_ = (normal[..., 1] * 2).clamp(0)
+    normal_ = normal_.cpu().data.numpy()
+    normal_ = normal_ * 127
+    normal_ = normal_.astype("uint8")
+    for i in range(normal_.shape[0]):
+        cv2.imwrite(f"debug/normal_{i}_axis_1.png", normal_[i])
+
+    normal_ = (normal[..., 0] * 2).clamp(0)
+    normal_ = normal_.cpu().data.numpy()
+    normal_ = normal_ * 127
+    normal_ = normal_.astype("uint8")
+    for i in range(normal_.shape[0]):
+        cv2.imwrite(f"debug/normal_{i}_axis_0.png", normal_[i])
+    
+    normal_ = normal * 0.5 + 0.5
+    normal_ = normal_.cpu().data.numpy()
+    normal_ = normal_ * 255
+    normal_ = normal_.astype("uint8")
+    for i in range(normal_.shape[0]):
+        cv2.imwrite(f"debug/normal_{i}_rgb.png", normal_[i])
+
+    normal_ = gbuffers["normal"]
+    normal_ = normal_ * 0.5 + 0.5
+    normal_ = normal_.cpu().data.numpy()
+    normal_ = normal_ * 255
+    normal_ = normal_.astype("uint8")
+    for i in range(normal_.shape[0]):
+        cv2.imwrite(f"debug/normal_{i}_rgb_world.png", normal_[i])
+
+
+    exit()

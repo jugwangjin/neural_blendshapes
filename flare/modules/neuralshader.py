@@ -123,12 +123,13 @@ class NeuralShader(torch.nn.Module):
         kr_max = kr_max.to(self.device)                    
 
         wo = util.safe_normalize(view_dir - deformed_position)
-        reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
+        # reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
         # view_dir = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
         # view_dir = self.dir_enc_func(wo.view(-1, 3), kr_max.view(-1, 1))
         # view_dir = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
         normal_bend = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
-        reflvec = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
+        # reflvec = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
+        view_dir = self.dir_enc_func(wo.view(-1, 3), kr_max.view(-1, 1))
 
         # print(normal_bend.shape, reflvec.shape, uv_coordinates.shape)
         # exit()
@@ -138,7 +139,7 @@ class NeuralShader(torch.nn.Module):
         diffuse = material[..., :3]
         specular = material[..., 3:6]
         
-        light_mlp_input = torch.cat([uv_coordinates.view(-1, 3), normal_bend, reflvec], dim=1)
+        light_mlp_input = torch.cat([uv_coordinates.view(-1, 3), normal_bend, view_dir], dim=1)
         # light_mlp_input = torch.cat([uv_coordinates.view(-1, 3), normal_bend.view(-1, 3), reflvec.view(-1, 3)], dim=1)
         # light_mlp_input = torch.cat([view_dir.view(-1, 20), pe_input.view(-1, self.inp_size)], dim=1)
 
