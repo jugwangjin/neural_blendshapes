@@ -62,9 +62,41 @@ from flare.utils.ict_model import ICTFaceKitTorch
 import open3d as o3d
 import cv2
 
+import hashlib
+
 
 import matplotlib.pyplot as plt
 # from flare.modules.optimizer import torch.optim.Adam
+import sys
+
+
+def hash_file(file_path):
+    hasher = hashlib.sha256()
+    with open(file_path, 'rb') as f:
+        buf = f.read()
+        hasher.update(buf)
+    return hasher.hexdigest()
+
+def hash_directory(directory):
+    hashes = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            # if not ends with .py, skip
+            if not file.endswith('.py'):
+                continue
+            file_path = os.path.join(root, file)
+            file_hash = hash_file(file_path)
+            hashes.append(file_hash)
+    combined_hash = hashlib.sha256(''.join(hashes).encode()).hexdigest()
+    return combined_hash
+
+def hash_arguments(arguments):
+    hasher = hashlib.sha256()
+    for arg in arguments:
+        hasher.update(arg.encode())
+    return hasher.hexdigest()
+
+
 
 def compute_laplacian_uniform_filtered(mesh, head_index=11248):
     """
@@ -130,10 +162,23 @@ def compute_laplacian_uniform_filtered(mesh, head_index=11248):
 
 
 def main(args, device, dataset_train, dataloader_train, debug_views):
+
+
     ## ============== Dir ==============================
     run_name = args.run_name if args.run_name is not None else args.input_dir.parent.name
     images_save_path, images_eval_save_path, meshes_save_path, shaders_save_path, experiment_dir = make_dirs(args, run_name, args.finetune_color)
     copy_sources(args, run_name)
+
+    project_directory = os.getcwd()
+
+    print("Project Directory:", project_directory)
+    print("start hashing directory")
+    directory_hash = hash_directory(project_directory)
+    print("start hashing arguments")
+    arguments_hash = hash_arguments(sys.argv)
+    print("hashing done")
+    final_hash = hashlib.sha256((directory_hash + arguments_hash).encode()).hexdigest()
+
 
     ## =================== Load FLAME ==============================
     flame_path = args.working_dir / 'flame/FLAME2020/generic_model.pkl'
@@ -238,7 +283,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "material_mlp_ch": args.material_mlp_ch,
         "light_mlp_ch":args.light_mlp_ch,
         "material_mlp_dims":args.material_mlp_dims,
-        "light_mlp_dims":args.light_mlp_dims
+        "light_mlp_dims":args.light_mlp_dims,
+        "brdf_mlp_dims": args.brdf_mlp_dims,
+
     }
 
     # Create the optimizer for the neural shader
@@ -274,14 +321,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "landmark": args.weight_landmark,
         "closure": args.weight_closure,
         "feature_regularization": args.weight_feature_regularization,
-        # "segmentation": args.weight_segmentation,
         "geometric_regularization": args.weight_geometric_regularization,
-        # "semantic_stat": args.weight_semantic_stat,
         "normal_laplacian": args.weight_normal_laplacian,
-        "material_regularization": 1e-3,
         "linearity_regularization": 1e-1,
         "identity_weight_regularization": 1e-3,
         "flame_regularization": args.weight_flame_regularization,
+        "white_lgt_regularization": args.weight_white_lgt_regularization,
+        "roughness_regularization": args.weight_roughness_regularization,
+        "fresnel_coeff": args.weight_fresnel_coeff,
     }
 
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
@@ -524,9 +571,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             if iteration == args.iterations // 3:
                 
                 optimizer_neural_blendshapes = torch.optim.Adam([
-                                                                {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian * 2e-1},
+                                                                {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                                 {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
-                                                                {'params': neural_blendshapes_pe, 'lr': args.lr_deformer * 1e1}
+                                                                {'params': neural_blendshapes_pe, 'lr': args.lr_deformer}
                                                                 ],
                                                                 # ], betas=(0.05, 0.1)
                                                                 )
@@ -566,7 +613,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # no_flame loss after two-third of args.iterations.
 
             flame_loss_full_head = iteration < args.iterations // 5
-            no_flame_loss = iteration > args.iterations // 2
+            no_flame_loss = iteration > 3 * (args.iterations // 5)
 
             use_jaw = True
             # use_jaw = iteration < args.iterations // 20
@@ -591,8 +638,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             shading_loss, pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
             perceptual_loss = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
 
-            specular = cbuffers['material'][..., 3:]
-            losses['material_regularization'] = (1 - specular).pow(2).mean()
+            white_light_loss = white_light_regularization(cbuffers['light'])
+            roughness_loss = material_regularization_function(cbuffers['material'][..., 3], views_subset['skin_mask'], gbuffer_mask, roughness=True)
+            specular_loss = material_regularization_function(cbuffers['material'][..., 4], views_subset['skin_mask'], gbuffer_mask, specular=True)
+
 
             normal_laplacian_loss = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
             inverted_normal_loss = inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
@@ -601,6 +650,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # regularizations
             # 1. laplacian regularization - every output mesh should have smooth mesh. using laplacian_loss_given_lap
             template_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, ict_facekit.neutral_mesh_canonical[0], return_dict['template_mesh'], filtered_lap, head_index =socket_index) 
+            expression_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, return_dict['ict_mesh_w_temp'], return_dict['expression_mesh'], filtered_lap, head_index =socket_index) if not pretrain else torch.tensor(0., device=device)
 
             # 2. normal regularization - template mesh should have similar normal with canonical mesh. using normal_reg_loss
             template_mesh_normal_regularization = normal_reg_loss(mesh, ict_canonical_mesh, ict_canonical_mesh.with_vertices(return_dict['template_mesh']), head_index =socket_index)
@@ -609,12 +659,19 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
                                                                 neural_blendshapes, facs_weight=0)
 
-            random_blendshapes = torch.rand(views_subset['mp_blendshape'].shape[0], 53, device=device)
+            random_blendshapes = torch.rand(views_subset['mp_blendshape'].shape[0], 2, 53, device=device)
+            random_blendshapes = torch.cat([random_blendshapes[:, 0:1], torch.mean(random_blendshapes, dim=1, keepdim=True), random_blendshapes[:, 1:2]], dim=1)
+            random_blendshapes = random_blendshapes.reshape(-1, 53)
+            
             expression_delta_random = neural_blendshapes.get_expression_delta(blendshapes=random_blendshapes)
 
-            l1_regularization = expression_delta_random.abs().mean() * 1e-4
+            expression_delta_random = expression_delta_random.reshape(views_subset['mp_blendshape'].shape[0], 3, expression_delta_random.shape[1], 3)
 
-            template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean() * 1e1
+            linearity_regularization = (expression_delta_random[:, 0] + expression_delta_random[:, 2] - 2 * expression_delta_random[:, 1]).abs().mean() * 1e-6
+
+            l1_regularization = expression_delta_random.abs().mean() * 1e-6
+
+            template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
             if not pretrain:
                 expression_geometric_regularization = (return_dict['ict_mesh_w_temp'].detach() - return_dict['expression_mesh']).pow(2).mean() 
             else:
@@ -637,7 +694,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             if super_flame:
                 flame_loss = flame_loss * 2
 
-            losses['laplacian_regularization'] = template_mesh_laplacian_regularization
+            losses['laplacian_regularization'] = template_mesh_laplacian_regularization + expression_mesh_laplacian_regularization
             losses['normal_regularization'] = template_mesh_normal_regularization
             losses['feature_regularization'] = feature_regularization
             losses['geometric_regularization'] = template_geometric_regularization + expression_geometric_regularization 
@@ -647,12 +704,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['closure'] += closure_loss
             losses['flame_regularization'] = flame_loss
             losses['normal_laplacian'] = normal_laplacian_loss + inverted_normal_loss
-            
 
             losses['shading'] = shading_loss
             losses['perceptual_loss'] = perceptual_loss
 
-            losses['linearity_regularization'] = l1_regularization
+            losses['linearity_regularization'] = l1_regularization + linearity_regularization
+
+            losses['white_lgt_regularization'] = white_light_loss
+            losses['roughness_regularization'] = roughness_loss
+            losses['fresnel_coeff'] = specular_loss
 
             decay_keys = ['mask', 'landmark', 'closure']
             

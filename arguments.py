@@ -85,6 +85,7 @@ def config_parser():
     parser.add_argument('--light_mlp_ch', type=int, default=3, help="channels for light MLP")
     parser.add_argument('--light_mlp_dims', type=int, nargs='+', default=[64, 64], help="Views to use for visualization. By default, a random view is selected each time")
     parser.add_argument('--material_mlp_dims', type=int, nargs='+', default=[128, 128, 128, 128], help="Views to use for visualization. By default, a random view is selected each time")
+    parser.add_argument('--brdf_mlp_dims', type=int, nargs='+', default=[128, 128, 128, 128], help="Views to use for visualization. By default, a random view is selected each time")
     parser.add_argument('--material_mlp_ch', type=int, default=3, help="channels for material MLP")   
 
     parser.add_argument('--train_deformer', action='store_true', help="mlp for vertex displacements")

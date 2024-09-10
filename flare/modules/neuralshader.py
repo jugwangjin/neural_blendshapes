@@ -101,15 +101,19 @@ class NeuralShader(torch.nn.Module):
         # create MLP
         # ==============================================================================================
         # self.material_mlp_ch = disentangle_network_params['material_mlp_ch']
-        self.material_mlp_ch = 6 # diffuse 3 and roughness 1
+        self.material_mlp_ch = 5 # diffuse 3 and roughness 1
         self.material_mlp = FC(self.inp_size, self.material_mlp_ch, self.disentangle_network_params["material_mlp_dims"], self.activation, self.last_activation).to(self.device) #sigmoid
         
+        self.brdf_mlp = FC(self.inp_size + 20 + 20, 3, self.disentangle_network_params["brdf_mlp_dims"], self.activation, self.last_activation).to(self.device) # inp size for coords, 20 for normal and reflvec
+
         if fourier_features == "hashgrid":
             self.gradient_scaling = 128.0
             self.material_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
 
-        self.light_mlp = FC(20+20+3, 1, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) 
+        self.light_mlp = FC(20, 3, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) # reflvec / normal for input
 
+
+        # Need: coords, normal, reflvec
     def forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None):
         bz, h, w, ch = position.shape
         uv_coordinates = gbuffer["uv_coordinates"]
@@ -123,33 +127,28 @@ class NeuralShader(torch.nn.Module):
         kr_max = kr_max.to(self.device)                    
 
         wo = util.safe_normalize(view_dir - deformed_position)
-        # reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
-        # view_dir = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
-        # view_dir = self.dir_enc_func(wo.view(-1, 3), kr_max.view(-1, 1))
-        # view_dir = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
-        normal_bend = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
-        # reflvec = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
-        view_dir = self.dir_enc_func(wo.view(-1, 3), kr_max.view(-1, 1))
-
-        # print(normal_bend.shape, reflvec.shape, uv_coordinates.shape)
-        # exit()
-
-        material = self.material_mlp(pe_input.view(-1, self.inp_size).to(torch.float32)) 
-
-        diffuse = material[..., :3]
-        specular = material[..., 3:6]
+        reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
         
-        light_mlp_input = torch.cat([uv_coordinates.view(-1, 3), normal_bend, view_dir], dim=1)
-        # light_mlp_input = torch.cat([uv_coordinates.view(-1, 3), normal_bend.view(-1, 3), reflvec.view(-1, 3)], dim=1)
-        # light_mlp_input = torch.cat([view_dir.view(-1, 20), pe_input.view(-1, self.inp_size)], dim=1)
+        material = self.material_mlp(pe_input.view(-1, self.inp_size).to(torch.float32)) 
+        diffuse = material[..., :3]
+        roughness = material[..., 3:4]
+        specular_intensity = material[..., 4:5]
 
-        light = self.light_mlp(light_mlp_input)
+        diffuse_light_input = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
+        diffuse_light = self.light_mlp(diffuse_light_input)
 
-        specular = light * specular
+        specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), roughness.view(-1, 1))
+        specular_light = self.light_mlp(specular_light_input)
 
-        color = diffuse + specular
+        brdf_light_input = self.dir_enc_func(normal_bend.view(-1, 3), roughness.view(-1, 1))
 
-        return color, material, light
+        brdf = self.brdf_mlp(torch.cat([pe_input.view(-1, self.inp_size), brdf_light_input, specular_light_input], dim=1))
+
+        color = diffuse * diffuse_light + specular_intensity * brdf * specular_light
+
+        lights = torch.cat([diffuse_light, specular_light, brdf], dim=1)
+
+        return color, material, lights
 
     def get_mask(self, gbuffer, views, mesh, finetune_color, lgt):
         

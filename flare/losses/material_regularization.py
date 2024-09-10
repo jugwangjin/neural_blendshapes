@@ -24,6 +24,25 @@ def safe_normalize(x: torch.Tensor, eps: float =1e-20) -> torch.Tensor:
     return x / length(x, eps)
 
 
+def white_light_regularization(lights):
+    diffuse_shading = lights[..., :3]
+
+    return (diffuse_shading - diffuse_shading.mean(dim=-1, keepdim=True)).abs().mean()
+
+def material_regularization_function(values, semantic, mask, specular=False, roughness=False):
+    assert specular or roughness, "At least one of specular or roughness should be True"
+    skin_mask = ((semantic[..., 2] * mask[..., 0]) > 0.0).int().bool()
+    skin_mask = skin_mask.view(-1)
+    values_skin = values[skin_mask]
+    mean = 0.3753 if specular else 0.5
+    std = 0.1655 if specular else 0.1
+
+    z_score = (values_skin - mean) / std
+
+    loss = torch.mean(torch.max(torch.zeros_like(z_score), (torch.abs(z_score) - 2)))
+    return loss
+
+
 def cbuffers_regularization(cbuffers):
     material = cbuffers["material"]
     light = cbuffers["light"]

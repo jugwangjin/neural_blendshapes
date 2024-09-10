@@ -151,15 +151,24 @@ class NeuralBlendshapes(nn.Module):
         self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to('cuda')
         self.inp_size = self.fourier_feature_transform.n_output_dims
 
+        # print("before uniform init")
+        # print(self.fourier_feature_transform.params.min(), self.fourier_feature_transform.params.max())
+        # print(self.fourier_feature_transform.params.mean(), self.fourier_feature_transform.params.std())
+
         nn.init.uniform_(self.fourier_feature_transform.params, -1e-1, 1e-1)
 
+        # print("after uniform init")
+        # print(self.fourier_feature_transform.params.min(), self.fourier_feature_transform.params.max())
+        # print(self.fourier_feature_transform.params.mean(), self.fourier_feature_transform.params.std())
+
+        # exit()
 
         self.include_identity_on_encoding = True
 
         if self.include_identity_on_encoding:
             self.inp_size += 3
 
-        self.gradient_scaling = 128.
+        self.gradient_scaling = 32.
         self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
         # self.inp_size = self.fourier_feature_transform.n_output_dims
 
@@ -168,13 +177,13 @@ class NeuralBlendshapes(nn.Module):
         self.expression_deformer = nn.Sequential(
             nn.Linear(self.inp_size + 53, 256),
             # nn.Linear(self.inp_size + 3 + 3 + 53, 256),
-            mygroupnorm(num_groups=4, num_channels=256),
+            # mygroupnorm(num_groups=4, num_channels=256),
             nn.PReLU(),
             nn.Linear(256, 256),
-            mygroupnorm(num_groups=4, num_channels=256),
+            # mygroupnorm(num_groups=4, num_channels=256),
             nn.PReLU(),
             nn.Linear(256, 256),
-            mygroupnorm(num_groups=4, num_channels=256),
+            # mygroupnorm(num_groups=4, num_channels=256),
             nn.PReLU(),
             nn.Linear(256, 3)
             # nn.Linear(256, 53*3)
@@ -217,7 +226,7 @@ class NeuralBlendshapes(nn.Module):
         )
 
         # last layer to all zeros, to make zero deformation as the default            
-        initialize_weights(self.expression_deformer, gain=0.01)
+        # initialize_weights(self.expression_deformer, gain=0.01)
         self.expression_deformer[-1].weight.data.zero_()
         self.expression_deformer[-1].bias.data.zero_()
 
