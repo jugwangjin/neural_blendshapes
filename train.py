@@ -201,11 +201,24 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     ict_pair_indices = np.array(ict_to_flame_pairs[0]).astype(np.int64)
     flame_pair_indices = np.array(ict_to_flame_pairs[1]).astype(np.int64)
 
+    tight_face_index = 6705
+
+    # print(ict_pair_indices)
+
+    tight_face_ict_flame = np.where(ict_pair_indices < tight_face_index)[0]  
+
+    
+    # print(tight_face_ict_flame)
+    # print(ict_pair_indices[tight_face_ict_flame])
+    # print(tight_face_ict_flame.shape)
+
+    # exit()
+
     ## ============== load ict facekit ==============================
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
-    ict_canonical_mesh = Mesh(ict_facekit.neutral_mesh_canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
+    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
     ict_canonical_mesh.compute_connectivity()
 
     write_mesh(Path(meshes_save_path / "init_ict_canonical.obj"), ict_canonical_mesh.to('cpu'))
@@ -391,6 +404,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         os.rename(filename, target_filename)
 
 
+    bshapes_multipliers = []
+    for i in range(53):
+        bshapes_multipliers.append([])
+
+
     iteration = 0
     for epoch in progress_bar:
         for iter_, views_subset in tqdm(enumerate(dataloader_train)):
@@ -416,11 +434,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 ict_gt = flame_gt_clip_space[:, flame_pair_indices]
                 # if pretrain:
-            flame_loss = (ict_mesh_w_temp_vertices_on_clip_space[:, ict_pair_indices] - ict_gt)
+            flame_loss = (ict_mesh_w_temp_vertices_on_clip_space[:, ict_pair_indices] * 1 - ict_gt * 1)
 
-            flame_loss = flame_loss.abs().mean()
+            flame_loss = flame_loss.pow(2).mean()
 
-            flame_loss = flame_loss * 4
+            flame_loss = flame_loss * 2
             
             template_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, ict_facekit.neutral_mesh_canonical[0], return_dict['template_mesh'], filtered_lap, ) 
             feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
@@ -428,7 +446,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
 
             losses['laplacian_regularization'] = template_mesh_laplacian_regularization 
-            losses['feature_regularization'] = feature_regularization
+            losses['feature_regularization'] = feature_regularization 
             losses['flame_regularization'] = flame_loss
 
             torch.cuda.empty_cache()
@@ -456,6 +474,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     v = v.mean()
                 # if v > 0:
                     print(f"{k}: {v.item() * loss_weights[k]}")
+
+                for nn in range(53):
+                    bshapes_multipliers[nn].append(1 + neural_blendshapes.encoder.softplus(neural_blendshapes.encoder.bshapes_multiplier).cpu().data.numpy()[nn])
+
+                    plt.clf()
+                    plt.plot(bshapes_multipliers[nn])
+                    plt.title(f"BSMult_{nn}_{ict_facekit.expression_names.tolist()[nn]}")
+                    plt.savefig(str(images_save_path / f"bsmult_{nn}_{ict_facekit.expression_names.tolist()[nn]}.png"))
 
 
                 bshapes = return_dict['features'][:, :53].detach().cpu().numpy()
@@ -485,10 +511,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             loss.backward()
             # print(neural_blendshapes.encoder.bshapes_multiplier)
             # print grad
-            # print(neural_blendshapes.encoder.bshapes_multiplier.grad)
-            # print(neural_blendshapes.encoder.bshape_modulator[-1].weight.grad)
-            # print(neural_blendshapes.encoder.bshape_modulator[0].weight.grad)
-
+            # print('bmult', neural_blendshapes.encoder.bshapes_multiplier.grad)
+            # print('bmod', neural_blendshapes.encoder.bshape_modulator[-1].weight.grad)
+            # print('tail', neural_blendshapes.encoder.tail[-1].weight.grad)
+            # print('temp', neural_blendshapes.template_deformer.constant.grad)
 
             torch.cuda.synchronize()
             
@@ -538,7 +564,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 cv2.imwrite(str(images_save_path / "grid" / f'a_flame_epoch_{epoch}_seg_{ith}.png'), seg)
 
-
+    # exit()
 
     import wandb
     if 'debug' not in run_name and not args.skip_wandb:
@@ -557,6 +583,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     epochs = (args.iterations // len(dataloader_train)) + 1
     progress_bar = tqdm(range(epochs))
     start = time.time()
+
 
     iteration = 0
     for epoch in progress_bar:
@@ -683,10 +710,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     flame_gt_clip_space = renderer.get_vertices_clip_space_from_view(views_subset['flame_camera'], flame_gt)
                     ict_gt = flame_gt_clip_space[:, flame_pair_indices]
                 # if pretrain:
-                flame_loss = (gbuffers['deformed_verts_clip_space'][:, ict_pair_indices] - ict_gt)
+                flame_loss = (gbuffers['deformed_verts_clip_space'][:, ict_pair_indices] * 1 - ict_gt * 1)
                 if not flame_loss_full_head:
-                    flame_loss = flame_loss[:, :tight_face_index]
-                flame_loss = flame_loss.abs().mean()
+                    flame_loss = flame_loss[:, tight_face_ict_flame]
+                flame_loss = flame_loss.pow(2).mean()
                 
             else:
                 flame_loss = torch.tensor(0., device=device)
@@ -789,7 +816,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 # if v > 0:
                     print(f"{k}: {v.item() * loss_weights[k]}")
 
-                
+                for nn in range(53):
+                    bshapes_multipliers[nn].append(1 + neural_blendshapes.encoder.softplus(neural_blendshapes.encoder.bshapes_multiplier).cpu().data.numpy()[nn])
+
+                    plt.clf()
+                    plt.plot(bshapes_multipliers[nn])
+                    plt.title(f"BSMult_{nn}_{ict_facekit.expression_names.tolist()[nn]}")
+                    plt.savefig(str(images_save_path / f"bsmult_{nn}_{ict_facekit.expression_names.tolist()[nn]}.png"))
+
+
                 print("=="*50)
 
                 dataset_sampler = torch.utils.data.WeightedRandomSampler(importance, dataset_train.len_img, replacement=True)

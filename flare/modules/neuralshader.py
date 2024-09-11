@@ -117,8 +117,9 @@ class NeuralShader(torch.nn.Module):
     def forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None):
         bz, h, w, ch = position.shape
         uv_coordinates = gbuffer["uv_coordinates"]
+        canonical_position = gbuffer["canonical_position"]
         deformed_position = deformed_position
-        pe_input = self.apply_pe(position=uv_coordinates)
+        pe_input = self.apply_pe(position=canonical_position, normalize=True)
 
         view_dir = view_direction[:, None, None, :]
         normal_bend = self.get_shading_normals(deformed_position, view_dir, gbuffer, mesh)

@@ -14,6 +14,7 @@ import os
 from .geometry import compute_matrix, laplacian_uniform, laplacian_density
 from .solvers import CholeskySolver, solve
 from .parameterize import to_differential, from_differential
+from scipy.spatial import KDTree
 
 import tinycudann as tcnn
 SCALE_CONSTANT = 0.25
@@ -82,7 +83,6 @@ class ConstantTemplate(nn.Module):
     def forward(self, *args, **kwargs):
         return self.constant
 
-
 class NeuralBlendshapes(nn.Module):
     def __init__(self, vertex_parts, ict_facekit, exp_dir, lambda_=32):
         super().__init__()
@@ -103,6 +103,9 @@ class NeuralBlendshapes(nn.Module):
         _, interior_displacement_index, _ = pt3o.knn_points(interior_vertices[None], exterior_vertices[None], K=1, return_nn=False)
         self.interior_displacement_index = interior_displacement_index[0, :, 0]
         
+        self.exterior_vertices_np = exterior_vertices.cpu().data.numpy()
+        self.exterior_vertices_kdtree = KDTree(self.exterior_vertices_np)
+
         vertices = ict_facekit.neutral_mesh_canonical[0].cpu().data.numpy()
         faces = ict_facekit.faces.cpu().data.numpy()
 
@@ -177,6 +180,9 @@ class NeuralBlendshapes(nn.Module):
         self.expression_deformer = nn.Sequential(
             nn.Linear(self.inp_size + 53, 256),
             # nn.Linear(self.inp_size + 3 + 3 + 53, 256),
+            # mygroupnorm(num_groups=4, num_channels=256),
+            nn.PReLU(),
+            nn.Linear(256, 256),
             # mygroupnorm(num_groups=4, num_channels=256),
             nn.PReLU(),
             nn.Linear(256, 256),
@@ -361,6 +367,11 @@ class NeuralBlendshapes(nn.Module):
         return return_dict
 
 
+    def get_closest_indices(self, vertices):
+        _, indices = self.exterior_vertices_kdtree.query(vertices)
+        return indices
+
+
     def forward(self, image=None, views=None, features=None, image_input=True, pretrain=False):
         bshape=None
         if features is not None:
@@ -377,6 +388,8 @@ class NeuralBlendshapes(nn.Module):
         template = self.ict_facekit.canonical[0][:self.socket_index]
         neutral_template = self.ict_facekit.neutral_mesh_canonical[0][:self.socket_index]
 
+
+
         pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
 
         encoded_points = torch.cat([self.encode_position(template)], dim=-1)
@@ -387,19 +400,45 @@ class NeuralBlendshapes(nn.Module):
         template_mesh_delta = self.solve(template_mesh_u_delta) + neutral_ict_mesh_delta
 
         deformation = template_mesh_delta
-
+        
         deformation = torch.cat([deformation, deformation[self.interior_displacement_index]], dim=0)
         template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + deformation
 
         # template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + self.template_deformer(self.template_embedder(self.ict_facekit.canonical[0]))
         # template_mesh_delta = template_mesh[:self.socket_index] - neutral_template
 
-        ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(bsize, 1))[:, :self.socket_index]
+
+        ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(bsize, 1))
+
+        neutral_template_with_eyeball = self.ict_facekit.neutral_mesh_canonical.repeat(bsize, 1, 1)
+        neutral_template_with_eyeball[:, 21451:24591] = ict_mesh[:, 21451:24591]
+
+        
+        interior_displacement_index = []
+        for b in range(bsize):
+            interior_displacement_index.append(self.get_closest_indices(neutral_template_with_eyeball[b, 21451:24591].cpu().data.numpy()))
+        interior_displacement_index = torch.tensor(interior_displacement_index, device=neutral_template_with_eyeball.device)
+
+        # print(interior_displacement_index.shape)
+
+        interior_displacement_index = torch.cat([self.interior_displacement_index[None, :-interior_displacement_index.shape[1]].repeat(bsize, 1), interior_displacement_index], dim=1)        
+        # print(interior_displacement_index.shape)
+
+        # print(interior_displacement_index.shape)
+        # print(deformation[interior_displacement_index].shape)
+
+        ict_mesh = ict_mesh[:, :self.socket_index]
 
         ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
         deformation = ict_mesh_w_temp - neutral_template[None]
-        deformation = torch.cat([deformation, deformation[:, self.interior_displacement_index]], dim=1)
-        ict_mesh_w_temp = self.ict_facekit.neutral_mesh_canonical + deformation
+
+        interior_deformation = []
+        for b in range(bsize):
+            interior_deformation.append(deformation[b, interior_displacement_index[b]])
+        interior_deformation = torch.stack(interior_deformation, dim=0)
+
+        deformation = torch.cat([deformation, interior_deformation], dim=1)
+        ict_mesh_w_temp = neutral_template_with_eyeball + deformation
 
         ict_mesh_w_temp_posed = self.apply_deformation(ict_mesh_w_temp, features, pose_weight)
 
@@ -431,9 +470,15 @@ class NeuralBlendshapes(nn.Module):
         expression_mesh = ict_mesh_w_temp[:, :self.socket_index] + expression_mesh_delta
         
         deformation = expression_mesh - neutral_template[None]
-        deformation = torch.cat([deformation, deformation[:, self.interior_displacement_index]], dim=1)
+
+        interior_deformation = []
+        for b in range(bsize):
+            interior_deformation.append(deformation[b, interior_displacement_index[b]])
+        interior_deformation = torch.stack(interior_deformation, dim=0)
+
+        deformation = torch.cat([deformation, interior_deformation], dim=1)
         
-        expression_mesh = self.ict_facekit.neutral_mesh_canonical + deformation
+        expression_mesh = neutral_template_with_eyeball + deformation
 
         expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
         return_dict['expression_mesh'] = expression_mesh

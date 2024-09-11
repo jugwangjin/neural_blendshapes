@@ -91,11 +91,11 @@ class ResnetEncoder(nn.Module):
                     nn.Linear(256, 53)
         )
 
-        # for layer in self.bshape_modulator:
-        #     if isinstance(layer, nn.Linear):
-        #         layer.weight.register_hook(lambda grad: grad * 0.1)
-        #         if layer.bias is not None:
-        #             layer.bias.register_hook(lambda grad: grad * 0.1)
+        for layer in self.tail:
+            if isinstance(layer, nn.Linear):
+                layer.weight.register_hook(lambda grad: grad * 0.01)
+                if layer.bias is not None:
+                    layer.bias.register_hook(lambda grad: grad * 0.01)
 
 
         initialize_weights(self.tail, gain=0.01)
@@ -106,7 +106,7 @@ class ResnetEncoder(nn.Module):
         self.bshape_modulator[-1].weight.data.zero_()
         self.bshape_modulator[-1].bias.data.zero_()
             
-        self.softplus = nn.Softplus(beta=torch.log(torch.tensor(2.)))
+        self.softplus = nn.Softplus()
         self.elu = nn.ELU()
         # self.register_buffer('scale', torch.zeros(1))
         self.scale = torch.nn.Parameter(torch.zeros(1))

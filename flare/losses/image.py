@@ -76,6 +76,7 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
 def _tonemap_srgb(f):
     return torch.where(f > 0.0031308, torch.pow(torch.clamp(f, min=0.0031308), 1.0/2.4)*1.055 - 0.055, 12.92*f)
 
+
 def image_loss_fn(img, target):
 
     img    = _tonemap_srgb(torch.log(torch.clamp(img, min=0, max=65535) + 1))
