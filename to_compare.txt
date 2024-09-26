@@ -1,0 +1,17 @@
+INSTA  -> volumetric, sota afaik -> dataset ing
+
+POINTAVATAR -> linear blendshapes on pointcloud
+IMAvatar -> volumetric afaik 
+
+NHA -> mesh based  ->  dataset ing
+
+Gaussian blendshapes (? ) 
+https://github.com/zjumsj/GaussianBlendshapes
+
+MonoGaussianAvatar  -> gaussian splatting -> 코드없다
+
+FLARE  -> linear blendshapes on mesh, relightable -> 다들 안넣네??? 
+
+NHA ->  ?
+NeRFace -> ? 
+diffusionavatars : deffered diffusion -> ? 

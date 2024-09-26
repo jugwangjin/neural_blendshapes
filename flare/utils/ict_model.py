@@ -2,6 +2,11 @@ import torch
 import numpy as np
 import pickle
 
+import pytorch3d.transforms as pt3d
+import pytorch3d.ops as pt3o
+
+import open3d as o3d
+
 class ICTFaceKitTorch(torch.nn.Module):
     def __init__(self, npy_dir = './assets/ict_facekit_torch.npy', canonical = None, mediapipe_name_to_ict = './assets/mediapipe_name_to_indices.pkl'):
         super().__init__()
@@ -80,7 +85,13 @@ class ICTFaceKitTorch(torch.nn.Module):
         expression_shape_modes_norm = torch.norm(torch.tensor(expression_shape_modes, dtype=torch.float32), dim=-1) # shape of (num_expression, num_vertices)
         expression_shape_modes_norm = expression_shape_modes_norm / (torch.amax(expression_shape_modes_norm, dim=1, keepdim=True) + 1e-8) # shape of (num_expression, num_vertices)
 
-
+        self.register_buffer('left_eyeball_center', torch.mean(self.neutral_mesh[:, 13294:13678], dim=1).clone().detach())
+        self.register_buffer('right_eyeball_center', torch.mean(self.neutral_mesh[:, 13678:14062], dim=1).clone().detach())
+        
+        self.left_eyeball_blendshape_indices = [self.expression_names.tolist().index('eyeLookUp_L'), self.expression_names.tolist().index('eyeLookDown_L'), 
+                                                self.expression_names.tolist().index('eyeLookIn_L'), self.expression_names.tolist().index('eyeLookOut_L'), ]
+        self.right_eyeball_blendshape_indices = [self.expression_names.tolist().index('eyeLookUp_R'), self.expression_names.tolist().index('eyeLookDown_R'),
+                                                self.expression_names.tolist().index('eyeLookIn_R'), self.expression_names.tolist().index('eyeLookOut_R'), ]
 
         # get weighted sum of expression shape modes to get the mean position of the expression
 
@@ -132,6 +143,32 @@ class ICTFaceKitTorch(torch.nn.Module):
 
         # self.debug_indices()
 
+        # test: save each eyeball expression to debug/eyeball directory
+        # import os
+        # os.makedirs('debug/eyeball', exist_ok=True)
+        # for exp_idx in self.left_eyeball_blendshape_indices:
+        #     exp_name = self.expression_names[exp_idx]
+        #     expression_weights = torch.zeros(1, self.num_expression)
+        #     expression_weights[0, exp_idx] = 1
+        #     deformed_mesh = self.forward(expression_weights=expression_weights, identity_weights=self.identity, to_canonical=True)
+        #     mesh = o3d.geometry.TriangleMesh()
+        #     mesh.vertices = o3d.utility.Vector3dVector(deformed_mesh.squeeze().cpu().numpy())
+        #     mesh.triangles = o3d.utility.Vector3iVector(faces)
+        #     # color left eyeball randomly - to check if the eyeball is rotated correctly
+            
+        #     o3d.io.write_triangle_mesh(f'debug/eyeball/{exp_name}.obj', mesh)
+
+        # for exp_idx in self.right_eyeball_blendshape_indices:
+        #     exp_name = self.expression_names[exp_idx]
+        #     expression_weights = torch.zeros(1, self.num_expression)
+        #     expression_weights[0, exp_idx] = 1
+        #     deformed_mesh = self.forward(expression_weights=expression_weights, identity_weights=self.identity, to_canonical=True)
+        #     mesh = o3d.geometry.TriangleMesh()
+        #     mesh.vertices = o3d.utility.Vector3dVector(deformed_mesh.squeeze().cpu().numpy())
+        #     mesh.triangles = o3d.utility.Vector3iVector(faces)
+        #     o3d.io.write_triangle_mesh(f'debug/eyeball/{exp_name}.obj', mesh)
+
+        # exit()
 
     def to_canonical_space(self, mesh):
         """
@@ -172,6 +209,34 @@ class ICTFaceKitTorch(torch.nn.Module):
         deformed_mesh = self.neutral_mesh + \
                         torch.einsum('bn, bnmd -> bmd', expression_weights, self.expression_shape_modes.repeat(bsize, 1, 1, 1)) + \
                         torch.einsum('bn, bnmd -> bmd', identity_weights, self.identity_shape_modes.repeat(bsize, 1, 1, 1))
+
+        # for eyeballs (left eyeball: from verts [21451:23021], right eyeball: from verts [23021:24591])
+        # based on index eyeLookIn_L/R, eyeLookOut_L/R, eyeLookUp_L/R, eyeLookDown_L/R
+        # rotate the eyeballs 
+        # for left eyeball: get xy rotation from eyeLookIn_L, eyeLookOut_L, eyeLookUp_L, eyeLookDown_L
+        # for right eyeball: get xy rotation from eyeLookIn_R, eyeLookOut_R, eyeLookUp_R, eyeLookDown_R
+        left_eyeball_rotation = torch.zeros(bsize, 3).to(expression_weights.device)
+        left_eyeball_rotation[:, 0] = (expression_weights[:, self.left_eyeball_blendshape_indices[1]] - expression_weights[:, self.left_eyeball_blendshape_indices[0]]) * np.pi * 0.15
+        left_eyeball_rotation[:, 1] = (expression_weights[:, self.left_eyeball_blendshape_indices[3]] - expression_weights[:, self.left_eyeball_blendshape_indices[2]]) * np.pi * 0.15
+
+        left_eyeball_matrix = pt3d.euler_angles_to_matrix(left_eyeball_rotation, convention='XYZ')
+        
+        right_eyeball_rotation = torch.zeros(bsize, 3).to(expression_weights.device)
+        right_eyeball_rotation[:, 0] = (expression_weights[:, self.right_eyeball_blendshape_indices[1]] - expression_weights[:, self.right_eyeball_blendshape_indices[0]]) * np.pi * 0.15
+        right_eyeball_rotation[:, 1] = (expression_weights[:, self.right_eyeball_blendshape_indices[2]] - expression_weights[:, self.right_eyeball_blendshape_indices[3]]) * np.pi * 0.15
+
+        right_eyeball_matrix = pt3d.euler_angles_to_matrix(right_eyeball_rotation, convention='XYZ')
+
+        # rotate the eyeballs
+        left_eyeball = deformed_mesh[:, 21451:23021] - self.left_eyeball_center
+        left_eyeball_rotated = torch.einsum('bvd, bmd -> bvm', left_eyeball, left_eyeball_matrix)
+        left_eyeball_displacement = left_eyeball_rotated - left_eyeball
+        deformed_mesh[:, 21451:23021] = deformed_mesh[:, 21451:23021] + left_eyeball_displacement
+        
+        right_eyeball = deformed_mesh[:, 23021:24591] - self.right_eyeball_center
+        right_eyeball_rotated = torch.einsum('bvd, bmd -> bvm', right_eyeball, right_eyeball_matrix)
+        right_eyeball_displacement = right_eyeball_rotated - right_eyeball
+        deformed_mesh[:, 23021:24591] = deformed_mesh[:, 23021:24591] + right_eyeball_displacement
 
         if to_canonical:
             # Transform the deformed mesh to canonical space

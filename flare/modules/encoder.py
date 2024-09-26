@@ -91,11 +91,11 @@ class ResnetEncoder(nn.Module):
                     nn.Linear(256, 53)
         )
 
-        for layer in self.tail:
-            if isinstance(layer, nn.Linear):
-                layer.weight.register_hook(lambda grad: grad * 0.01)
-                if layer.bias is not None:
-                    layer.bias.register_hook(lambda grad: grad * 0.01)
+        # for layer in self.tail:
+        #     if isinstance(layer, nn.Linear):
+        #         layer.weight.register_hook(lambda grad: grad * 0.01)
+        #         if layer.bias is not None:
+        #             layer.bias.register_hook(lambda grad: grad * 0.01)
 
 
         initialize_weights(self.tail, gain=0.01)

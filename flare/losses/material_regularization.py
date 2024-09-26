@@ -79,7 +79,7 @@ def albedo_regularization(_adaptive, shader, mesh, device, displacements, iterat
 def white_light(cbuffers):
     loss = 0.0
 
-    shading = cbuffers["shading"]
+    shading = cbuffers["shading"][..., :3]
     white = (shading[..., 0:1] + shading[..., 1:2] + shading[..., 2:3]) / 3.0
     masked_pts = (shading - white)
     loss += torch.mean(torch.abs(masked_pts))
@@ -87,7 +87,7 @@ def white_light(cbuffers):
     return loss
 
 def roughness_regularization(roughness, semantic, mask, r_mean):
-    skin_mask = (torch.sum(semantic[..., :3], axis=-1)).unsqueeze(-1)
+    skin_mask = (torch.sum(semantic[..., 2:3], axis=-1)).unsqueeze(-1)
     skin_mask = skin_mask * mask 
 
     loss = 0.0
@@ -102,7 +102,7 @@ def roughness_regularization(roughness, semantic, mask, r_mean):
     return loss
 
 def spec_intensity_regularization(rho, semantic, mask):
-    skin_mask = (torch.sum(semantic[..., :3], axis=-1)).unsqueeze(-1)
+    skin_mask = (torch.sum(semantic[..., 2:3], axis=-1)).unsqueeze(-1)
     skin_mask = skin_mask * mask 
 
     loss = 0.0

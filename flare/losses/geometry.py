@@ -100,7 +100,6 @@ def laplacian_loss_two_meshes(mesh, vertices1, vertices2, L, head_index=14062):
     # val = val[mask]
 
     # L = torch.sparse_coo_tensor(ind, val, (head_index, head_index))
-
     V1 = vertices1
     V2 = vertices2
 
@@ -114,7 +113,7 @@ def laplacian_loss_two_meshes(mesh, vertices1, vertices2, L, head_index=14062):
     for b in range(V1.shape[0]):
         v1_lap = L.mm(V1[b])
         v2_lap = L.mm(V2[b])
-        loss = torch.pow(v1_lap - v2_lap, 2)
+        loss = torch.norm(v1_lap - v2_lap, p=2, dim=1)
         loss = loss.mean()
         if b == 0:
             total_loss = loss

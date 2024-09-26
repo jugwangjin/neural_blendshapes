@@ -35,6 +35,7 @@ class NeuralShader(torch.nn.Module):
                  disentangle_network_params=None,
                  bsdf='pbr',
                  aabb=None,
+                 existing_encoder=None,
                  device='cpu'):
 
         super().__init__()
@@ -46,7 +47,58 @@ class NeuralShader(torch.nn.Module):
         self.fourier_features = fourier_features
         self.disentangle_network_params = disentangle_network_params
         
-        self.update_mlp(fourier_features)
+        # ==============================================================================================
+        # PE
+        # ==============================================================================================
+        if existing_encoder is not None:
+            self.fourier_feature_transform = existing_encoder
+            self.inp_size = self.fourier_feature_transform.n_output_dims
+
+        else:
+            if fourier_features == 'positional':
+                print("STAGE 1: Using positional encoding (NeRF) for intrinsic materials")
+                self.fourier_feature_transform, channels = get_embedder(multires=9)
+                self.inp_size = channels
+            elif fourier_features == 'hashgrid':
+                print("STAGE 2: Using hashgrid (tinycudann) for intrinsic materials")
+                # ==============================================================================================
+                # used for 2nd stage training
+                # ==============================================================================================
+                # Setup positional encoding, see https://github.com/NVlabs/tiny-cuda-nn for details
+                desired_resolution = 4096
+                base_grid_resolution = 16
+                num_levels = 16
+                per_level_scale = np.exp(np.log(desired_resolution / base_grid_resolution) / (num_levels-1))
+                enc_cfg =  {
+                    "otype": "HashGrid",
+                    "n_levels": num_levels,
+                    "n_features_per_level": 2,
+                    "log2_hashmap_size": 19,
+                    "base_resolution": base_grid_resolution,
+                    "per_level_scale" : per_level_scale
+                }
+
+                self.gradient_scaling = 128.0
+                self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to(self.device)
+                # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / gradient_scaling, ))
+                self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+                self.inp_size = self.fourier_feature_transform.n_output_dims
+
+        # ==============================================================================================
+        # create MLP
+        # ==============================================================================================
+        # self.material_mlp_ch = disentangle_network_params['material_mlp_ch']
+        self.material_mlp_ch = 5 # diffuse 3 and roughness 1
+        self.material_mlp = FC(self.inp_size, self.material_mlp_ch, self.disentangle_network_params["material_mlp_dims"], self.activation, self.last_activation).to(self.device) #sigmoid
+        
+        self.brdf_mlp = FC(2, 3, self.disentangle_network_params["brdf_mlp_dims"], self.activation, self.last_activation).to(self.device) # inp size for coords, 20 for normal and reflvec
+
+        if fourier_features == "hashgrid":
+            self.gradient_scaling = 64.0
+            self.material_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
+
+        self.light_mlp = FC(20, 3, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) # reflvec / normal for input
+
 
         print(disentangle_network_params)
 
@@ -64,38 +116,43 @@ class NeuralShader(torch.nn.Module):
             "aabb":aabb,
         }
 
-    def update_mlp(self, fourier_features):
+    def update_mlp(self, fourier_features, existing_encoder = None):
          # ==============================================================================================
         # PE
         # ==============================================================================================
-        if fourier_features == 'positional':
-            print("STAGE 1: Using positional encoding (NeRF) for intrinsic materials")
-            self.fourier_feature_transform, channels = get_embedder(multires=9)
-            self.inp_size = channels
-        elif fourier_features == 'hashgrid':
-            print("STAGE 2: Using hashgrid (tinycudann) for intrinsic materials")
-            # ==============================================================================================
-            # used for 2nd stage training
-            # ==============================================================================================
-            # Setup positional encoding, see https://github.com/NVlabs/tiny-cuda-nn for details
-            desired_resolution = 2048
-            base_grid_resolution = 16
-            num_levels = 16
-            per_level_scale = np.exp(np.log(desired_resolution / base_grid_resolution) / (num_levels-1))
-            enc_cfg =  {
-                "otype": "HashGrid",
-                "n_levels": num_levels,
-                "n_features_per_level": 2,
-                "log2_hashmap_size": 19,
-                "base_resolution": base_grid_resolution,
-                "per_level_scale" : per_level_scale
-            }
-
-            self.gradient_scaling = 128.0
-            self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to(self.device)
-            # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / gradient_scaling, ))
-            self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+        if existing_encoder is not None:
+            self.fourier_feature_transform = existing_encoder
             self.inp_size = self.fourier_feature_transform.n_output_dims
+
+        else:
+            if fourier_features == 'positional':
+                print("STAGE 1: Using positional encoding (NeRF) for intrinsic materials")
+                self.fourier_feature_transform, channels = get_embedder(multires=9)
+                self.inp_size = channels
+            elif fourier_features == 'hashgrid':
+                print("STAGE 2: Using hashgrid (tinycudann) for intrinsic materials")
+                # ==============================================================================================
+                # used for 2nd stage training
+                # ==============================================================================================
+                # Setup positional encoding, see https://github.com/NVlabs/tiny-cuda-nn for details
+                desired_resolution = 4096
+                base_grid_resolution = 16
+                num_levels = 16
+                per_level_scale = np.exp(np.log(desired_resolution / base_grid_resolution) / (num_levels-1))
+                enc_cfg =  {
+                    "otype": "HashGrid",
+                    "n_levels": num_levels,
+                    "n_features_per_level": 2,
+                    "log2_hashmap_size": 19,
+                    "base_resolution": base_grid_resolution,
+                    "per_level_scale" : per_level_scale
+                }
+
+                self.gradient_scaling = 128.0
+                self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to(self.device)
+                # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / gradient_scaling, ))
+                self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+                self.inp_size = self.fourier_feature_transform.n_output_dims
 
         # ==============================================================================================
         # create MLP
@@ -104,10 +161,10 @@ class NeuralShader(torch.nn.Module):
         self.material_mlp_ch = 5 # diffuse 3 and roughness 1
         self.material_mlp = FC(self.inp_size, self.material_mlp_ch, self.disentangle_network_params["material_mlp_dims"], self.activation, self.last_activation).to(self.device) #sigmoid
         
-        self.brdf_mlp = FC(self.inp_size + 20 + 20, 3, self.disentangle_network_params["brdf_mlp_dims"], self.activation, self.last_activation).to(self.device) # inp size for coords, 20 for normal and reflvec
+        self.brdf_mlp = FC(2, 3, self.disentangle_network_params["brdf_mlp_dims"], self.activation, self.last_activation).to(self.device) # inp size for coords, 20 for normal and reflvec
 
         if fourier_features == "hashgrid":
-            self.gradient_scaling = 128.0
+            self.gradient_scaling = 64.0
             self.material_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
 
         self.light_mlp = FC(20, 3, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) # reflvec / normal for input
@@ -134,6 +191,9 @@ class NeuralShader(torch.nn.Module):
         diffuse = material[..., :3]
         roughness = material[..., 3:4]
         specular_intensity = material[..., 4:5]
+        # cosine between wo and normal_bend
+        wo_n = torch.sum(wo * normal_bend, dim=-1, keepdim=True)
+        wo_n = wo_n.view(-1, 1)
 
         diffuse_light_input = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
         diffuse_light = self.light_mlp(diffuse_light_input)
@@ -141,9 +201,8 @@ class NeuralShader(torch.nn.Module):
         specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), roughness.view(-1, 1))
         specular_light = self.light_mlp(specular_light_input)
 
-        brdf_light_input = self.dir_enc_func(normal_bend.view(-1, 3), roughness.view(-1, 1))
 
-        brdf = self.brdf_mlp(torch.cat([pe_input.view(-1, self.inp_size), brdf_light_input, specular_light_input], dim=1))
+        brdf = self.brdf_mlp(torch.cat([wo_n.view(-1, 1), roughness.view(-1, 1)], dim=1))
 
         color = diffuse * diffuse_light + specular_intensity * brdf * specular_light
 

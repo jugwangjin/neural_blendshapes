@@ -140,7 +140,8 @@ def _load_semantic(fn):
     # semantics[:, :, 1] = ((img == 17) + (img == 16) + (img == 15) + (img == 14) + (img==7) + (img==8) + (img==9)) >= 1
     # semantics[:, :, 1] = ((img == 17) + (img == 16) + (img == 15) + (img == 14) + (img==7) + (img==8) + (img==9)) >= 1
 
-    semantics[:, :, 2] = (img == 1) >= 1 # skin
+    # skin, ear, nose, neck
+    semantics[:, :, 2] = ((img == 1) + (img == 7) + (img == 8) + (img == 10) + (img == 14)) >= 1
 
     semantics[:, :, 3] = 1. - np.sum(semantics[:, :, :-1], 2) # background
 
