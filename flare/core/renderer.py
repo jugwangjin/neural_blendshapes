@@ -243,6 +243,23 @@ class Renderer:
             gbuffer['eyes'] = segmentation
 
             
+            # now for mouth: 
+            # 11248:13294, 14062:21451
+            valid_idx_tensor = torch.zeros(b, h, w, 1).to(self.device)
+            valid_idx_tensor[valid_idx < 21451] = 1.
+            valid_idx_tensor[valid_idx < 14062] = 0.
+            valid_idx_tensor[valid_idx < 13294] = 1.
+            valid_idx_tensor[valid_idx < 11248] = 0.
+
+            # segmentation will be the intersection of valid_idx < 11248 and mask > 0
+            mask = (rast[..., -1:] > 0.).float()
+            segmentation = mask * valid_idx_tensor
+            segmentation = torch.lerp(torch.zeros((batch_size, h, w, 1)).to(self.device), 
+                                        torch.ones((batch_size, h, w, 1)).to(self.device), segmentation.float())
+            
+            segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
+            gbuffer['mouth'] = segmentation
+
             # zero tensor size of b, h*w, 1
             # fill ones on valid_idx < 11248
 

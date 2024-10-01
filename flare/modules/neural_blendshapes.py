@@ -166,14 +166,14 @@ class NeuralBlendshapes(nn.Module):
         if self.include_identity_on_encoding:
             self.inp_size += 3
 
-        self.gradient_scaling = 64.
+        self.gradient_scaling = 4.
         self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
         # self.inp_size = self.fourier_feature_transform.n_output_dims
 
         # print(self.inp_size)
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(self.inp_size + 53, 512),
+            nn.Linear(self.inp_size, 512),
             # nn.Linear(self.inp_size + 3 + 3 + 53, 512),
             # mygroupnorm(num_groups=4, num_channels=512),
             nn.ReLU(),
@@ -183,10 +183,7 @@ class NeuralBlendshapes(nn.Module):
             nn.Linear(512, 512),
             # mygroupnorm(num_groups=4, num_channels=512),
             nn.ReLU(),
-            nn.Linear(512, 512),
-            # mygroupnorm(num_groups=4, num_channels=512),
-            nn.ReLU(),
-            nn.Linear(512, 3)
+            nn.Linear(512, 53*3)
             # nn.Linear(512, 53*3)
         )
         
@@ -304,6 +301,7 @@ class NeuralBlendshapes(nn.Module):
 
 
     def remove_teeth(self, verts):
+        return verts
         if len(verts.shape) == 2:
             verts[14062:21451] = verts[14062:21451] * 0
         else:
@@ -357,16 +355,16 @@ class NeuralBlendshapes(nn.Module):
             return return_dict
 
         expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
-                                        features[:, None, :53].repeat(1, template.shape[0], 1), \
+                                        # features[:, None, :53].repeat(1, template.shape[0], 1), \
                                         # self.encode_position(ict_mesh_w_temp[:, :self.socket_index]), \
                                         ], \
                                     dim=2) # B V ? 
         
-        expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 3)
-        # expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 53, 3)
-        # expression_mesh_delta_u = expression_mesh_delta_u * features[:, None, :53, None]
+        # expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 3)
+        expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 53, 3)
+        expression_mesh_delta_u = expression_mesh_delta_u * features[:, None, :53, None]
         
-        # expression_mesh_delta_u = expression_mesh_delta_u.sum(dim=2)
+        expression_mesh_delta_u = expression_mesh_delta_u.sum(dim=2)
         expression_mesh_delta = self.solve(expression_mesh_delta_u)
         expression_mesh = ict_mesh_w_temp + expression_mesh_delta
 
@@ -388,12 +386,12 @@ class NeuralBlendshapes(nn.Module):
         # encoded_points = torch.cat([self.encode_position(uv_coords)], dim=-1)
 
         expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
-                                        blendshapes[:, None].repeat(1, template.shape[0], 1), \
+                                        # blendshapes[:, None].repeat(1, template.shape[0], 1), \
                                         ], \
                                     dim=2) # B V ? 
-        expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 3)
-        # expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 53, 3)
-        # expression_mesh_delta_u = expression_mesh_delta_u * blendshapes[:, None, :53, None]
+        # expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 3)
+        expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 53, 3)
+        expression_mesh_delta_u = expression_mesh_delta_u * blendshapes[:, None, :53, None]
         return expression_mesh_delta_u
 
 

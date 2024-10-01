@@ -83,7 +83,7 @@ def _load_img(fn):
 def _load_semantic(fn):
     img = imageio.imread(fn, mode='F')
     h, w = img.shape
-    semantics = np.zeros((h, w, 5))
+    semantics = np.zeros((h, w, 6))
     # Labels that ICT have
     # face, head/neck/, left eye, right eye, mouth interior
     # face + eyebrow + nose + upper lip + lower lip + ears +  == ICT-FaceKit.full_face_area
@@ -146,7 +146,10 @@ def _load_semantic(fn):
     # only eyes
     semantics[:, :, 3] = ((img == 4) + (img == 5)) >= 1
 
-    semantics[:, :, 4] = 1. - np.sum(semantics[:, :, :-1], 2) # background
+    #inside mouth
+    semantics[:, :, 4] = (img == 11) >= 1  # will it include the teeth and 
+
+    semantics[:, :, 5] = 1. - np.sum(semantics[:, :, :-1], 2) # background
 
     # semantics[:, :, 0] = ((img == 1) + (img == 10) + (img == 8) + (img == 7) + (img == 14) + (img == 6) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
     # semantics[:, :, 1] = ((img == 4) + (img == 5)) >= 1 # left eye, right eye
@@ -197,6 +200,4 @@ def _srgb_to_rgb(f: torch.Tensor) -> torch.Tensor:
 def srgb_to_rgb(f: torch.Tensor) -> torch.Tensor:
     assert f.shape[-1] == 3 or f.shape[-1] == 4
     out = torch.cat((_srgb_to_rgb(f[..., 0:3]), f[..., 3:4]), dim=-1) if f.shape[-1] == 4 else _srgb_to_rgb(f)
-    assert out.shape[0] == f.shape[0] and out.shape[1] == f.shape[1] and out.shape[2] == f.shape[2]
-    return out
-
+    assert out.shape[0] == f.shape[0] and out.shape[1] == f.shape[1] and out.shape

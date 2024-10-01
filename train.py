@@ -665,9 +665,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             super_flame = False
             pretrain = iteration < args.iterations // 3
             if iteration == args.iterations // 3:
-                
+                neural_blendshapes_tail_params = list(neural_blendshapes.encoder.tail.parameters())
                 optimizer_neural_blendshapes = torch.optim.Adam([
-                                                                {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer * 0.2},
+                                                                {'params': neural_blendshapes_tail_params, 'lr': args.lr_deformer * 0.25}, # fix the blendshapes
                                                                 {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                                 {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
                                                                 {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
@@ -703,19 +703,20 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 scheduler_shader = torch.optim.lr_scheduler.MultiStepLR(optimizer_shader, milestones=scheduler_milestones, gamma=scheduler_gamma)
 
-                args.lr_deformer *= 0.1
-                args.lr_jacobian *= 0.1
+                # args.lr_deformer *= 0.01
+                # args.lr_jacobian *= 0.01
 
+                optimizer_neural_blendshapes = None
 
-                optimizer_neural_blendshapes = torch.optim.Adam([
-                                                                {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer * 0.2},
-                                                                {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
-                                                                {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
-                                                                {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
-                                                                {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
-                                                                ],
+                # optimizer_neural_blendshapes = torch.optim.Adam([
+                #                                                 {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer * 0.2},
+                #                                                 {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
+                #                                                 {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
+                #                                                 {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
+                #                                                 {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
+                #                                                 ],
                                                                 # ], betas=(0.05, 0.1)
-                                                                )
+                                                                # )
                                                      
 
 
@@ -736,21 +737,21 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             return_dict = neural_blendshapes(input_image, views_subset, pretrain=pretrain)
             mesh = ict_canonical_mesh.with_vertices(ict_canonical_mesh.vertices)
             
-            deformed_vertices = return_dict['ict_mesh_w_temp_posed'] 
-            d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
             
-            channels = ['mask', 'canonical_position'] if not pretrain else channels_gbuffer + ['segmentation']
-            gbuffers = renderer.render_batch(views_subset['camera'], deformed_vertices.contiguous(), d_normals,
-                                    channels=channels, with_antialiasing=True, 
-                                    canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh)
             if pretrain:
-                pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
-            else:
-                _, _, gbuffer_mask = shader.get_mask(gbuffers, views_subset, mesh, args.finetune_color, lgt)
+                deformed_vertices = return_dict['ict_mesh_w_temp_posed'] 
+                d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
+                channels = ['mask', 'canonical_position'] if not pretrain else channels_gbuffer + ['segmentation']
+                gbuffers = renderer.render_batch(views_subset['camera'], deformed_vertices.contiguous(), d_normals,
+                                        channels=channels, with_antialiasing=True, 
+                                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh)
+                if pretrain:
+                    pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
+                else:
+                    _, _, gbuffer_mask = shader.get_mask(gbuffers, views_subset, mesh, args.finetune_color, lgt)
 
-            landmark_loss, closure_loss = landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
-            mask_loss = mask_loss_function(views_subset["mask"], gbuffer_mask)
-            if pretrain:
+                landmark_loss, closure_loss = landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
+                mask_loss = mask_loss_function(views_subset["mask"], gbuffer_mask)
                 mask_loss_segmentation = mask_loss_function(views_subset["skin_mask"][..., :1], gbuffers['segmentation'])
 
                 shading_loss, pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
@@ -765,6 +766,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
 
             else: 
+                landmark_loss = torch.tensor(0., device=device)
+                closure_loss = torch.tensor(0., device=device)
+                mask_loss = torch.tensor(0., device=device)
+
                 mask_loss_segmentation = torch.tensor(0., device=device)
                 shading_loss = torch.tensor(0., device=device)
                 perceptual_loss = torch.tensor(0., device=device)
@@ -876,7 +881,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 # linearity_regularization = (expression_delta_random[:, 0] + expression_delta_random[:, 2] - 2 * expression_delta_random[:, 1]).abs().mean() * 1e-5
 
-                l1_regularization = expression_delta_random.pow(2).mean() * 1e-4
+                l1_regularization = expression_delta_random.pow(2).mean() * 1e-5
             else:
                 l1_regularization = torch.tensor(0., device=device)
 
@@ -1022,7 +1027,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             neural_blendshapes.zero_grad()
             shader.zero_grad()
             optimizer_shader.zero_grad()
-            optimizer_neural_blendshapes.zero_grad()
+            if optimizer_neural_blendshapes is not None:
+                optimizer_neural_blendshapes.zero_grad()
 
             loss.backward()
             # print(neural_blendshapes.expression_deformer[-1].weight.grad)
@@ -1039,9 +1045,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             # print(neural_blendshapes.expression_deformer[-1].weight.grad)
             # print(neural_blendshapes.expression_deformer[-1].weight)
-# 
-            optimizer_neural_blendshapes.step()
-            scheduler_neural_blendshapes.step()
+
+            if optimizer_neural_blendshapes is not None:
+                optimizer_neural_blendshapes.step() 
+                scheduler_neural_blendshapes.step()
             # else:
             # print(neural_blendshapes.expression_deformer[-1].weight)
             # exit()
