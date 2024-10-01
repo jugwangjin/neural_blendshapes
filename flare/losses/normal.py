@@ -61,6 +61,43 @@ def normal_loss(gbuffers, views_subset, gbuffer_mask, device):
     # return normal_loss, normal_laplacian_loss 
 
 
+def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
+    # get the mask. 
+    # gt eye seg
+    gt_eye_seg = views_subset["skin_mask"][..., 3:4]
+    rendered_eye_seg = gbuffers["eyes"]
+
+
+    position = gbuffers["position"]
+    normal = gbuffers["normal"] # shape of B, H, W, 3
+
+    with torch.no_grad():
+        # camera space normal
+        camera = views_subset["camera"] # list of cameras.
+        camera = torch.stack([c.R.T for c in camera], dim=0).to(device)
+        R = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], device=device, dtype=torch.float32)
+
+        normal_cam = torch.einsum('bhwc, cj->bhwj', torch.einsum('bhwc, bcj->bhwj', normal, camera), R.T) # shape of B, H, W, 3
+
+        # for where z negative
+        # deformed_verts_clip_space should move to its world coordinate normal direction 
+        #where normal z negative, multiply minus 1 to the normal
+        mask_cam   = (normal_cam[..., 2] < -1e-2).float()
+        normal = normal * (1 - mask_cam[..., None]) + normal * mask_cam [..., None] * -1
+
+    # loss objective is : 
+    # where rendered_eye_seg is 1 and gt_eye_seg is 0
+    # apply move it to the inverse direction of the normal.
+    # for where mask is 1, find position
+        target_position = position - normal
+
+
+
+    mask = ((1 - gt_eye_seg) * rendered_eye_seg).float()
+    loss = torch.mean(torch.abs(position - target_position) * mask) * 1e1
+    return loss
+
+
 def inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
     # get camera space normal
     camera = views_subset["camera"] # list of cameras.

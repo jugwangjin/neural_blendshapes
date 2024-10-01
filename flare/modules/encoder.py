@@ -68,26 +68,29 @@ class ResnetEncoder(nn.Module):
         self.tail = nn.Sequential(
                     nn.Linear(7 + 68*3 + 7, 256),
                     mygroupnorm(num_groups=8, num_channels=256),
-                    nn.PReLU(),
+                    nn.ReLU(),
                     nn.Linear(256, 256),
                     mygroupnorm(num_groups=8, num_channels=256),
-                    nn.PReLU(),
+                    nn.ReLU(),
                     nn.Linear(256, 256),
                     mygroupnorm(num_groups=8, num_channels=256),
-                    nn.PReLU(),
+                    nn.ReLU(),
                     nn.Linear(256, 9)
         )
         
         self.bshape_modulator = nn.Sequential(
                     nn.Linear(68*3 + 53, 256),
                     mygroupnorm(num_groups=8, num_channels=256),
-                    nn.PReLU(),
+                    nn.ReLU(),
                     nn.Linear(256, 256),
                     mygroupnorm(num_groups=8, num_channels=256),
-                    nn.PReLU(),
+                    nn.ReLU(),
                     nn.Linear(256, 256),
                     mygroupnorm(num_groups=8, num_channels=256),
-                    nn.PReLU(),
+                    nn.ReLU(),
+                    nn.Linear(256, 256),
+                    mygroupnorm(num_groups=8, num_channels=256),
+                    nn.ReLU(),
                     nn.Linear(256, 53)
         )
 

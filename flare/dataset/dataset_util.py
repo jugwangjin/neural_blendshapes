@@ -83,7 +83,7 @@ def _load_img(fn):
 def _load_semantic(fn):
     img = imageio.imread(fn, mode='F')
     h, w = img.shape
-    semantics = np.zeros((h, w, 4))
+    semantics = np.zeros((h, w, 5))
     # Labels that ICT have
     # face, head/neck/, left eye, right eye, mouth interior
     # face + eyebrow + nose + upper lip + lower lip + ears +  == ICT-FaceKit.full_face_area
@@ -143,7 +143,10 @@ def _load_semantic(fn):
     # skin, ear, nose, neck
     semantics[:, :, 2] = ((img == 1) + (img == 7) + (img == 8) + (img == 10) + (img == 14)) >= 1
 
-    semantics[:, :, 3] = 1. - np.sum(semantics[:, :, :-1], 2) # background
+    # only eyes
+    semantics[:, :, 3] = ((img == 4) + (img == 5)) >= 1
+
+    semantics[:, :, 4] = 1. - np.sum(semantics[:, :, :-1], 2) # background
 
     # semantics[:, :, 0] = ((img == 1) + (img == 10) + (img == 8) + (img == 7) + (img == 14) + (img == 6) + (img == 12) + (img == 13)) >= 1 # skin, nose, ears, neck, lips
     # semantics[:, :, 1] = ((img == 4) + (img == 5)) >= 1 # left eye, right eye

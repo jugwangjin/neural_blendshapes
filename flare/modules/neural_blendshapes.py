@@ -88,13 +88,13 @@ class MLPTemplate(nn.Module):
     def __init__(self, inp_dim):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(inp_dim, 256),
-            nn.PReLU(),
-            nn.Linear(256, 256),
-            nn.PReLU(),
-            nn.Linear(256, 256),
-            nn.PReLU(),
-            nn.Linear(256, 3)
+            nn.Linear(inp_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 3)
         )
 
     def forward(self, x):
@@ -125,12 +125,16 @@ class NeuralBlendshapes(nn.Module):
 
         self.register_buffer('L', laplacian_uniform(torch.from_numpy(vertices).to('cuda'), torch.from_numpy(faces).to('cuda')))
 
-        alpha = 1 - 1 / float(lambda_) if lambda_ > 1 else None
-        alpha = None
-        # print(alpha)
-        # exit()
+        self.lambda_ = lambda_
+        if self.lambda_ > 0:
 
-        self.register_buffer('M', compute_matrix(torch.from_numpy(vertices).to('cuda'), torch.from_numpy(faces).to('cuda'), lambda_, alpha=alpha, density=False))
+            alpha = 1 - 1 / float(lambda_) if lambda_ > 1 else None
+            alpha = None
+            # print(alpha)
+            # exit()
+
+            self.register_buffer('M', compute_matrix(torch.from_numpy(vertices).to('cuda'), torch.from_numpy(faces).to('cuda'), lambda_, alpha=alpha, density=False))
+
 
         code_dim = 53
 
@@ -169,21 +173,21 @@ class NeuralBlendshapes(nn.Module):
         # print(self.inp_size)
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(self.inp_size + 53, 256),
-            # nn.Linear(self.inp_size + 3 + 3 + 53, 256),
-            # mygroupnorm(num_groups=4, num_channels=256),
-            nn.PReLU(),
-            nn.Linear(256, 256),
-            # mygroupnorm(num_groups=4, num_channels=256),
-            nn.PReLU(),
-            nn.Linear(256, 256),
-            # mygroupnorm(num_groups=4, num_channels=256),
-            nn.PReLU(),
-            nn.Linear(256, 256),
-            # mygroupnorm(num_groups=4, num_channels=256),
-            nn.PReLU(),
-            nn.Linear(256, 3)
-            # nn.Linear(256, 53*3)
+            nn.Linear(self.inp_size + 53, 512),
+            # nn.Linear(self.inp_size + 3 + 3 + 53, 512),
+            # mygroupnorm(num_groups=4, num_channels=512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            # mygroupnorm(num_groups=4, num_channels=512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            # mygroupnorm(num_groups=4, num_channels=512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            # mygroupnorm(num_groups=4, num_channels=512),
+            nn.ReLU(),
+            nn.Linear(512, 3)
+            # nn.Linear(512, 53*3)
         )
         
         self.template_deformer = MLPTemplate(self.inp_size)
@@ -191,9 +195,9 @@ class NeuralBlendshapes(nn.Module):
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
-                    nn.PReLU(),
+                    nn.ReLU(),
                     nn.Linear(32, 32),
-                    nn.PReLU(),
+                    nn.ReLU(),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
@@ -225,6 +229,8 @@ class NeuralBlendshapes(nn.Module):
 
 
     def solve(self, x):
+        if self.lambda_ == 0:
+            return x
         if len(x.shape) == 2:
             return from_differential(self.M, x, 'Cholesky')
         else:
@@ -259,7 +265,7 @@ class NeuralBlendshapes(nn.Module):
 
     def encode_position(self, coords):
         template = self.ict_facekit.canonical[0] # shape of V, 3
-        org_coords = coords
+        org_coords = coords * 0.25
 
 
         unsqueezed = False
@@ -295,6 +301,14 @@ class NeuralBlendshapes(nn.Module):
             encoded_coords = torch.cat([encoded_coords, org_coords], dim=-1)
 
         return encoded_coords
+
+
+    def remove_teeth(self, verts):
+        if len(verts.shape) == 2:
+            verts[14062:21451] = verts[14062:21451] * 0
+        else:
+            verts[:, 14062:21451] = verts[:, 14062:21451] * 0
+        return verts
 
 
     def forward(self, image=None, views=None, features=None, image_input=True, pretrain=False):
@@ -335,9 +349,9 @@ class NeuralBlendshapes(nn.Module):
 
         ict_mesh_w_temp_posed = self.apply_deformation(ict_mesh_w_temp, features, pose_weight)
 
-        return_dict['template_mesh'] = template_mesh
-        return_dict['ict_mesh_w_temp'] = ict_mesh_w_temp
-        return_dict['ict_mesh_w_temp_posed'] = ict_mesh_w_temp_posed
+        return_dict['template_mesh'] = self.remove_teeth(template_mesh)
+        return_dict['ict_mesh_w_temp'] = self.remove_teeth(ict_mesh_w_temp)
+        return_dict['ict_mesh_w_temp_posed'] = self.remove_teeth(ict_mesh_w_temp_posed)
 
         if pretrain:
             return return_dict
@@ -357,8 +371,8 @@ class NeuralBlendshapes(nn.Module):
         expression_mesh = ict_mesh_w_temp + expression_mesh_delta
 
         expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
-        return_dict['expression_mesh'] = expression_mesh
-        return_dict['expression_mesh_posed'] = expression_mesh_posed
+        return_dict['expression_mesh'] = self.remove_teeth(expression_mesh)
+        return_dict['expression_mesh_posed'] = self.remove_teeth(expression_mesh_posed)
 
         return_dict['pose_weight'] = pose_weight
 
