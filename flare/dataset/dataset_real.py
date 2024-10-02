@@ -66,6 +66,7 @@ class DatasetLoader(Dataset):
 
         self.len_img = len(self.all_img_path)
         test_path = self.base_dir / self.all_img_path[0]["dir"] / Path(self.all_img_path[0]["file_path"] + ".png")
+        # print(test_path)
         self.resolution = _load_img(test_path).shape[0:2]
 
         # Load the camera intrinsics (Note that we use the same intrinsics for all cameras since it is shot on a single device)

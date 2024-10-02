@@ -24,6 +24,12 @@ import nvdiffrast.torch as dr
 from nvdiffrec.render import util
 
 
+def make_module(module):
+    # Create a module instance if we don't already have one
+    if isinstance(module, torch.nn.Module):
+        return module
+    else:
+        return module()
 
 
 class NeuralShader(torch.nn.Module):
@@ -78,10 +84,10 @@ class NeuralShader(torch.nn.Module):
                     "per_level_scale" : per_level_scale
                 }
 
-                self.gradient_scaling = 128.0
+                # self.gradient_scaling = 128.0
                 self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to(self.device)
                 # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / gradient_scaling, ))
-                self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+                # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
                 self.inp_size = self.fourier_feature_transform.n_output_dims
 
         # ==============================================================================================
@@ -89,15 +95,16 @@ class NeuralShader(torch.nn.Module):
         # ==============================================================================================
         # self.material_mlp_ch = disentangle_network_params['material_mlp_ch']
         self.diffuse_mlp_ch = 4 # diffuse 3 and roughness 1
-        self.diffuse_mlp = FC(self.inp_size, self.diffuse_mlp_ch, self.disentangle_network_params["material_mlp_dims"], self.activation, self.last_activation).to(self.device) #sigmoid
+        self.diffuse_mlp = FC(self.inp_size, self.inp_size, self.disentangle_network_params["material_mlp_dims"], self.activation, None).to(self.device) #sigmoid
+        self.last_act = make_module(self.last_activation)
         
         # self.brdf_mlp = FC(2, 3, self.disentangle_network_params["brdf_mlp_dims"], self.activation, self.last_activation).to(self.device) # inp size for coords, 20 for normal and reflvec
 
-        if fourier_features == "hashgrid":
-            self.gradient_scaling = 64.0
-            self.diffuse_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
+        # if fourier_features == "hashgrid":
+            # self.gradient_scaling = 4.0
+            # self.diffuse_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
 
-        self.specular_mlp = FC(self.inp_size + 20 * 2, 3, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) # reflvec / normal for input
+        self.specular_mlp = FC(self.inp_size + 20, 3, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) # reflvec / normal for input
 
 
         print(disentangle_network_params)
@@ -120,10 +127,10 @@ class NeuralShader(torch.nn.Module):
         # Need: coords, normal, reflvec
     def forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None):
         bz, h, w, ch = position.shape
-        uv_coordinates = gbuffer["uv_coordinates"]
+        # uv_coordinates = gbuffer["uv_coordinates"]
         canonical_position = gbuffer["canonical_position"]
         deformed_position = deformed_position
-        pe_input = self.apply_pe(position=uv_coordinates, normalize=False)
+        pe_input = self.apply_pe(position=canonical_position, normalize=True)
 
         view_dir = view_direction[:, None, None, :]
         normal_bend = self.get_shading_normals(deformed_position, view_dir, gbuffer, mesh)
@@ -132,26 +139,27 @@ class NeuralShader(torch.nn.Module):
         kr_max = kr_max.to(self.device)                    
 
         wo = util.safe_normalize(view_dir - deformed_position)
-        reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
+        # reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
         
         diffuse_light_input = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
-        specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
+        # specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
 
         diffuse_mlp_input =  pe_input.view(-1, self.inp_size)
         # diffuse_mlp_input =  torch.cat([pe_input.view(-1, self.inp_size), diffuse_light_input], dim=1)
         diffuse_mlp_output = self.diffuse_mlp(diffuse_mlp_input) 
 
-        diffuse = diffuse_mlp_output[..., :3]
+        diffuse = self.last_act(diffuse_mlp_output[..., :3])
         diffuse_light = torch.zeros_like(diffuse_mlp_output[..., 3:6])
-        roughness = diffuse_mlp_output[..., 3:4]
+        roughness = self.last_act(diffuse_mlp_output[..., 3:4])
         
         diffuse_light_input = self.dir_enc_func(normal_bend.view(-1, 3), roughness)
-        specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), roughness)
+        # specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), roughness)
 
         # diffuse = diffuse_mlp_output[..., :3]
         # diffuse_light = diffuse_mlp_output[..., 3:6]
 
-        specular_mlp_input = torch.cat([pe_input.view(-1, self.inp_size), diffuse_light_input, specular_light_input], dim=1)
+        specular_mlp_input = torch.cat([diffuse_mlp_output, diffuse_light_input], dim=1)
+        # specular_mlp_input = torch.cat([pe_input.view(-1, self.inp_size), diffuse_light_input, specular_light_input], dim=1)
         specular_mlp_output = self.specular_mlp(specular_mlp_input)
 
         specular_intensity = torch.zeros_like(diffuse_mlp_output[..., 3:4])

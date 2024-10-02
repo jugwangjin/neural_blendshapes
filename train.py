@@ -164,9 +164,9 @@ def clip_grad(neural_blendshapes, shader, norm=1.0):
     # torch.nn.utils.clip_grad_norm_(shader.material_mlp.parameters(), norm)
     # torch.nn.utils.clip_grad_norm_(shader.light_mlp.parameters(), norm)
     # torch.nn.utils.clip_grad_norm_(shader.brdf_mlp.parameters(), norm)
-    torch.nn.utils.clip_grad_norm_(neural_blendshapes.template_deformer.parameters(), norm)
-    torch.nn.utils.clip_grad_norm_(neural_blendshapes.expression_deformer.parameters(), norm * 5)
-    torch.nn.utils.clip_grad_norm_(neural_blendshapes.pose_weight.parameters(), norm)
+    # torch.nn.utils.clip_grad_norm_(neural_blendshapes.template_deformer.parameters(), norm)
+    # torch.nn.utils.clip_grad_norm_(neural_blendshapes.expression_deformer.parameters(), norm * 5)
+    # torch.nn.utils.clip_grad_norm_(neural_blendshapes.pose_weight.parameters(), norm)
     torch.nn.utils.clip_grad_norm_(neural_blendshapes.encoder.tail.parameters(), norm)
     torch.nn.utils.clip_grad_norm_(neural_blendshapes.encoder.bshape_modulator.parameters(), norm)
     return
@@ -289,8 +289,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     optimizer_neural_blendshapes = torch.optim.Adam([
                                                     {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer},
                                                     # {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian },
+                                                    # {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
+                                                    # {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian },
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
                                                     ],
                                                     # ], betas=(0.05, 0.1)
@@ -401,8 +401,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     epochs = 3
 
     epochs = (args.iterations // len(dataloader_train)) + 1
-    epochs = epochs // 2
-    epochs = 2
+    epochs = epochs // 3
+    # epochs = 0
+    # epochs = (args.iterations // len(dataloader_train)) + 1
     progress_bar = tqdm(range(epochs))
     start = time.time()
 
@@ -411,6 +412,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         mesh = ict_canonical_mesh.with_vertices(ict_canonical_mesh.vertices)
         return_dict_ = neural_blendshapes(debug_views['img'], debug_views)
         
+    
 
         debug_gbuffer = renderer.render_batch(debug_views['camera'], return_dict_['ict_mesh_w_temp_posed'].contiguous(), mesh.fetch_all_normals(return_dict_['ict_mesh_w_temp_posed'], mesh), 
                                 channels=channels_gbuffer+['segmentation'], with_antialiasing=True, 
@@ -433,6 +435,18 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     for epoch in progress_bar:
         for iter_, views_subset in tqdm(enumerate(dataloader_train)):
             iteration += 1
+
+            if iteration == args.iterations // 4:
+                optimizer_neural_blendshapes = torch.optim.Adam([
+                                                {'params': neural_blendshapes_others_params, 'lr': args.lr_deformer},
+                                                # {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
+                                                {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
+                                                {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian },
+                                                {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
+                                                ],
+                                                # ], betas=(0.05, 0.1)
+                                                )
+
             progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}')
             losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
 
@@ -444,8 +458,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # template optimization
             ict_mesh_w_temp_posed = return_dict['ict_mesh_w_temp_posed']
             d_normals = mesh.fetch_all_normals(ict_mesh_w_temp_posed, mesh)
-            channels = []
-            ict_mesh_w_temp_vertices_on_clip_space = renderer.get_vertices_clip_space_from_view(views_subset['camera'], ict_mesh_w_temp_posed)
+            deformed_vertices = ict_mesh_w_temp_posed
+            gbuffers = renderer.render_batch(views_subset['camera'], deformed_vertices.contiguous(), d_normals,
+                                    channels=channels_gbuffer+['segmentation'], with_antialiasing=True, 
+                                    canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh)
+            
+            _, _, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
+
+            ict_mesh_w_temp_vertices_on_clip_space = gbuffers['deformed_verts_clip_space']
             
             with torch.no_grad():
                 flame_gt, _, _ = FLAMEServer(views_subset['flame_expression'], views_subset['flame_pose'])
@@ -460,7 +480,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
 
 
-            flame_loss = flame_loss 
+            flame_loss = flame_loss
 
             # pcd = o3d.geometry.PointCloud()
             # pcd.points = o3d.utility.Vector3dVector(ict_gt[0].cpu().data.numpy().astype(np.float64)[..., :3])
@@ -498,17 +518,23 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             template_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, ict_facekit.neutral_mesh_canonical[0], return_dict['template_mesh'], filtered_lap, head_index=ict_canonical_mesh.vertices.shape[0]) 
             feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                neural_blendshapes, facs_weight=0)
+                                                                neural_blendshapes, return_dict['bshape_modulation'], facs_weight=0)
 
             template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
             template_mesh_normal_regularization = normal_reg_loss(mesh, ict_canonical_mesh.with_vertices(ict_facekit.neutral_mesh_canonical[0]), ict_canonical_mesh.with_vertices(return_dict['template_mesh']), head_index =ict_canonical_mesh.vertices.shape[0])
             # eyeball_normal_loss = eyeball_normal_loss_function(debug_gbuffer, debug_views, ict_facekit.skin_mask, device)
 
-            losses['laplacian_regularization'] = template_mesh_laplacian_regularization 
-            losses['feature_regularization'] = feature_regularization 
-            losses['flame_regularization'] = flame_loss
-            losses['geometric_regularization'] = template_geometric_regularization
-            losses['normal_regularization'] = template_mesh_normal_regularization 
+
+            inverted_normal_loss = inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
+            eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
+        
+
+            losses['laplacian_regularization'] = template_mesh_laplacian_regularization * 5
+            losses['feature_regularization'] = feature_regularization  * 5
+            losses['flame_regularization'] = flame_loss * 5
+            losses['geometric_regularization'] = template_geometric_regularization * 5
+            losses['normal_regularization'] = template_mesh_normal_regularization * 5 
+            losses['normal_laplacian'] =inverted_normal_loss +  eyeball_normal_loss 
 
             loss = torch.tensor(0., device=device) 
             for k, v in losses.items():
@@ -526,7 +552,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 print(return_dict['features'][0, 53:])
                 print(neural_blendshapes.encoder.transform_origin)
                 print("=="*50)
-                keys = ['laplacian_regularization', 'feature_regularization', 'flame_regularization', 'geometric_regularization', 'normal_regularization']
+                keys = ['laplacian_regularization', 'feature_regularization', 'flame_regularization', 'geometric_regularization', 'normal_regularization', 'normal_laplacian']
                 for k in keys:
                     # if k in losses_to_print:
                     v = losses[k]
@@ -576,7 +602,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             if args.grad_scale and args.fourier_features == "hashgrid":
                 shader.fourier_feature_transform.params.grad /= 8.0
                 
-            clip_grad(neural_blendshapes, shader, norm=5.0)
+            clip_grad(neural_blendshapes, shader, norm=2.0)
             
             optimizer_neural_blendshapes.step()
             scheduler_neural_blendshapes.step()
@@ -623,6 +649,24 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 cv2.imwrite(str(images_save_path / "grid" / f'a_flame_epoch_{epoch}_seg_{ith}.png'), seg)
 
+                # draw bar graph of blendshapes.
+                # y for activaiton (value)
+                # x for each blendshape index.
+                # label for each blendshape name.
+                bshapes = return_dict_['features'][ith, :53].detach().cpu().numpy()
+                bshapes = np.round(bshapes, 2)
+                
+                names = ict_facekit.expression_names.tolist()
+
+                plt.clf()
+                plt.figsize=(8,8)
+                plt.bar(np.arange(53), bshapes)
+                plt.xticks(np.arange(53), names, rotation=90, fontsize=5)
+                plt.title(f"Blendshapes Activation_{ith}")
+                plt.savefig(str(images_save_path / "grid" / f"a_flame_epoch_{epoch}_blendshapes_activation_{ith}.png"))
+                
+
+
     # exit()
 
     import wandb
@@ -667,7 +711,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             if iteration == args.iterations // 3:
                 neural_blendshapes_tail_params = list(neural_blendshapes.encoder.tail.parameters())
                 optimizer_neural_blendshapes = torch.optim.Adam([
-                                                                {'params': neural_blendshapes_tail_params, 'lr': args.lr_deformer * 0.25}, # fix the blendshapes
+                                                                # {'params': neural_blendshapes_tail_params, 'lr': args.lr_deformer * 0.25}, # fix the blendshapes
                                                                 {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                                 {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
                                                                 {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
@@ -766,9 +810,23 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
 
             else: 
-                landmark_loss = torch.tensor(0., device=device)
-                closure_loss = torch.tensor(0., device=device)
-                mask_loss = torch.tensor(0., device=device)
+                deformed_vertices = return_dict['ict_mesh_w_temp_posed'] 
+                d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
+                channels = ['mask', 'canonical_position'] if not pretrain else channels_gbuffer + ['segmentation']
+                gbuffers = renderer.render_batch(views_subset['camera'], deformed_vertices.contiguous(), d_normals,
+                                        channels=channels, with_antialiasing=True, 
+                                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh)
+                if pretrain:
+                    pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
+                else:
+                    _, _, gbuffer_mask = shader.get_mask(gbuffers, views_subset, mesh, args.finetune_color, lgt)
+
+                landmark_loss, closure_loss = landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
+                mask_loss = mask_loss_function(views_subset["mask"], gbuffer_mask)
+            
+                # landmark_loss = torch.tensor(0., device=device)
+                # closure_loss = torch.tensor(0., device=device)
+                # mask_loss = torch.tensor(0., device=device)
 
                 mask_loss_segmentation = torch.tensor(0., device=device)
                 shading_loss = torch.tensor(0., device=device)
@@ -853,22 +911,22 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # regularizations
             # 1. laplacian regularization - every output mesh should have smooth mesh. using laplacian_loss_given_lap
             template_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, ict_facekit.neutral_mesh_canonical[0], return_dict['template_mesh'], filtered_lap, head_index =ict_canonical_mesh.vertices.shape[0]) 
-            expression_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, return_dict['ict_mesh_w_temp'], return_dict['expression_mesh'], filtered_lap, head_index =ict_canonical_mesh.vertices.shape[0]) if not pretrain else torch.tensor(0., device=device)
+            expression_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, return_dict['ict_mesh_w_temp'].detach(), return_dict['expression_mesh'], filtered_lap, head_index =ict_canonical_mesh.vertices.shape[0]) * 1e-1 if not pretrain else torch.tensor(0., device=device) 
 
             # 2. normal regularization - template mesh should have similar normal with canonical mesh. using normal_reg_loss
             template_mesh_normal_regularization = normal_reg_loss(mesh, ict_canonical_mesh.with_vertices(ict_facekit.neutral_mesh_canonical[0]), ict_canonical_mesh.with_vertices(return_dict['template_mesh']), head_index =ict_canonical_mesh.vertices.shape[0])
             expression_mesh_normal_regularization = torch.tensor(0., device=device)
             if not pretrain:
                 for i in range(return_dict['expression_mesh'].shape[0]):
-                    expression_mesh_normal_regularization += normal_reg_loss(mesh, ict_canonical_mesh.with_vertices(return_dict['expression_mesh'][i]), ict_canonical_mesh.with_vertices(return_dict['ict_mesh_w_temp'][i]), head_index =ict_canonical_mesh.vertices.shape[0])
+                    expression_mesh_normal_regularization += normal_reg_loss(mesh, ict_canonical_mesh.with_vertices(return_dict['expression_mesh'][i]), ict_canonical_mesh.with_vertices(return_dict['ict_mesh_w_temp'][i].detach()), head_index =ict_canonical_mesh.vertices.shape[0])  * 1e-1
                 expression_mesh_normal_regularization /= return_dict['expression_mesh'].shape[0]
                 # expression_mesh_normal_regularization *= 1e1
 
             # 3. feature regularization - feature should be similar with neural blendshapes. using feature_regularization_loss
             feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                neural_blendshapes, facs_weight=0)
+                                                                neural_blendshapes, return_dict['bshape_modulation'], facs_weight=0)
 
-            if pretrain:
+            if not pretrain:
                 random_blendshapes = torch.rand(views_subset['mp_blendshape'].shape[0], 53, device=device)
                 # random_blendshapes = torch.cat([random_blendshapes[:, 0:1], torch.mean(random_blendshapes, dim=1, keepdim=True), random_blendshapes[:, 1:2]], dim=1)
                 # random_blendshapes = random_blendshapes.reshape(-1, 53)
@@ -881,13 +939,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 # linearity_regularization = (expression_delta_random[:, 0] + expression_delta_random[:, 2] - 2 * expression_delta_random[:, 1]).abs().mean() * 1e-5
 
-                l1_regularization = expression_delta_random.pow(2).mean() * 1e-5
+                l1_regularization = expression_delta_random.abs().mean() * 1e-6
             else:
                 l1_regularization = torch.tensor(0., device=device)
 
             template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
             if not pretrain:
-                expression_geometric_regularization = (return_dict['ict_mesh_w_temp'] - return_dict['expression_mesh']).pow(2).mean() 
+                expression_geometric_regularization = (return_dict['ict_mesh_w_temp'].detach() - return_dict['expression_mesh']).pow(2).mean() * 1e-1
             else:
                 expression_geometric_regularization = torch.tensor(0., device=device)
 
@@ -1016,8 +1074,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 print("=="*50)
 
-                dataset_sampler = torch.utils.data.WeightedRandomSampler(importance, dataset_train.len_img, replacement=True)
-                dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, collate_fn=dataset_train.collate, drop_last=True, sampler=dataset_sampler)
+                # dataset_sampler = torch.utils.data.WeightedRandomSampler(importance, dataset_train.len_img, replacement=True)
+                # dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, collate_fn=dataset_train.collate, drop_last=True, sampler=dataset_sampler)
 
 
             # ==============================================================================================
@@ -1039,7 +1097,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             if args.grad_scale and args.fourier_features == "hashgrid":
                 shader.fourier_feature_transform.params.grad /= 8.0
 
-            clip_grad(neural_blendshapes, shader, norm=5.0)
+            clip_grad(neural_blendshapes, shader, norm=2.0)
                 
             
 
@@ -1122,6 +1180,24 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                         seg = np.stack([seg, gt_seg, np.zeros(seg.shape)], axis=2)
 
                         cv2.imwrite(str(images_save_path / "grid" / f'grid_{iteration}_seg_narrow_{ith}.png'), seg)
+
+
+                        # draw bar graph of blendshapes.
+                        # y for activaiton (value)
+                        # x for each blendshape index.
+                        # label for each blendshape name.
+                        bshapes = return_dict_['features'][ith, :53].detach().cpu().numpy()
+                        bshapes = np.round(bshapes, 2)
+                        
+                        names = ict_facekit.expression_names.tolist()
+
+                        plt.clf()
+                        plt.figsize=(8,8)
+                        plt.bar(np.arange(53), bshapes)
+                        plt.xticks(np.arange(53), names, rotation=90, fontsize=5)
+                        plt.title(f"Blendshapes Activation_{ith}")
+                        plt.savefig(str(images_save_path / "grid" / f"grid_{iteration}_blendshapes_activation_{ith}.png"))
+                
 
                     for n in range(debug_views['img'].shape[0]):                            
                         if n != 0:

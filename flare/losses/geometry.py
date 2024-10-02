@@ -100,6 +100,8 @@ def laplacian_loss_two_meshes(mesh, vertices1, vertices2, L, head_index=14062):
     # val = val[mask]
 
     # L = torch.sparse_coo_tensor(ind, val, (head_index, head_index))
+    L = mesh.laplacian
+    
     V1 = vertices1
     V2 = vertices2
 
@@ -107,8 +109,8 @@ def laplacian_loss_two_meshes(mesh, vertices1, vertices2, L, head_index=14062):
         V1 = V1.unsqueeze(0)
         V2 = V2.unsqueeze(0)
 
-    V1 = V1[:, :head_index]
-    V2 = V2[:, :head_index]
+    V1 = V1
+    V2 = V2
 
     for b in range(V1.shape[0]):
         v1_lap = L.mm(V1[b])
@@ -144,7 +146,8 @@ def laplacian_loss_single_mesh(mesh, vertices1):
 
 
 def normal_reg_loss(mesh, mesh1, mesh2, head_index=14062):
-    loss = 1 - torch.cosine_similarity(mesh1.vertex_normals[:head_index], mesh2.vertex_normals[:head_index], dim=-1)
+    loss = 1 - torch.cosine_similarity(mesh1.vertex_normals, mesh2.vertex_normals, dim=-1)
+    # loss = 1 - torch.cosine_similarity(mesh1.vertex_normals[:head_index], mesh2.vertex_normals[:head_index], dim=-1)
     loss = loss**2
     loss = loss.mean()
     

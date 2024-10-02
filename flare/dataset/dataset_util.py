@@ -71,13 +71,16 @@ def _load_mask(fn):
     return mask
 
 def _load_img(fn):
+    # print(fn)
     img = imageio.imread(fn)
+    # print(img)
     if img.dtype != np.float32: # LDR image
         img = torch.tensor(img / 255, dtype=torch.float32)
         # look into this
         img[..., 0:3] = srgb_to_rgb(img[..., 0:3])
     else:
         img = torch.tensor(img, dtype=torch.float32)
+    
     return img
 
 def _load_semantic(fn):
@@ -201,3 +204,4 @@ def srgb_to_rgb(f: torch.Tensor) -> torch.Tensor:
     assert f.shape[-1] == 3 or f.shape[-1] == 4
     out = torch.cat((_srgb_to_rgb(f[..., 0:3]), f[..., 3:4]), dim=-1) if f.shape[-1] == 4 else _srgb_to_rgb(f)
     assert out.shape[0] == f.shape[0] and out.shape[1] == f.shape[1] and out.shape
+    return out
