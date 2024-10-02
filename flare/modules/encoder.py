@@ -50,7 +50,22 @@ class ModulationActivation(nn.Module):
         # for elements where x>0, torch.log1p(x). For elements where x<0, self.elu(x)
         ret = torch.where(x > 0, torch.log1p(x), self.elu(x))
         return ret
-        
+
+
+
+class bshape_act(nn.Module):
+    def __init__(self, k=5, d=-0.5):
+        super().__init__()
+        self.sigmoid = nn.Sigmoid()
+        self.k = k
+        self.d = d
+        # self.k = k
+        # self.s = lambda x: 1 / (1 + torch.exp(- self.k * x))
+        # self.y = lambda x: x * self.s(x) * (1 - self.s(x-1)) + self.s(x-1)
+
+    def forward(self, x):
+        return self.sigmoid(self.k * (x + self.d))
+    
 
 class GaussianActivation(nn.Module):
     def __init__(self, a=1., trainable=True):
@@ -79,13 +94,13 @@ class ResnetEncoder(nn.Module):
         )
         
         self.bshape_modulator = nn.Sequential(
-                    nn.Linear(68*3 + 53, 256),
-                    mygroupnorm(num_groups=8, num_channels=256),
+                    nn.Linear(68*3 + 53, 512),
+                    mygroupnorm(num_groups=8, num_channels=512),
                     nn.ReLU(),
-                    nn.Linear(256, 256),
-                    mygroupnorm(num_groups=8, num_channels=256),
+                    nn.Linear(512, 512),
+                    mygroupnorm(num_groups=8, num_channels=512),
                     nn.ReLU(),
-                    nn.Linear(256, 256),
+                    nn.Linear(512, 256),
                     mygroupnorm(num_groups=8, num_channels=256),
                     nn.ReLU(),
                     nn.Linear(256, 256),
@@ -93,6 +108,7 @@ class ResnetEncoder(nn.Module):
                     nn.ReLU(),
                     nn.Linear(256, 53)
         )
+
 
         # for layer in self.tail:
         #     if isinstance(layer, nn.Linear):
@@ -109,7 +125,7 @@ class ResnetEncoder(nn.Module):
         self.bshape_modulator[-1].weight.data.zero_()
         self.bshape_modulator[-1].bias.data.zero_()
             
-        self.softplus = nn.Softplus()
+        self.softplus = nn.Softplus(beta=2)
         self.elu = nn.ELU()
         # self.register_buffer('scale', torch.zeros(1))
         self.scale = torch.nn.Parameter(torch.zeros(1))
@@ -147,6 +163,9 @@ class ResnetEncoder(nn.Module):
 
         self.bshapes_multiplier = nn.Parameter(torch.zeros(53))
 
+        # hook gradient of bshapes_multiplier and multiply by 10
+        # self.bshapes_multiplier.register_hook(lambda grad: grad*10)
+        self.bshape_act = bshape_act()
         
 
     def forward(self, views):
@@ -194,6 +213,7 @@ class ResnetEncoder(nn.Module):
         # blendshape = blendshape + bshape_modulation
         # blendshape = blendshape * (1+self.gelu(self.bshapes_multiplier[None])) 
         blendshape = blendshape * (1+self.softplus(self.bshapes_multiplier[None])) + bshape_modulation
+        blendshape = self.bshape_act(blendshape)
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 

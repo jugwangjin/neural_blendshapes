@@ -34,7 +34,7 @@ def initialize_weights(m, gain=0.1):
 
     for l in m.children():
         if isinstance(l, nn.Linear):
-            nn.init.xavier_uniform_(l.weight, gain=gain)
+            # nn.init.xavier_uniform_(l.weight, gain=gain)
             l.bias.data.zero_()
 
 class mylayernorm(nn.Module):
@@ -84,17 +84,18 @@ class ConstantTemplate(nn.Module):
         return self.constant
 
 
+
 class MLPTemplate(nn.Module):
     def __init__(self, inp_dim):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(inp_dim, 512),
-            nn.ReLU(),
-            nn.Linear(512, 512),
-            nn.ReLU(),
-            nn.Linear(512, 512),
-            nn.ReLU(),
-            nn.Linear(512, 3)
+            nn.Linear(inp_dim, 128),
+            nn.Softplus(beta=100),
+            nn.Linear(128, 128),
+            nn.Softplus(beta=100),
+            nn.Linear(128, 128),
+            nn.Softplus(beta=100),
+            nn.Linear(128, 3)
         )
 
     def forward(self, x):
@@ -161,51 +162,52 @@ class NeuralBlendshapes(nn.Module):
         
         # nn.init.uniform_(self.fourier_feature_transform.params, -1e-1, 1e-1)
 
-        self.include_identity_on_encoding = True
+        self.include_identity_on_encoding = False
 
         if self.include_identity_on_encoding:
             self.inp_size += 3
 
-        self.gradient_scaling = 4.
-        self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+        self.gradient_scaling = 1.
+        # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
         # self.inp_size = self.fourier_feature_transform.n_output_dims
 
         # print(self.inp_size)
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(self.inp_size, 512),
+            nn.Linear(self.inp_size, 256),
             # nn.Linear(self.inp_size + 3 + 3 + 53, 512),
             # mygroupnorm(num_groups=4, num_channels=512),
-            nn.ReLU(),
-            nn.Linear(512, 512),
+            nn.Softplus(beta=100),
+            nn.Linear(256, 256),
             # mygroupnorm(num_groups=4, num_channels=512),
-            nn.ReLU(),
-            nn.Linear(512, 512),
+            nn.Softplus(beta=100),
+            nn.Linear(256, 256),
             # mygroupnorm(num_groups=4, num_channels=512),
-            nn.ReLU(),
-            nn.Linear(512, 53*3)
+            nn.Softplus(beta=100),
+            nn.Linear(256, 256),
+            # mygroupnorm(num_groups=4, num_channels=512),
+            nn.Softplus(beta=100),
+            nn.Linear(256, 53*3)
             # nn.Linear(512, 53*3)
         )
-        
         self.template_deformer = MLPTemplate(self.inp_size)
         self.template_embedder = Identity()
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
-                    nn.ReLU(),
+                    nn.Softplus(beta=100),
                     nn.Linear(32, 32),
-                    nn.ReLU(),
+                    nn.Softplus(beta=100),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
-
         # last layer to all zeros, to make zero deformation as the default            
-        # initialize_weights(self.expression_deformer, gain=0.01)
-        self.expression_deformer[-1].weight.data.zero_()
+        initialize_weights(self.expression_deformer, gain=0.01)
+        # self.expression_deformer[-1].weight.data.zero_()
         self.expression_deformer[-1].bias.data.zero_()
 
         initialize_weights(self.template_deformer, gain=0.01)
-        self.template_deformer.mlp[-1].weight.data.zero_()
+        # self.template_deformer.mlp[-1].weight.data.zero_()
         self.template_deformer.mlp[-1].bias.data.zero_()
 
         # by default, weight to almost ones
@@ -320,6 +322,10 @@ class NeuralBlendshapes(nn.Module):
             features[:, :53] = bshape
 
         return_dict['features'] = features
+        mp_bshapes = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
+        estim_bshapes = features[:, :53]
+        bshape_modulation = estim_bshapes - mp_bshapes * (1+self.encoder.softplus(self.encoder.bshapes_multiplier[None]))
+        return_dict['bshape_modulation'] = bshape_modulation
     
         bsize = features.shape[0]
         template = self.ict_facekit.canonical[0]
