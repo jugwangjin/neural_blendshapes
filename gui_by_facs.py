@@ -2,7 +2,6 @@ import open3d as o3d
 import numpy as np
 import open3d.visualization.rendering as rendering
 import torch
-import gui_helper 
 from arguments import config_parser
 import os
 

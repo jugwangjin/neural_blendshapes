@@ -461,10 +461,26 @@ def run_one_folder(output_dir, gt_dir, save_dir, is_insta, no_cloth):
     result_filenames = list()
 
     import tqdm
-    for file in tqdm.tqdm(os.listdir(output_dir)):
+
+    filenames = os.listdir(output_dir)
+
+    filenames_padded = {}
+    for filename in filenames:
+        if not filename.endswith(".png") and not filename.endswith(".jpg"):
+            continue
+        filenames_padded[filename] = str(int(filename[:-4]) + 1) + ".png"
+    
+    # sort filenames by the padded number
+    filenames = sorted(filenames, key=lambda x: int(x[:-4]))
+
+    n = 0
+
+    for file in tqdm.tqdm(filenames):
         if not file.endswith(".png") and not file.endswith(".jpg"):
             continue
-
+        n += 1
+        if n > 400:
+            break
         try:
             pred_image = os.path.join(output_dir, file)
             # inverse of zfill?

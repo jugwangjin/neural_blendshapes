@@ -5,3 +5,68 @@ python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/pointavatar/m
 Written result to  ./quant/pointavatar_marcel/results_no_cloth_rgb.npy
 nan	nan	nan	nan
 python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/pointavatar/subject_3/pointavatar/train/eval/test/epoch_62/rgb_erode_dilate --gt_dir /Bean/data/gwangjin/2024/subject_3/subject_3/test --save_dir ./quant/pointavatar_subject_3
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+Loading model from: /opt/conda/lib/python3.10/site-packages/lpips/weights/v0.1/alex.pth
+Written result to  ./quant/pointavatar_subject_3/results_1319.png.npy
+0.022674754035066476	0.08639095720016596	0.843351294669238	25.196373149987423
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/pointavatar/subject_3/pointavatar/train/eval/test/epoch_62/rgb_erode_dilate --gt_dir /Bean/data/gwangjin/2024/subject_3/subject_3/test --save_dir ./quant/pointavatar_subject_3 --no_cloth
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+Loading model from: /opt/conda/lib/python3.10/site-packages/lpips/weights/v0.1/alex.pth
+Written result to  ./quant/pointavatar_subject_3/results_no_cloth_1319.png.npy
+0.01280888700180433	0.06744334242109097	0.9161523346467452	27.313253800363253
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/pointavatar/yufeng/pointavatar/MVI_1810+MVI_1814/eval/MVI_1812/epoch_63/rgb_erode_dilate --gt_dir /Bean/data/gwangjin/2024/yufeng/yufeng/MVI_1812 --save_dir ./quant/pointavatar_yufeng
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+Loading model from: /opt/conda/lib/python3.10/site-packages/lpips/weights/v0.1/alex.pth
+Error processing 5.png: unpack_from requires a buffer of at least 4 bytes for unpacking 4 bytes at offset 0 (actual buffer size is 0)
+Written result to  ./quant/pointavatar_yufeng/results_1319.png.npy
+0.023098595661985313	0.08941458220381224	0.8813876752137092	25.34249936488637
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/pointavatar/yufeng/pointavatar/MVI_1810+MVI_1814/eval/MVI_1812/epoch_63/rgb_erode_dilate --gt_dir /Bean/data/gwangjin/2024/yufeng/yufeng/MVI_1812 --save_dir ./quant/pointavatar_yufeng --no_cloth
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+Loading model from: /opt/conda/lib/python3.10/site-packages/lpips/weights/v0.1/alex.pth
+Error processing 5.png: unpack_from requires a buffer of at least 4 bytes for unpacking 4 bytes at offset 0 (actual buffer size is 0)
+Written result to  ./quant/pointavatar_yufeng/results_no_cloth_1319.png.npy
+0.02236111698418921	0.08726562816943777	0.8835172599606347	25.549416089267062
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/imavatar/marcel/IMavatar/MVI_1797+MVI_1801/eval/MVI_1802/epoch_35/rgb --gt_dir /Bean/data/gwangjin/2024/marcel/marcel/MVI_1802 --save_dir ./quant/imavatar_marcel
+Written result to  ./quant/imavatar_marcel/results_rgb.npy
+nan	nan	nan	nan
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/imavatar/marcel/IMavatar/MVI_1797+MVI_1801/eval/MVI_1802/epoch_35/rgb --gt_dir /Bean/data/gwangjin/2024/marcel/marcel/MVI_1802 --save_dir ./quant/imavatar_marcel --no_cloth
+Written result to  ./quant/imavatar_marcel/results_no_cloth_rgb.npy
+nan	nan	nan	nan
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/imavatar/subject_3/IMavatar/train/eval/test/epoch_33/rgb --gt_dir /Bean/data/gwangjin/2024/subject_3/subject_3/test --save_dir ./quant/imavatar_subject_3
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+Loading model from: /opt/conda/lib/python3.10/site-packages/lpips/weights/v0.1/alex.pth
+Written result to  ./quant/imavatar_subject_3/results_593.png.npy
+0.02827228477845589	0.16982248922189078	0.8178149527311325	23.363608983357746
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/imavatar/subject_3/IMavatar/train/eval/test/epoch_33/rgb --gt_dir /Bean/data/gwangjin/2024/subject_3/subject_3/test --save_dir ./quant/imavatar_subject_3 --no_cloth
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+Loading model from: /opt/conda/lib/python3.10/site-packages/lpips/weights/v0.1/alex.pth
+Written result to  ./quant/imavatar_subject_3/results_no_cloth_593.png.npy
+0.014774041640727471	0.11922768082469702	0.9113361784815788	25.96319619178772
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/imavatar/yufeng/IMavatar/MVI_1810+MVI_1814/eval/MVI_1812/epoch_70/rgb --gt_dir /Bean/data/gwangjin/2024/yufeng/yufeng/MVI_1812 --save_dir ./quant/imavatar_yufeng
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+Loading model from: /opt/conda/lib/python3.10/site-packages/lpips/weights/v0.1/alex.pth
+Written result to  ./quant/imavatar_yufeng/results_1319.png.npy
+0.026313107388272677	0.1414233813424633	0.8691624571199287	23.40774623609569
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/imavatar/yufeng/IMavatar/MVI_1810+MVI_1814/eval/MVI_1812/epoch_70/rgb --gt_dir /Bean/data/gwangjin/2024/yufeng/yufeng/MVI_1812 --save_dir ./quant/imavatar_yufeng --no_cloth
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+Loading model from: /opt/conda/lib/python3.10/site-packages/lpips/weights/v0.1/alex.pth
+Written result to  ./quant/imavatar_yufeng/results_no_cloth_1319.png.npy
+0.024503420689844922	0.1351650202927524	0.8742536401095455	24.40575124453192
+python flare/metrics/metrics.py --data_dir /Bean/data/gwangjin/2024/insta_data/marcel_insta/experiments/insta/debug/overlay --gt_dir /Bean/data/gwangjin/2024/marcel/marcel/MVI_1802 --save_dir ./quant/insta_marcel --is_insta
+Written result to  ./quant/insta_marcel/results_rgb.npy
+nan	nan	nan	nan
+python flare/metrics/metrics.py --data_dir /Bean/data/gwangjin/2024/insta_data/marcel_insta/experiments/insta/debug/overlay --gt_dir /Bean/data/gwangjin/2024/marcel/marcel/MVI_1802 --save_dir ./quant/insta_marcel --is_insta --no_cloth
+Written result to  ./quant/insta_marcel/results_no_cloth_rgb.npy
+nan	nan	nan	nan
+python flare/metrics/metrics.py --data_dir /Bean/data/gwangjin/2024/insta_data/yufeng_insta/experiments/insta/debug/overlay --gt_dir /Bean/data/gwangjin/2024/yufeng/yufeng/MVI_1812 --save_dir ./quant/insta_yufeng --is_insta
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+Loading model from: /opt/conda/lib/python3.10/site-packages/lpips/weights/v0.1/alex.pth
+Written result to  ./quant/insta_yufeng/results_00587.png.npy
+0.1985200890398597	0.39462978953368044	0.5943960419256393	11.604702322450402
+python flare/metrics/metrics.py --data_dir /Bean/data/gwangjin/2024/insta_data/yufeng_insta/experiments/insta/debug/overlay --gt_dir /Bean/data/gwangjin/2024/yufeng/yufeng/MVI_1812 --save_dir ./quant/insta_yufeng --is_insta --no_cloth
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+Loading model from: /opt/conda/lib/python3.10/site-packages/lpips/weights/v0.1/alex.pth
+Written result to  ./quant/insta_yufeng/results_no_cloth_00587.png.npy
+0.1967842052346223	0.39260456088062834	0.5996632933290037	11.881098223385745
+python flare/metrics/metrics.py --data_dir /Bean/data/gwangjin/2024/insta_data/subject_3/experiments/insta/debug/overlayrgb --gt_dir /Bean/data/gwangjin/2024/subject_3/subject_3/test --save_dir ./quant/insta_subject_3 --is_insta
+python flare/metrics/metrics.py --data_dir /Bean/data/gwangjin/2024/insta_data/subject_3/experiments/insta/debug/overlayrgb --gt_dir /Bean/data/gwangjin/2024/subject_3/subject_3/test --save_dir ./quant/insta_subject_3 --is_insta --no_cloth

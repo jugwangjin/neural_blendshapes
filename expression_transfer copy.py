@@ -103,59 +103,47 @@ import matplotlib.pyplot as plt
 import sys
 from flare.dataset import dataset_util
 
+
 import imageio 
+# ==============================================================================================
+# evaluation
+# ==============================================================================================    
+def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt):
+    return_dict = neural_blendshapes(views["img"].to(device), views)
+    # print(return_dict['features'][:, 53:])
+
+    deformed_vertices = return_dict['expression_mesh_posed']
+    
+    d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
+    ## ============== Rasterize ==============================
+    gbuffers = renderer.render_batch(views["flame_camera"], deformed_vertices.contiguous(), d_normals,
+                        channels=channels_gbuffer, with_antialiasing=True, 
+                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
+    
+    ## ============== predict color ==============================
+    rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffers, views, mesh, args.finetune_color, lgt)
+
+    return rgb_pred, gbuffers, cbuffers
 
 
 # ==============================================================================================
 # evaluation: numbers
 # ==============================================================================================  
-@torch.no_grad()
-def run_video(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer,
+def run_transfer(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer,
                         experiment_dir, images_eval_save_path, lgt=None, save_each=False):
     import tqdm
 
-    transfer_save_dir = Path(images_save_path / 'interpolation')
+    transfer_save_dir = Path(images_save_path / args.transfer_out_name)
     transfer_save_dir.mkdir(parents=True, exist_ok=True)
 
     Path(transfer_save_dir / "rgb").mkdir(parents=True, exist_ok=True)
     Path(transfer_save_dir / "normal").mkdir(parents=True, exist_ok=True)
     
-    exps_facs = {}
-    exps_facs['happiness'] = ['cheekSquint_L', 'cheekSquint_R', 'mouthSmile_L', 'mouthSmile_R']
-    exps_facs['sadness'] = ['browInnerUp_L', 'browInnerUp_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
-    exps_facs['surprise'] = ['browInnerUp_L', 'browInnerUp_R', 'browOuterUp_L', 'browOuterUp_R', 'eyeWide_L', 'eyeWide_R', 'jawOpen']
+    for it, views in tqdm.tqdm(enumerate(dataloader_validate)):
+        with torch.no_grad():
+            rgb_pred, gbuffer, cbuffer = run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, 
+                    channels_gbuffer, lgt=lgt)
 
-    facs_codes = {}
-    for exp in exps_facs:
-        facs_codes[exp] = torch.zeros(1, 53)
-        for fac in exps_facs[exp]:
-            facs_codes[exp][0, ict_facekit.expression_names.tolist().index(fac)] = 0.7
-
-    pose = torch.zeros(1, 10)
-    pose[0, 6] = 1 # scale
-
-    
-    for view in dataloader_validate:
-        fixed_view = view
-        break
-
-    # zero - one expression - zero - to another expression .. make sequence
-    facs_sequence = []
-    num_interp = 15 # 0.5 sec
-    for exp in exps_facs:
-        for i in range(num_interp):
-            facs_sequence.append(facs_codes[exp] * (i/(num_interp-1)))
-        for i in range(num_interp):
-            facs_sequence.append(facs_codes[exp] * (1 - i/(num_interp-1)))
-
-    for i, facs in enumerate(facs_sequence):
-        return_dict = neural_blendshapes(features = torch.cat([0.8 * facs[None].to(neural_blendshapes.device), pose.to(neural_blendshapes.device)], dim=-1))
-
-        gbuffer = renderer.render_batch(fixed_view['flame_camera'], return_dict['expression_mesh_posed'].contiguous(), mesh.fetch_all_normals(return_dict['ict_mesh_w_temp_posed'], mesh), 
-                                channels=channels_gbuffer+['segmentation'], with_antialiasing=True, 
-                                canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh) 
-        rgb_pred, cbuffers, _ = shader.shade(gbuffer, fixed_view, mesh, args.finetune_color, lgt)
-        
         rgb_pred = rgb_pred * gbuffer["mask"]
         if save_each:
             normals = gbuffer["normal"]
@@ -167,7 +155,7 @@ def run_video(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, 
             
             for i in range(len(gbuffer_mask)):
                 mask = gbuffer_mask[i].cpu()
-                id = int(i)
+                id = int(views["frame_name"][i])
 
                 # rgb prediction
                 imageio.imsave(transfer_save_dir / "rgb" / f'{id:05d}.png', convert_uint(torch.cat([rgb_pred[i].cpu(), mask], -1))) 
@@ -176,8 +164,6 @@ def run_video(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, 
                 normal = (normals[i] + 1.) / 2.
                 normal = torch.cat([normal.cpu(), mask], -1)
                 imageio.imsave(transfer_save_dir / "normal" / f'{id:05d}.png', convert_uint_255(normal))
-    
-
 
 
 
@@ -236,9 +222,8 @@ if __name__ == '__main__':
     # ==============================================================================================
     # deformation 
     # ==============================================================================================
-    
+
     model_path = Path(experiment_dir / "stage_1" / "network_weights" / f"neural_blendshapes.pt")
-    print(os.listdir(Path(experiment_dir / "stage_1" / "network_weights")))
     neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, exp_dir = experiment_dir, lambda_=args.lambda_, aabb = ict_mesh_aabb, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
     neural_blendshapes = neural_blendshapes.to(device)
@@ -292,4 +277,4 @@ if __name__ == '__main__':
     mesh = ict_canonical_mesh.with_vertices(ict_canonical_mesh.vertices)
 
     with torch.no_grad():
-        run_video(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, experiment_dir, images_save_path, lgt=lgt, save_each=True)
+        run_trasnfer(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, experiment_dir, images_save_path, lgt=lgt, save_each=True)

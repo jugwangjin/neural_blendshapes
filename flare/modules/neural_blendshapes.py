@@ -452,6 +452,7 @@ def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_f
     neural_blendshapes.to(device)
 
     import os
+    print(os.path.exists(str(model_path)))
     if (os.path.exists(str(model_path))):
         print("Loading model from: ", str(model_path))
         params = torch.load(str(model_path))
