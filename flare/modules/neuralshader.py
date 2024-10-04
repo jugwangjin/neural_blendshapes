@@ -104,7 +104,7 @@ class NeuralShader(torch.nn.Module):
         #     self.gradient_scaling = 4.0
         #     self.diffuse_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
 
-        self.specular_mlp = FC(20 + 20 + 20, 3, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) # reflvec / normal for input
+        self.specular_mlp = FC(20 + 20, 3, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) # reflvec / normal for input
 
 
         print(disentangle_network_params)
@@ -140,33 +140,45 @@ class NeuralShader(torch.nn.Module):
 
         wo = util.safe_normalize(view_dir - deformed_position)
         reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
-        
+
+        diffuse_mlp_input = pe_input.view(-1, self.inp_size)
+        diffuse_mlp_output = self.diffuse_mlp(diffuse_mlp_input)
+
+        reflvec_enc = self.dir_enc_func(reflvec.view(-1, 3), self.last_act(diffuse_mlp_output[..., :1].view(-1, 1)))
+        specular_mlp_input = torch.cat([diffuse_mlp_output, reflvec_enc], dim=1)
+
+        specular_mlp_output = self.specular_mlp(specular_mlp_input)
+
+        color = specular_mlp_output[..., :3]
+
         # diffuse_light_input = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
         # specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
 
-        diffuse_mlp_input =  pe_input.view(-1, self.inp_size)
+        # specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
+        # diffuse_mlp_input = torch.cat([pe_input.view(-1, self.inp_size), specular_light_input], dim=1)
         # diffuse_mlp_input =  torch.cat([pe_input.view(-1, self.inp_size), diffuse_light_input], dim=1)
-        diffuse_mlp_output = self.diffuse_mlp(diffuse_mlp_input) 
+        # diffuse_mlp_output = self.diffuse_mlp(diffuse_mlp_input) 
 
-        diffuse = self.last_act(diffuse_mlp_output[..., :3])
-        diffuse_light = torch.zeros_like(diffuse_mlp_output[..., 3:6])
-        roughness = self.last_act(diffuse_mlp_output[..., 3:4])
+        # diffuse = self.last_act(diffuse_mlp_output[..., :3])
+        # diffuse_light = torch.zeros_like(diffuse_mlp_output[..., 3:6])
+        # roughness = self.last_act(diffuse_mlp_output[..., 3:4])
         
-        diffuse_light_input = self.dir_enc_func(normal_bend.view(-1, 3), roughness)
-        specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), roughness)
+        # diffuse_light_input = self.dir_enc_func(normal_bend.view(-1, 3), roughness)
 
         # diffuse = diffuse_mlp_output[..., :3]
-        # diffuse_light = diffuse_mlp_output[..., 3:6]
-
-        specular_mlp_input = torch.cat([diffuse_mlp_output, diffuse_light_input, specular_light_input], dim=1)
-        # specular_mlp_input = torch.cat([pe_input.view(-1, self.inp_size), diffuse_light_input, specular_light_input], dim=1)
-        specular_mlp_output = self.specular_mlp(specular_mlp_input)
-
+        diffuse_light = torch.zeros_like(diffuse_mlp_output[..., 3:6])
+        specular_light = torch.zeros_like(diffuse_mlp_output[..., 3:6])
         specular_intensity = torch.zeros_like(diffuse_mlp_output[..., 3:4])
-        # specular_light = specular_mlp_output[..., 1:4]
-        specular_light = torch.zeros_like(diffuse_light)
 
-        color = diffuse + specular_mlp_output
+        # specular_mlp_input = torch.cat([diffuse_mlp_output, diffuse_light_input, specular_light_input], dim=1)
+        # specular_mlp_input = torch.cat([pe_input.view(-1, self.inp_size), diffuse_light_input, specular_light_input], dim=1)
+        # specular_mlp_output = self.specular_mlp(specular_mlp_input)
+
+        # specular_intensity = torch.zeros_like(diffuse_mlp_output[..., 3:4])
+        # specular_light = specular_mlp_output[..., 1:4]
+        # specular_light = torch.zeros_like(diffuse_light)
+
+        # color = diffuse
         # color = diffuse * diffuse_light + specular_intensity * specular_light
 
         lights = torch.cat([diffuse_light, specular_light, specular_mlp_output], dim=1)
