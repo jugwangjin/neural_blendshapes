@@ -17,6 +17,9 @@ def config_parser():
     parser.add_argument('--working_dir', type=Path, default="/home/sbharadwaj/projects/neural-deferred-shading/", help="Path to the input data")
     parser.add_argument('--output_dir', type=Path, default="out", help="Path to the output directory")
 
+    parser.add_argument('--target_model_dir', type=Path, default="data/yufeng/", help="Path to the input data")
+    parser.add_argument('--transfer_out_name', type=str, default="transferred", help="Path to the input data")
+
     # misc
     parser.add_argument('--sample_idx_ratio', type=int, default=1, help="To sample less images (mainly for debugging purposes)")    
     parser.add_argument('--device', type=int, default=0, choices=([-1] + list(range(torch.cuda.device_count()))), help="GPU to use; -1 is CPU")

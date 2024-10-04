@@ -114,6 +114,40 @@ def add_buffer(cbuffers, gbuffer_mask, color_list, convert_uint):
 def diffuse_specular(cbuffers, gbuffer_mask, color_list, convert_uint):
     H, W = 512, 512
 
+
+def save_shading(shaded_image, cbuffers, debug_gbuffer, debug_view, images_save_path, iteration, save_name=None, ict_facekit=None):
+    device = shaded_image.device
+    convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
+
+    gbuffer_mask = debug_gbuffer["mask"]
+    Bz, H, W, _ = debug_gbuffer["mask"].shape
+    # Save a normal map in camera space
+    R = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], device=device, dtype=torch.float32)
+    normal_image = (0.5*(debug_gbuffer["normal"] @ debug_view["camera"][0].R.T @ R.T + 1)) * gbuffer_mask 
+
+    shading = add_directionlight(debug_gbuffer["normal"].reshape([1, -1, 3]), device)
+    shading = shading.reshape(debug_gbuffer["normal"].shape)
+    shading = shading * gbuffer_mask 
+
+    shading = shading.permute(0,3,1,2)
+    shading = shading * 255
+
+    # if shading.shape[0] == 1:
+    if len(shading.shape) == 3:
+        shading = shading.unsqueeze(0)
+    img = Image.fromarray(shading[0].detach().cpu().numpy().astype(np.uint8).transpose(1, 2, 0))
+    img.save(images_save_path / save_name)
+    return
+    
+    # for i in range(shading.shape[0]):
+    #     img = Image.fromarray(shading[i].detach().cpu().numpy().astype(np.uint8).transpose(1, 2, 0))
+    #     img.save(images_save_path / save_name.replace(".png", f"_{i}.png").replace(".jpg", f"_{i}.jpg"))
+
+
+
+
+
+
 # ==================== visualizations =================================
 def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images_save_path, iteration, save_name=None, ict_facekit=None):
     device = shaded_image.device
@@ -193,6 +227,53 @@ def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images
     del color_list
 
     return shaded_image
+
+
+
+
+# ==================== visualizations =================================
+def visualize_training_no_lm(shaded_image, cbuffers, debug_gbuffer, debug_view, images_save_path, iteration, save_name=None, ict_facekit=None):
+    device = shaded_image.device
+    convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
+
+    gbuffer_mask = debug_gbuffer["mask"]
+    Bz, H, W, _ = debug_gbuffer["mask"].shape
+    grid_path = (images_save_path / "grid")
+    grid_path.mkdir(parents=True, exist_ok=True)
+
+    grid_path_each = (images_save_path / "grid_each")
+    grid_path_each.mkdir(parents=True, exist_ok=True)
+
+    # Save a normal map in camera space
+    R = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], device=device, dtype=torch.float32)
+    normal_image = (0.5*(debug_gbuffer["normal"] @ debug_view["camera"][0].R.T @ R.T + 1)) * gbuffer_mask 
+
+    shading = add_directionlight(debug_gbuffer["normal"].reshape([1, -1, 3]), device)
+    shading = shading.reshape(debug_gbuffer["normal"].shape)
+    shading = shading * gbuffer_mask 
+
+
+
+    save_individual_img(shaded_image, debug_view, normal_image, gbuffer_mask, cbuffers, grid_path_each)
+    color_list = []
+    color_list += [list_torchgrid(convert_uint(debug_view['img'].clone().detach()), grid_path, save_name=None, nrow=1, save=False, scale_factor=1).unsqueeze(0)]
+    color_list += [list_torchgrid(convert_uint(shaded_image), grid_path, save_name=None, nrow=1, save=False, scale_factor=1).unsqueeze(0)]
+
+    # if 'shading' in cbuffers:
+    #     color_list += [list_torchgrid(convert_uint(cbuffers["albedo"]), grid_path, save_name=None, nrow=1, save=False, scale_factor=1).unsqueeze(0)]
+    #     color_list += [list_torchgrid(convert_uint(cbuffers["shading"] * gbuffer_mask), grid_path, save_name=None, nrow=1, save=False, scale_factor=1).unsqueeze(0)]
+    #     add_buffer(cbuffers, gbuffer_mask, color_list, convert_uint) ## visualize roughness and specular intensity
+    color_list += [list_torchgrid(normal_image, grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
+    color_list += [list_torchgrid(shading.to(device), grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
+    if save_name is None:
+        save_name = f'grid_{iteration}.png'
+    else:
+        save_name = f'grid_{iteration}_{save_name}.png'
+    list_torchgrid(color_list, grid_path, save_name, nrow=len(color_list), scale_factor=1)
+    del color_list
+
+    return shaded_image
+
 
 # ==============================================================================================
 # SAVE IMAGE FOR QUALITATIVE EVALUATION

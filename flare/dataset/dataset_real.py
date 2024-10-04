@@ -50,19 +50,38 @@ class DatasetLoader(Dataset):
         
         self.json_dict = {"frames": []}
         for dir in self.train_dir: 
-            json_file = self.base_dir / dir / "merged_params.json"
+            
+            try:
+                json_file = self.base_dir / dir / "flame_params.json"
 
-            with open(json_file, 'r') as f:
-                json_data = json.load(f)
-                for item in json_data["frames"]:
-                    # keep track of the subfolder
-                    item.update({"dir":dir})
-                self.json_dict["frames"].extend(json_data["frames"])
+
+                with open(json_file, 'r') as f:
+                    json_data = json.load(f)
+                    for item in json_data["frames"]:
+                        # keep track of the subfolder
+                        item.update({"dir":dir})
+                    self.json_dict["frames"].extend(json_data["frames"])
+            except:
+                json_file = self.base_dir / dir / "merged_params.json"
+
+
+                with open(json_file, 'r') as f:
+                    json_data = json.load(f)
+                    for item in json_data["frames"]:
+                        # keep track of the subfolder
+                        item.update({"dir":dir})
+                    self.json_dict["frames"].extend(json_data["frames"])
+        
 
         if sample_ratio > 1:
             self.all_img_path = self.json_dict["frames"][::sample_ratio]
         else:
             self.all_img_path = self.json_dict["frames"]
+
+        stem = lambda json_dict: str(self.base_dir / json_dict["dir"] / Path(json_dict["file_path"] + ".png").stem).zfill(6)
+    
+        # sort self.all_img_path, by stem lambda function
+        self.all_img_path = sorted(self.all_img_path, key=stem)
 
         self.len_img = len(self.all_img_path)
         test_path = self.base_dir / self.all_img_path[0]["dir"] / Path(self.all_img_path[0]["file_path"] + ".png")
@@ -132,7 +151,7 @@ class DatasetLoader(Dataset):
             self.loaded[True] = {}
             self.loaded[False] = {}
 
-        self._compute_importance()
+        # self._compute_importance()
 
 
     def get_mean_expression_train(self, train_dir):
@@ -264,7 +283,7 @@ class DatasetLoader(Dataset):
         # self.importance = list(importance.cpu().data.numpy())
 
     def _parse_frame_single(self, idx, flip=False):
-        json_dict = self.all_img_path[idx % self.len_img]
+        json_dict = self.all_img_path[idx]
 
         img_path = self.base_dir / json_dict["dir"] / Path(json_dict["file_path"] + ".png")
         
@@ -281,13 +300,13 @@ class DatasetLoader(Dataset):
 
         # ignore frames where no face is detected, just re-route to the next frame
         if mp_landmark is None:
-            print(flip)
-            # save the mp_image, to debug folder 
-            mp_image = Image.open(img_path)
-            mp_image.save(f'./debug/no_face/{json_dict["dir"]}_{img_path.stem}_mp.png')
-            if flip:
-                mp_image = mp_image.transpose(Image.FLIP_LEFT_RIGHT)
-                mp_image.save(f'./debug/no_face/{json_dict["dir"]}_{img_path.stem}_mp_flip.png')
+            # print(flip)
+            # # save the mp_image, to debug folder 
+            # mp_image = Image.open(img_path)
+            # mp_image.save(f'./debug/no_face/{json_dict["dir"]}_{img_path.stem}_mp.png')
+            # if flip:
+            #     mp_image = mp_image.transpose(Image.FLIP_LEFT_RIGHT)
+            #     mp_image.save(f'./debug/no_face/{json_dict["dir"]}_{img_path.stem}_mp_flip.png')
             # raise ValueError('No face detected')
             return self._parse_frame_single(idx+1)
         
@@ -351,6 +370,8 @@ class DatasetLoader(Dataset):
         R *= -1 
         t = world_mat[:3, 3]
         flame_camera = Camera(self.K, R, t, device=device)
+
+        camera = flame_camera
 
         # facs = torch.tensor(json_dict["facs"], dtype=torch.float32)
         # facs = torch.tensor(json_dict["facs"], dtype=torch.float32)

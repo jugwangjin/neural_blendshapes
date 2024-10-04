@@ -118,19 +118,23 @@ class ICTFaceKitTorch(torch.nn.Module):
         jaw_index = self.expression_names.tolist().index('jawOpen')
         self.jaw_index = jaw_index
 
+        self.register_buffer('identity', torch.zeros(1, self.num_identity))
+        self.register_buffer('expression', torch.zeros(1, self.num_expression))
+        self.expression[0, jaw_index] = 0.75 # jaw open for canonical face
+        
         if canonical is not None:
             canonical = np.load(canonical, allow_pickle=True).item()
-            self.register_buffer('identity', torch.from_numpy(canonical['identity'])[None])
-            self.register_buffer('expression', torch.from_numpy(canonical['expression'])[None])
+            # self.register_buffer('identity', torch.from_numpy(canonical['identity'])[None])
+            # self.register_buffer('expression', torch.from_numpy(canonical['expression'])[None])
             # B of s, R, T is 1
             self.register_buffer('s', canonical['s'].cpu()) # shape of (B)
             self.register_buffer('R', canonical['R'].cpu()) # shape of (B, 3, 3)
             self.register_buffer('T', canonical['T'].cpu()) # shape of (B, 3)
 
         else:
-            self.register_buffer('identity', torch.zeros(1, self.num_identity))
-            self.register_buffer('expression', torch.zeros(1, self.num_expression))
-            self.expression[0, jaw_index] = 0.75 # jaw open for canonical face
+            # self.register_buffer('identity', torch.zeros(1, self.num_identity))
+            # self.register_buffer('expression', torch.zeros(1, self.num_expression))
+            # self.expression[0, jaw_index] = 0.75 # jaw open for canonical face
             # B of s, R, T is 1
             self.register_buffer('s', torch.ones(1).cpu()) # shape of (B)
             self.register_buffer('R', torch.eye(3)[None].cpu()) # shape of (B, 3, 3)

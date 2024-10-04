@@ -90,10 +90,13 @@ class MLPTemplate(nn.Module):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(inp_dim, 128),
+            mygroupnorm(num_groups=2, num_channels=128),
             nn.Softplus(beta=100),
             nn.Linear(128, 128),
+            mygroupnorm(num_groups=2, num_channels=128),
             nn.Softplus(beta=100),
             nn.Linear(128, 128),
+            mygroupnorm(num_groups=2, num_channels=128),
             nn.Softplus(beta=100),
             nn.Linear(128, 3)
         )
@@ -156,6 +159,7 @@ class NeuralBlendshapes(nn.Module):
 
         # self.gradient_scaling = 64.0
         self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to('cuda')
+        self.fourier_feature_transform2 = tcnn.Encoding(3, enc_cfg).to('cuda')
         # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / gradient_scaling, ))
         # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
         self.inp_size = self.fourier_feature_transform.n_output_dims
@@ -175,17 +179,13 @@ class NeuralBlendshapes(nn.Module):
 
         self.expression_deformer = nn.Sequential(
             nn.Linear(self.inp_size, 256),
-            # nn.Linear(self.inp_size + 3 + 3 + 53, 512),
-            # mygroupnorm(num_groups=4, num_channels=512),
+            mygroupnorm(num_groups=2, num_channels=256),
             nn.Softplus(beta=100),
             nn.Linear(256, 256),
-            # mygroupnorm(num_groups=4, num_channels=512),
+            mygroupnorm(num_groups=2, num_channels=256),
             nn.Softplus(beta=100),
             nn.Linear(256, 256),
-            # mygroupnorm(num_groups=4, num_channels=512),
-            nn.Softplus(beta=100),
-            nn.Linear(256, 256),
-            # mygroupnorm(num_groups=4, num_channels=512),
+            mygroupnorm(num_groups=2, num_channels=256),
             nn.Softplus(beta=100),
             nn.Linear(256, 53*3)
             # nn.Linear(512, 53*3)
@@ -201,10 +201,20 @@ class NeuralBlendshapes(nn.Module):
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
-        # last layer to all zeros, to make zero deformation as the default            
-        initialize_weights(self.expression_deformer, gain=0.01)
-        # self.expression_deformer[-1].weight.data.zero_()
-        self.expression_deformer[-1].bias.data.zero_()
+
+        for l in self.expression_deformer.children():
+            if isinstance(l, nn.Linear):
+                # nn.init.xavier_uniform_(l.weight, gain=gain)
+                try:
+                    # multiply 0.1 to the weights data
+                    scale = ((1 / l.in_features)**0.5) * 0.02
+                    # Initialize weights and biases with the new scale
+                    nn.init.uniform_(l.weight, -scale, scale)
+                    l.bias.data.zero_()
+                except Exception as e:
+                    print("Error in initializing weights", e)
+                    pass
+        self.expression_deformer[-1].weight.data.zero_()
 
         initialize_weights(self.template_deformer, gain=0.01)
         # self.template_deformer.mlp[-1].weight.data.zero_()
@@ -262,7 +272,7 @@ class NeuralBlendshapes(nn.Module):
 
         return mesh
 
-    def encode_position(self, coords):
+    def encode_position(self, coords, sec=False):
         template = self.ict_facekit.canonical[0] # shape of V, 3
         org_coords = coords * 0.25
 
@@ -290,7 +300,10 @@ class NeuralBlendshapes(nn.Module):
 
             coords = (coords - aabb_min) / (aabb_max - aabb_min)
 
-        encoded_coords = self.fourier_feature_transform(coords)
+        if not sec:
+            encoded_coords = self.fourier_feature_transform(coords)
+        else:
+            encoded_coords = self.fourier_feature_transform2(coords)
 
         encoded_coords = encoded_coords.reshape(b, v, -1)
         if unsqueezed:
@@ -312,21 +325,22 @@ class NeuralBlendshapes(nn.Module):
 
 
     def forward(self, image=None, views=None, features=None, image_input=True, pretrain=False):
-        bshape=None
-        if features is not None:
-            bshape = features
-        return_dict = {} 
-        features = self.encoder(views)
+        if features is None:
+            bshape=None
+            if features is not None:
+                bshape = features
+            return_dict = {} 
+            features, bshape_modulation = self.encoder(views)
+            return_dict['bshape_modulation'] = bshape_modulation
 
-        if bshape is not None:
-            features[:, :53] = bshape
+            if bshape is not None:
+                features[:, :53] = bshape
+        else:
+            return_dict = {} 
+            features = features
 
         return_dict['features'] = features
-        mp_bshapes = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
-        estim_bshapes = features[:, :53]
-        bshape_modulation = estim_bshapes - mp_bshapes * (1+self.encoder.softplus(self.encoder.bshapes_multiplier[None]))
-        return_dict['bshape_modulation'] = bshape_modulation
-    
+        
         bsize = features.shape[0]
         template = self.ict_facekit.canonical[0]
         neutral_template = self.ict_facekit.neutral_mesh_canonical[0]
@@ -338,6 +352,7 @@ class NeuralBlendshapes(nn.Module):
 # 
         # encoded_points = torch.cat([self.encode_position(uv_coords)], dim=-1)
         encoded_points = torch.cat([self.encode_position(template)], dim=-1)
+        encoded_points2 = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
         template_mesh_u_delta = self.template_deformer(encoded_points)
         # print(encoded_points.shape, template_mesh_u_delta.shape)
@@ -360,7 +375,7 @@ class NeuralBlendshapes(nn.Module):
         if pretrain:
             return return_dict
 
-        expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
+        expression_input = torch.cat([encoded_points2[None].repeat(bsize, 1, 1), \
                                         # features[:, None, :53].repeat(1, template.shape[0], 1), \
                                         # self.encode_position(ict_mesh_w_temp[:, :self.socket_index]), \
                                         ], \
@@ -388,7 +403,7 @@ class NeuralBlendshapes(nn.Module):
 
         template = self.ict_facekit.canonical[0]
         uv_coords = self.ict_facekit.uv_neutral_mesh[0]
-        encoded_points = torch.cat([self.encode_position(template)], dim=-1)
+        encoded_points = torch.cat([self.encode_position(template, sec=True)], dim=-1)
         # encoded_points = torch.cat([self.encode_position(uv_coords)], dim=-1)
 
         expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
@@ -397,7 +412,7 @@ class NeuralBlendshapes(nn.Module):
                                     dim=2) # B V ? 
         # expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 3)
         expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 53, 3)
-        expression_mesh_delta_u = expression_mesh_delta_u * blendshapes[:, None, :53, None]
+        # expression_mesh_delta_u = expression_mesh_delta_u * blendshapes[:, None, :53, None]
         return expression_mesh_delta_u
 
 
@@ -417,8 +432,7 @@ class NeuralBlendshapes(nn.Module):
         B, V, _ = vertices.shape
         rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle[:, None].repeat(1, V, 1) * weights, convention = 'XYZ')
         local_coordinate_vertices = (vertices - transform_origin[None, None,]) * scale[:, None]
-        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + weights * translation[:, None, :] + transform_origin[None, None] + global_translation[:, None]
-
+        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + transform_origin[None, None] 
         return deformed_mesh
 
     def save(self, path):

@@ -1,8 +1,8 @@
 run_name = fully_neural_v1
 
-input_dir = /data1/gwangjin/flare/marcel
-train_dir = ["MVI_1797", "MVI_1801"]
-eval_dir = ["MVI_1802"]
+input_dir = /data1/gwangjin/flare/subject_3
+train_dir = ["train"]
+eval_dir = ["test"]
 working_dir = .
 output_dir = /Bean/log/gwangjin/2024/neural_blendshapes
 

@@ -1,8 +1,8 @@
 run_name = fully_neural_v1
 
-input_dir = /data1/gwangjin/flare/marcel
-train_dir = ["MVI_1797", "MVI_1801"]
-eval_dir = ["MVI_1802"]
+input_dir = /data1/gwangjin/flare/yufeng/
+train_dir = ["MVI_1814", "MVI_1810"]
+eval_dir = ["MVI_1812"]
 working_dir = .
 output_dir = /Bean/log/gwangjin/2024/neural_blendshapes
 
@@ -48,3 +48,5 @@ light_mlp_dims = [64,64]
 material_mlp_dims = [256,256,256,256]
 material_mlp_ch = 4
 brdf_mlp_dims = [32, 32]
+
+

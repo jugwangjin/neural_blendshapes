@@ -198,12 +198,15 @@ class Mesh:
         self._uv_idx = faces
         self.vmapping = vmapping
 
-        self.vertices = self.vertices[vmapping]
-        self.indices = faces
+        # self.vertices = self.vertices[vmapping]
+        # self.indices = faces
         print(self._uv_coords.shape, self.vertices.shape)
 
     def compute_connectivity(self):
         # self.xatlas_uvmap()
+        if self._uv_coords is None:
+            self.xatlas_uvmap()
+
         self._faces_idx = self.face_idx
         self._edges = self.edges
         self._connected_faces = self.connected_faces

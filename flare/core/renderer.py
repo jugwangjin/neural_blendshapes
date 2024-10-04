@@ -127,7 +127,7 @@ class Renderer:
         batch_size = vertices.shape[0]
         # single fixed camera and for now we fix res also
         resolution = (512, 512)
-        P_batch, Rt = Renderer.to_gl_camera_batch(views['camera'], resolution, n=self.near, f=self.far)
+        P_batch, Rt = Renderer.to_gl_camera_batch(views['flame_camera'], resolution, n=self.near, f=self.far)
         deformed_vertices_clip_space = Renderer.transform_pos_batch(P_batch, vertices)
         return deformed_vertices_clip_space
 
@@ -275,9 +275,11 @@ class Renderer:
             # segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
             # gbuffer['narrow_face'] = segmentation
 
-
-        uv_coordinates, _ = dr.interpolate(canonical_uv, rast, idx, rast_db=rast_out_db, diff_attrs='all')
-        gbuffer["uv_coordinates"] = dr.antialias(uv_coordinates, rast, deformed_vertices_clip_space, idx) if with_antialiasing else uv_coordinates
+        try:
+            uv_coordinates, _ = dr.interpolate(canonical_uv, rast, idx, rast_db=rast_out_db, diff_attrs='all')
+            gbuffer["uv_coordinates"] = dr.antialias(uv_coordinates, rast, deformed_vertices_clip_space, idx) if with_antialiasing else uv_coordinates
+        except:
+            pass
 
         # We store the deformed vertices in clip space, the transformed camera matrix and the barycentric coordinates
         # to antialias texture and mask after computing the color 

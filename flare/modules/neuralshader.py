@@ -104,7 +104,7 @@ class NeuralShader(torch.nn.Module):
             # self.gradient_scaling = 4.0
             # self.diffuse_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
 
-        self.specular_mlp = FC(self.inp_size + 20, 3, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) # reflvec / normal for input
+        self.specular_mlp = FC(self.inp_size + 20 + 20, 3, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) # reflvec / normal for input
 
 
         print(disentangle_network_params)
@@ -139,9 +139,9 @@ class NeuralShader(torch.nn.Module):
         kr_max = kr_max.to(self.device)                    
 
         wo = util.safe_normalize(view_dir - deformed_position)
-        # reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
+        reflvec = util.safe_normalize(util.reflect(wo, normal_bend))        
         
-        diffuse_light_input = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
+        # diffuse_light_input = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
         # specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), kr_max.view(-1, 1))
 
         diffuse_mlp_input =  pe_input.view(-1, self.inp_size)
@@ -153,12 +153,12 @@ class NeuralShader(torch.nn.Module):
         roughness = self.last_act(diffuse_mlp_output[..., 3:4])
         
         diffuse_light_input = self.dir_enc_func(normal_bend.view(-1, 3), roughness)
-        # specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), roughness)
+        specular_light_input = self.dir_enc_func(reflvec.view(-1, 3), roughness)
 
         # diffuse = diffuse_mlp_output[..., :3]
         # diffuse_light = diffuse_mlp_output[..., 3:6]
 
-        specular_mlp_input = torch.cat([diffuse_mlp_output, diffuse_light_input], dim=1)
+        specular_mlp_input = torch.cat([diffuse_mlp_output, diffuse_light_input, specular_light_input], dim=1)
         # specular_mlp_input = torch.cat([pe_input.view(-1, self.inp_size), diffuse_light_input, specular_light_input], dim=1)
         specular_mlp_output = self.specular_mlp(specular_mlp_input)
 
@@ -169,7 +169,7 @@ class NeuralShader(torch.nn.Module):
         color = diffuse + specular_mlp_output
         # color = diffuse * diffuse_light + specular_intensity * specular_light
 
-        lights = torch.cat([diffuse_light, specular_light], dim=1)
+        lights = torch.cat([diffuse_light, specular_light, specular_mlp_output], dim=1)
 
         return color, specular_intensity, lights
 
@@ -196,7 +196,7 @@ class NeuralShader(torch.nn.Module):
         positions = gbuffer["canonical_position"]
         batch_size, H, W, ch = positions.shape
 
-        view_direction = torch.cat([v.center.unsqueeze(0) for v in views['camera']], dim=0)
+        view_direction = torch.cat([v.center.unsqueeze(0) for v in views['flame_camera']], dim=0)
         if finetune_color:
             ### skin mask for fresnel coefficient
             skin_mask = (torch.sum(views["skin_mask"][..., :3], axis=-1)).unsqueeze(-1)
@@ -234,7 +234,7 @@ class NeuralShader(torch.nn.Module):
         bz, h, w, ch = position.shape
         pe_input = self.apply_pe(position=position)
 
-        view_direction = torch.cat([v.center.unsqueeze(0) for v in views['camera']], dim=0)
+        view_direction = torch.cat([v.center.unsqueeze(0) for v in views['flame_camera']], dim=0)
         view_dir = view_direction[:, None, None, :]
 
         if finetune_color:

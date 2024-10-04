@@ -408,13 +408,196 @@ def run(output_dir, gt_dir, subfolders, load_npz=False):
     print("{}\t{}\t{}\t{}".format(np.mean(mae_l), np.mean(perceptual_l), np.mean(ssim_l), np.mean(psnr_l)))
     return np.mean(mae_l), np.mean(perceptual_l), np.mean(ssim_l), np.mean(psnr_l)
 
+
+
+
+
+
+
+
+
+
+
+def run_one_folder(output_dir, gt_dir, save_dir, is_insta):
+    ############
+    # testing extreme poses
+    ############
+    # frames_ = np.loadtxt("out/cluster_poses/extreme_pose_03_yao.txt")
+
+    res = 512
+    files = os.listdir(os.path.join(output_dir))
+    use_mask = True
+    only_face_interior = False
+    no_cloth_mask = False
+
+    def _load_img(imgpath):
+        image = imread(imgpath).astype(np.float32)
+        if image.shape[-2] != res:
+            image = cv2.resize(image, (res, res))
+        image = image / 255.
+        if image.ndim >= 3:
+            image = image[:, :, :3]
+        # 256, 256, 3
+        return image
+
+    def _to_tensor(image):
+        if image.ndim == 3:
+            image = image.transpose(2, 0, 1)
+        image = torch.as_tensor(image).unsqueeze(0)
+        # 1, 3, 256, 256
+        return image
+
+    mse_l = np.zeros(0)
+    rmse_l = np.zeros(0)
+    mae_l = np.zeros(0)
+    perceptual_l = np.zeros(0)
+    ssim_l = np.zeros(0)
+    psnr_l = np.zeros(0)
+    l1_l = np.zeros(0)
+    keypoint_l = np.zeros(0)
+
+    # Keep track of where the images come from
+    result_subfolders = list()
+    result_filenames = list()
+
+    import tqdm
+    for file in tqdm.tqdm(os.listdir(output_dir)):
+        if not file.endswith(".png") and not file.endswith(".jpg"):
+            continue
+
+        try:
+            pred_image = os.path.join(output_dir, file)
+            # inverse of zfill?
+            # i need to remove the padding from file
+            if is_insta:
+                # need to add 1 on file
+                file_no_pad = str(int(file[:-4]) + 1) + ".png"
+                # print(file, file_no_pad)
+                file_no_pad = file_no_pad.lstrip('0')
+            else:
+                file_no_pad = file.lstrip('0')
+            gt_image = os.path.join(gt_dir, 'image', file_no_pad)
+            mask_path = os.path.join(gt_dir, 'mask', file_no_pad)
+
+
+            pred = _load_img(pred_image)
+            gt = _load_img(gt_image)
+            mask = _load_img(mask_path)
+
+            # Our prediction has white background, so do the same for GT
+            gt_masked = gt * mask + 1.0 * (1 - mask)
+            if use_mask:
+                pred_masked = pred * mask + 1.0 * (1 - mask)
+                pred = pred_masked
+            gt = gt_masked
+
+            if no_cloth_mask:
+                def load_semantic(path, img_res):
+                    img = imageio.imread(path, mode='F')
+                    img = cv2.resize(img, (int(img_res), int(img_res)))
+                    return img
+                semantic_path = osp.join(os.path.join(gt_dir, "semantic", file_no_pad))
+                semantics = load_semantic(semantic_path, img_res=res)
+                mask_cloth = np.logical_or(semantics == 16, semantics == 15)
+                mask[mask_cloth] = 0.
+            w, h, d = gt.shape
+            gt = gt.reshape(-1, d)
+            # gt[np.sum(gt, 1) == 0., :] = 1 # if background is black, change to white
+            gt = gt.reshape(w, h, d)
+
+            # key_error = keypoint(fa_2d, pred_for_key, gt_for_key)
+
+            ### insta has some blank frames, check them and skip those frames
+            if (pred * mask).sum() == 0:
+                continue
+
+            pred = _to_tensor(pred)
+            gt = _to_tensor(gt)
+            mask = _to_tensor(mask)
+            mask = mask[:, [0], :, :]
+
+
+            l1, error_mask = img_mse(pred, gt, mask=mask, error_type='l1', use_mask=use_mask, return_all=True)
+        
+            if not osp.exists(osp.join(save_dir, "err_l1")):
+                os.mkdir(osp.join(save_dir, "err_l1"))
+            cv2.imwrite(osp.join(save_dir, "err_l1", file), 255 * error_mask[0].permute(1,2,0).cpu().numpy())
+
+            if not osp.exists(osp.join(save_dir, "gt")):
+                os.mkdir(osp.join(save_dir, "gt"))
+            cv2.imwrite(osp.join(save_dir, "gt", file), cv2.cvtColor(255 * gt[0].permute(1,2,0).cpu().numpy(), cv2.COLOR_RGB2BGR))
+
+            mse = img_mse(pred, gt, mask=mask, error_type='mse', use_mask=use_mask)
+            rmse = img_mse(pred, gt, mask=mask, error_type='rmse', use_mask=use_mask)
+            mae = img_mse(pred, gt, mask=mask, error_type='mae', use_mask=use_mask)
+            perc_error = perceptual(pred, gt, mask, use_mask=use_mask)
+
+            assert mask.size(1) == 1
+            if use_mask:
+                mask = mask.bool()
+                pred_masked = pred.clone()
+                gt_masked = gt.clone()
+                pred_masked[~mask.expand_as(pred_masked)] = 0
+                gt_masked[~mask.expand_as(gt_masked)] = 0
+
+                ssim = img_ssim(pred_masked, gt_masked)
+                psnr = img_psnr(pred_masked, gt_masked, rmse=rmse)
+
+            else:
+                ssim = img_ssim(pred, gt)
+                psnr = img_psnr(pred, gt, rmse=rmse)
+
+            mse_l = np.append(mse_l, mse)
+            rmse_l = np.append(rmse_l, rmse)
+            mae_l = np.append(mae_l, mae)
+            perceptual_l = np.append(perceptual_l, perc_error)
+            ssim_l = np.append(ssim_l, ssim)
+            psnr_l = np.append(psnr_l, psnr)
+            l1_l = np.append(l1_l, l1)
+            # keypoint_l = np.append(keypoint_l, key_error)
+        except Exception as e:
+            print(f"Error processing {file}: {e}")
+            continue
+
+
+
+    result = {
+        "filenames": result_filenames,
+        "mse_l": mse_l.copy(),
+        "rmse_l": rmse_l.copy(),
+        "mae_l": mae_l.copy(),
+        "perceptual_l": perceptual_l.copy(),
+        "ssim_l": ssim_l.copy(),
+        "psnr_l": psnr_l.copy(),
+        "l1_l": l1_l.copy(),
+        # "keypoint_l": keypoint_l.copy()
+    }
+    base_result_name = "results"
+    if no_cloth_mask:
+        base_result_name = "results_no_cloth"
+    path_result_npz = os.path.join(save_dir, "{}_{}.npy".format(base_result_name, file))
+    path_result_csv = os.path.join(save_dir, "{}_{}.csv".format(base_result_name, file))
+    # np.save(path_result_npz, **result)
+    # pd.DataFrame.from_dict(result).to_csv(path_result_csv)
+    print("Written result to ", path_result_npz)
+
+    print("{}\t{}\t{}\t{}".format(np.mean(mae_l), np.mean(perceptual_l), np.mean(ssim_l), np.mean(psnr_l)))
+    return np.mean(mae_l), np.mean(perceptual_l), np.mean(ssim_l), np.mean(psnr_l)
+
+
+
+
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process some integers.')
-    parser.add_argument('--output_dir', type=str, help='.')
-    parser.add_argument('--subject_name', type=str, help='.')
-    parser.add_argument('--load_npz', default=False, action="store_true", help='If set, load from npz')
+    parser.add_argument('--data_dir', type=str, help='.')
+    parser.add_argument('--gt_dir', type=str, help='.')
+    parser.add_argument('--save_dir', type=str)
+    parser.add_argument('--is_insta', action='store_true')
 
     args = parser.parse_args()
+    os.makedirs(args.save_dir, exist_ok=True)
+    _,_, _, _ = run_one_folder(args.data_dir, args.gt_dir, args.save_dir, args.is_insta)
 
-    output_dir = args.output_dir
-    _, _, _, _, _ = run(output_dir, gt_dir, subfolders, args.load_npz)
+    

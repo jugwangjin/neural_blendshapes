@@ -56,7 +56,7 @@ def read_mesh(path, device='cpu'):
     if hasattr(mesh_, 'faces'):
         indices = np.array(mesh_.faces, dtype=np.int32)
 
-    return Mesh(vertices, indices, device)
+    return Mesh(vertices, indices, device=device)
 
 def write_mesh(path, mesh):
     path = Path(path)

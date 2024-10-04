@@ -36,8 +36,11 @@ def initialize_weights(m, gain=0.1):
 
     for l in m.children():
         if isinstance(l, nn.Linear):
-            nn.init.xavier_uniform_(l.weight, gain=gain)
-            l.bias.data.zero_()
+            # nn.init.xavier_uniform_(l.weight, gain=gain)
+            try:
+                l.bias.data.zero_()
+            except:
+                pass
 
 
 class ModulationActivation(nn.Module):
@@ -54,7 +57,7 @@ class ModulationActivation(nn.Module):
 
 
 class bshape_act(nn.Module):
-    def __init__(self, k=5, d=-0.5):
+    def __init__(self, k=6, d=-0.5):
         super().__init__()
         self.sigmoid = nn.Sigmoid()
         self.k = k
@@ -81,32 +84,35 @@ class ResnetEncoder(nn.Module):
 
         self.ict_facekit = ict_facekit
         self.tail = nn.Sequential(
-                    nn.Linear(7 + 68*3 + 7, 256),
-                    mygroupnorm(num_groups=8, num_channels=256),
-                    nn.ReLU(),
-                    nn.Linear(256, 256),
-                    mygroupnorm(num_groups=8, num_channels=256),
-                    nn.ReLU(),
-                    nn.Linear(256, 256),
-                    mygroupnorm(num_groups=8, num_channels=256),
-                    nn.ReLU(),
-                    nn.Linear(256, 9)
+                    nn.Linear(7 + 68*3 + 7 + 3, 512),
+                    mygroupnorm(num_groups=4, num_channels=512),
+                    nn.Softplus(100),
+                    nn.Linear(512, 512),
+                    mygroupnorm(num_groups=4, num_channels=512),
+                    nn.Softplus(100),
+                    nn.Linear(512, 512),
+                    mygroupnorm(num_groups=4, num_channels=512),
+                    nn.Softplus(100),
+                    nn.Linear(512, 512),
+                    mygroupnorm(num_groups=4, num_channels=512),
+                    nn.Softplus(100),
+                    nn.Linear(512, 9)
         )
         
         self.bshape_modulator = nn.Sequential(
-                    nn.Linear(68*3 + 53, 512),
-                    mygroupnorm(num_groups=8, num_channels=512),
-                    nn.ReLU(),
+                    nn.Linear(68*3 + 53 + 7 + 7 + 3, 512),
+                    mygroupnorm(num_groups=4, num_channels=512),
+                    nn.Softplus(100),
                     nn.Linear(512, 512),
-                    mygroupnorm(num_groups=8, num_channels=512),
-                    nn.ReLU(),
-                    nn.Linear(512, 256),
-                    mygroupnorm(num_groups=8, num_channels=256),
-                    nn.ReLU(),
-                    nn.Linear(256, 256),
-                    mygroupnorm(num_groups=8, num_channels=256),
-                    nn.ReLU(),
-                    nn.Linear(256, 53)
+                    mygroupnorm(num_groups=4, num_channels=512),
+                    nn.Softplus(100),
+                    nn.Linear(512, 512),
+                    mygroupnorm(num_groups=4, num_channels=512),
+                    nn.Softplus(100),
+                    nn.Linear(512, 512),
+                    mygroupnorm(num_groups=4, num_channels=512),
+                    nn.Softplus(100),
+                    nn.Linear(512, 53)
         )
 
 
@@ -122,10 +128,25 @@ class ResnetEncoder(nn.Module):
         self.tail[-1].bias.data.zero_()
 
         initialize_weights(self.bshape_modulator, gain=0.01)
+
+        for l in self.bshape_modulator.children():
+            if isinstance(l, nn.Linear):
+                # nn.init.xavier_uniform_(l.weight, gain=gain)
+                try:
+                    # multiply 0.1 to the weights data
+                    scale = ((1 / l.in_features)**0.5) * 0.1
+                    # Initialize weights and biases with the new scale
+                    nn.init.uniform_(l.weight, -scale, scale)
+                    l.bias.data.zero_()
+                except Exception as e:
+                    print("Error in initializing weights", e)
+                    pass
+
+
         self.bshape_modulator[-1].weight.data.zero_()
         self.bshape_modulator[-1].bias.data.zero_()
             
-        self.softplus = nn.Softplus(beta=2)
+        self.softplus = nn.Softplus(beta=50)
         self.elu = nn.ELU()
         # self.register_buffer('scale', torch.zeros(1))
         self.scale = torch.nn.Parameter(torch.zeros(1))
@@ -170,61 +191,69 @@ class ResnetEncoder(nn.Module):
 
     def forward(self, views):
 
-        with torch.no_grad():
-            blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
-            # mp_landmark = views['mp_landmark'].reshape(-1, 478*3).detach()
-            transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
+        # with torch.no_grad():
+
+        blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
+        # mp_landmark = views['mp_landmark'].reshape(-1, 478*3).detach()
+        transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
+
+        camera_t = []
+        for i in range(len(views['flame_camera'])):
+            camera_t.append(views['flame_camera'][i].t)
+        camera_t = torch.stack(camera_t, dim=0).to(transform_matrix.device)
+        camera_t[:, -1] -= 3
 
 
-            detected_landmarks = views['landmark'].clone().detach()[:, :, :3]
-            detected_landmarks[..., :-1] = detected_landmarks[..., :-1] - 0.5 # center
-            detected_landmarks[..., -1] *= -1 
-            detected_landmarks = detected_landmarks.reshape(-1, 68*3).detach()
+        detected_landmarks = views['landmark'].clone().detach()[:, :, :3]
+        detected_landmarks[..., :-1] = detected_landmarks[..., :-1] - 0.5 # center
+        detected_landmarks[..., -1] *= -1 
+        detected_landmarks = detected_landmarks.reshape(-1, 68*3).detach()
 
-            square_indices = [39, 42, 35, 31, 27, 33]
-            fixed_square = detected_landmarks.reshape(-1, 68, 3)[:, square_indices, :3]
-            square_target = torch.tensor([[-0.2, -0.2, 0], [0.2, -0.2, 0], [0.2, 0.2, 0], [-0.2, 0.2, 0], [0, -0.2, 0], [0, 0.2, 0]], device='cuda')[None].repeat(detected_landmarks.shape[0], 1, 1)
+        square_indices = [39, 42, 35, 31, 27, 33]
+        fixed_square = detected_landmarks.reshape(-1, 68, 3)[:, square_indices, :3]
+        square_target = torch.tensor([[-0.2, -0.2, 0], [0.2, -0.2, 0], [0.2, 0.2, 0], [-0.2, 0.2, 0], [0, -0.2, 0], [0, 0.2, 0]], device='cuda')[None].repeat(detected_landmarks.shape[0], 1, 1)
 
-            alignment = p3do.corresponding_points_alignment(fixed_square, square_target, estimate_scale = True)
-            aligned_landmarks = alignment.s[:, None, None] * torch.einsum('bdk, bkl->bdl', detected_landmarks.reshape(-1, 68, 3).clone().detach(), alignment.R) + alignment.T[:, None]
+        alignment = p3do.corresponding_points_alignment(fixed_square, square_target, estimate_scale = True)
+        aligned_landmarks = alignment.s[:, None, None] * torch.einsum('bdk, bkl->bdl', detected_landmarks.reshape(-1, 68, 3).clone().detach(), alignment.R) + alignment.T[:, None]
 
-            # print(torch.amin(aligned_landmarks.reshape(-1, 3), dim=0), torch.amax(aligned_landmarks.reshape(-1, 3), dim=0))
-            # print(torch.std(aligned_landmarks.reshape(-1, 3), dim=0), torch.mean(aligned_landmarks.reshape(-1, 3), dim=0))
+        # print(torch.amin(aligned_landmarks.reshape(-1, 3), dim=0), torch.amax(aligned_landmarks.reshape(-1, 3), dim=0))
+        # print(torch.std(aligned_landmarks.reshape(-1, 3), dim=0), torch.mean(aligned_landmarks.reshape(-1, 3), dim=0))
 
-            align_rotation = p3dt.matrix_to_euler_angles(alignment.R, convention='XYZ')
-            align_info = torch.cat([alignment.s[:, None]*0, align_rotation, alignment.T], dim=-1)
+        align_rotation = p3dt.matrix_to_euler_angles(alignment.R, convention='XYZ')
+        align_info = torch.cat([alignment.s[:, None]*0, align_rotation, alignment.T * 0.2], dim=-1)
 
 
-            scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
-            translation = transform_matrix[:, :3, 3]
-            rotation_matrix = transform_matrix[:, :3, :3]
-            rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
+        scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
+        translation = transform_matrix[:, :3, 3]
+        rotation_matrix = transform_matrix[:, :3, :3]
+        rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
 
-            rotation_matrix = rotation_matrix.permute(0, 2, 1)
-            rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
-            
-            translation[:, -1] += 28
-            translation *= 0
+        rotation_matrix = rotation_matrix.permute(0, 2, 1)
+        rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
+        
+        translation[:, -1] += 28
+        translation *= 0
 
         # features = self.tail(torch.cat([rotation, translation, scale, align_info], dim=-1))
-        features = self.tail(torch.cat([detected_landmarks, rotation, translation, scale, align_info], dim=-1))
+        features = self.tail(torch.cat([detected_landmarks, rotation, translation, scale, align_info, camera_t], dim=-1))
         
-        bshape_modulation = (self.bshape_modulator(torch.cat([blendshape, aligned_landmarks.reshape(-1, 68*3)], dim=-1)))
+        bshape_modulation = (self.bshape_modulator(torch.cat([blendshape, aligned_landmarks.reshape(-1, 68*3), rotation, translation, scale, align_info, camera_t], dim=-1)))
         # blendshape = blendshape + bshape_modulation
         # blendshape = blendshape * (1+self.gelu(self.bshapes_multiplier[None])) 
+        # blendshape = blendshape + bshape_modulation
         blendshape = blendshape * (1+self.softplus(self.bshapes_multiplier[None])) + bshape_modulation
-        blendshape = self.bshape_act(blendshape)
+        # blendshape = self.bshape_act(blendshape)
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
         rotation = rotation + features[:, :3]
         translation = features[:, 3:6] 
-        translation[..., -1] *= 0.2
+        # translation[..., -1] *= 0.2
         before_translation = features[:, 6:9]
 
         out_features = torch.cat([blendshape, rotation, translation, scale, before_translation], dim=-1)
 
-        return out_features
+        return out_features, bshape_modulation
 
     def save(self, path):
         data = {
