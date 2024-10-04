@@ -368,6 +368,7 @@ class NeuralBlendshapes(nn.Module):
 
         ict_mesh_w_temp_posed = self.apply_deformation(ict_mesh_w_temp, features, pose_weight)
 
+        return_dict['ict_mesh_posed'] = self.apply_deformation(ict_mesh, features, pose_weight)
         return_dict['template_mesh'] = self.remove_teeth(template_mesh)
         return_dict['ict_mesh_w_temp'] = self.remove_teeth(ict_mesh_w_temp)
         return_dict['ict_mesh_w_temp_posed'] = self.remove_teeth(ict_mesh_w_temp_posed)
@@ -383,7 +384,7 @@ class NeuralBlendshapes(nn.Module):
         
         # expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 3)
         expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 53, 3)
-        expression_mesh_delta_u = expression_mesh_delta_u * features[:, None, :53, None]
+        expression_mesh_delta_u = expression_mesh_delta_u * (features[:, None, :53, None].detach())
         
         expression_mesh_delta_u = expression_mesh_delta_u.sum(dim=2)
         expression_mesh_delta = self.solve(expression_mesh_delta_u)

@@ -81,7 +81,7 @@ from flare.modules import (
 )
 from flare.utils import (
     AABB, read_mesh, write_mesh,
-    visualize_training,
+    visualize_training, save_shading,
     make_dirs, set_defaults_finetune, copy_sources
 )
 import nvdiffrec.render.light as light
@@ -116,19 +116,20 @@ def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, de
     
     d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
     ## ============== Rasterize ==============================
-    gbuffers = renderer.render_batch(views["flame_camera"], deformed_vertices.contiguous(), d_normals,
+    gbuffer = renderer.render_batch(views["flame_camera"], deformed_vertices.contiguous(), d_normals,
                         channels=channels_gbuffer, with_antialiasing=True, 
                         canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
     
     ## ============== predict color ==============================
-    rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffers, views, mesh, args.finetune_color, lgt)
+    rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffer, views, mesh, args.finetune_color, lgt)
 
-    return rgb_pred, gbuffers, cbuffers
+    return rgb_pred, gbuffer, cbuffers
 
 
 # ==============================================================================================
 # evaluation: numbers
 # ==============================================================================================  
+@torch.no_grad()
 def run_transfer(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer,
                         experiment_dir, images_eval_save_path, lgt=None, save_each=False):
     import tqdm
@@ -140,29 +141,174 @@ def run_transfer(args, mesh, dataloader_validate, ict_facekit, neural_blendshape
     Path(transfer_save_dir / "normal").mkdir(parents=True, exist_ok=True)
     
     for it, views in tqdm.tqdm(enumerate(dataloader_validate)):
-        with torch.no_grad():
-            rgb_pred, gbuffer, cbuffer = run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, 
-                    channels_gbuffer, lgt=lgt)
+
+
+
+        return_dict = neural_blendshapes(views["img"].to(device), views)
+        # print(return_dict['features'][:, 53:])
+
+        blendshape = views['mp_blendshape'][..., ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
+
+        transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
+        scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
+        translation = transform_matrix[:, :3, 3]
+        rotation_matrix = transform_matrix[:, :3, :3]
+        rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
+
+        rotation_matrix = rotation_matrix.permute(0, 2, 1)
+        rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
+            
+        translation[:, -1] += 28
+        translation *= 0
+
+        translation[:, -1] = -1.5
+        translation[:, -2] = -0.1
+
+        features = torch.cat([blendshape, rotation, translation, scale, torch.zeros_like(translation)], dim=-1)
+
+
+        ict_mesh = ict_facekit(expression_weights = features[..., :53], identity_weights = neural_blendshapes.encoder.identity_weights[None].repeat(1, 1))
+
+        features[:, 53:] = return_dict['features'][:, 53:]
+        ict_mesh_posed = neural_blendshapes.apply_deformation(ict_mesh, features, torch.ones_like(return_dict['pose_weight']) * 0.9526)
+
+
+        deformed_vertices = ict_mesh_posed
+        d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
+        ## ============== Rasterize ==============================
+        gbuffer = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
+                            channels=channels_gbuffer, with_antialiasing=True, 
+                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
+        
+        ## ============== predict color ==============================
+        rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffer, views, mesh, args.finetune_color, lgt)
 
         rgb_pred = rgb_pred * gbuffer["mask"]
-        if save_each:
-            normals = gbuffer["normal"]
-            gbuffer_mask = gbuffer["mask"]
+        
 
-            convert_uint = lambda x: np.clip(np.rint(dataset_util.rgb_to_srgb(x).numpy() * 255.0), 0, 255).astype(np.uint8) 
-            convert_uint_255 = lambda x: (x * 255).to(torch.uint8)
+        normals = gbuffer["normal"]
+        gbuffer_mask = gbuffer["mask"]
+
+        convert_uint = lambda x: np.clip(np.rint(dataset_util.rgb_to_srgb(x).numpy() * 255.0), 0, 255).astype(np.uint8) 
+        convert_uint_255 = lambda x: (x * 255).to(torch.uint8)
+
+    
+        mask = gbuffer_mask[0].cpu()
+        id = int(views["frame_name"][0])
+        
+
+        # rgb prediction
+        imageio.imsave(transfer_save_dir / "rgb" / f'{id:05d}_raw.png', convert_uint(torch.cat([rgb_pred[0].cpu()], -1))) 
+
+        ##normal
+        normal = (normals[0] + 1.) / 2.
+        normal = torch.cat([normal.cpu(), mask], -1)
+        imageio.imsave(transfer_save_dir / "normal" / f'{id:05d}_raw.png', convert_uint_255(normal))
+
+        output_mesh = str(id) +'_raw_shading.png'
+        save_shading(rgb_pred, cbuffers, gbuffer, views, (transfer_save_dir / "rgb"), id, ict_facekit=ict_facekit, save_name=output_mesh)
+
+
+
+
+
+
+        deformed_vertices = return_dict['ict_mesh_posed']
+        d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
+        ## ============== Rasterize ==============================
+        gbuffer = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
+                            channels=channels_gbuffer, with_antialiasing=True, 
+                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
+        
+        ## ============== predict color ==============================
+        rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffer, views, mesh, args.finetune_color, lgt)
+
+        rgb_pred = rgb_pred * gbuffer["mask"]
+        
+
+        normals = gbuffer["normal"]
+        gbuffer_mask = gbuffer["mask"]
+
+        convert_uint = lambda x: np.clip(np.rint(dataset_util.rgb_to_srgb(x).numpy() * 255.0), 0, 255).astype(np.uint8) 
+        convert_uint_255 = lambda x: (x * 255).to(torch.uint8)
+
+    
+        mask = gbuffer_mask[0].cpu()
+        id = int(views["frame_name"][0])
+        
+
+        # rgb prediction
+        imageio.imsave(transfer_save_dir / "rgb" / f'{id:05d}_fc_rgb.png', convert_uint(torch.cat([rgb_pred[0].cpu()], -1))) 
+
+        ##normal
+        normal = (normals[0] + 1.) / 2.
+        normal = torch.cat([normal.cpu(), mask], -1)
+        imageio.imsave(transfer_save_dir / "normal" / f'{id:05d}_fc_n.png', convert_uint_255(normal))
+
+
+
 
         
-            mask = gbuffer_mask[0].cpu()
-            id = int(views["frame_name"][0])
+        output_mesh = str(id) +'_shading_fc.png'
+        save_shading(rgb_pred, cbuffers, gbuffer, views, (transfer_save_dir / "rgb"), id, ict_facekit=ict_facekit, save_name=output_mesh)
+            
 
-            # rgb prediction
-            imageio.imsave(transfer_save_dir / "rgb" / f'{id:05d}.png', convert_uint(torch.cat([rgb_pred[0].cpu(), mask], -1))) 
 
-            ##normal
-            normal = (normals[0] + 1.) / 2.
-            normal = torch.cat([normal.cpu(), mask], -1)
-            imageio.imsave(transfer_save_dir / "normal" / f'{id:05d}.png', convert_uint_255(normal))
+
+
+
+        convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
+        org_image = views['img'][0]
+
+        org_image = convert_uint(org_image)
+        imageio.imwrite(os.path.join((transfer_save_dir / "rgb"), str(id) +'_org.png'), org_image.cpu().numpy())
+
+
+
+
+
+        deformed_vertices = return_dict['expression_mesh_posed']
+        d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
+        ## ============== Rasterize ==============================
+        gbuffer = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
+                            channels=channels_gbuffer, with_antialiasing=True, 
+                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
+        
+        ## ============== predict color ==============================
+        rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffer, views, mesh, args.finetune_color, lgt)
+
+        rgb_pred = rgb_pred * gbuffer["mask"]
+        
+        normals = gbuffer["normal"]
+        gbuffer_mask = gbuffer["mask"]
+
+        convert_uint = lambda x: np.clip(np.rint(dataset_util.rgb_to_srgb(x).numpy() * 255.0), 0, 255).astype(np.uint8) 
+        convert_uint_255 = lambda x: (x * 255).to(torch.uint8)
+
+    
+        mask = gbuffer_mask[0].cpu()
+        id = int(views["frame_name"][0])
+        
+
+        # rgb prediction
+        imageio.imsave(transfer_save_dir / "rgb" / f'{id:05d}.png', convert_uint(torch.cat([rgb_pred[0].cpu()], -1))) 
+
+        ##normal
+        normal = (normals[0] + 1.) / 2.
+        normal = torch.cat([normal.cpu(), mask], -1)
+        imageio.imsave(transfer_save_dir / "normal" / f'{id:05d}.png', convert_uint_255(normal))
+
+
+
+        output_mesh = str(id) +'.png'
+        save_shading(rgb_pred, cbuffers, gbuffer, views, (transfer_save_dir / "rgb"), id, ict_facekit=ict_facekit, save_name=output_mesh)
+            
+        convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
+        org_image = views['img'][0]
+
+        org_image = convert_uint(org_image)
+        imageio.imwrite(os.path.join((transfer_save_dir / "rgb"), str(id) +'_org.png'), org_image.cpu().numpy())
+
 
 
 
@@ -181,7 +327,7 @@ if __name__ == '__main__':
     run_name = args.run_name if args.run_name is not None else args.input_dir.parent.name
     images_save_path, images_eval_save_path, meshes_save_path, shaders_save_path, experiment_dir = make_dirs(args, run_name, args.finetune_color)
 
-    dataset_validate    = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=50, pre_load=False, train=False,)
+    dataset_validate    = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=25, pre_load=False, train=False,)
     dataloader_validate    = torch.utils.data.DataLoader(dataset_validate, batch_size=args.batch_size, collate_fn=dataset_validate.collate, drop_last=False, shuffle=False)
 
     ## =================== Load FLAME ==============================
@@ -227,12 +373,12 @@ if __name__ == '__main__':
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
     neural_blendshapes = neural_blendshapes.to(device)
 
-    target_model_path = Path(args.target_model_dir)
-    target_neural_blendshapes = get_neural_blendshapes(model_path=target_model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, exp_dir = experiment_dir, lambda_=args.lambda_, aabb = ict_mesh_aabb, device=device)
-    target_neural_blendshapes = target_neural_blendshapes.to(device)
+    # target_model_path = Path(args.target_model_dir)
+    # target_neural_blendshapes = get_neural_blendshapes(model_path=target_model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, exp_dir = experiment_dir, lambda_=args.lambda_, aabb = ict_mesh_aabb, device=device)
+    # target_neural_blendshapes = target_neural_blendshapes.to(device)
 
-    # copy paramters of target_neural_blendshapes.encoder to neural_blendshapes.encoder
-    neural_blendshapes.encoder.load_state_dict(target_neural_blendshapes.encoder.state_dict())
+    # # copy paramters of target_neural_blendshapes.encoder to neural_blendshapes.encoder
+    # neural_blendshapes.encoder.load_state_dict(target_neural_blendshapes.encoder.state_dict())
 
 
     # ==============================================================================================
@@ -251,7 +397,7 @@ if __name__ == '__main__':
 
     # Create the optimizer for the neural shader
     # shader = NeuralShader(fourier_features=args.fourier_features,
-    shader = NeuralShader(fourier_features=args.fourier_features,
+    shader = NeuralShader(fourier_features='positional',
                           activation=args.activation,
                           last_activation=torch.nn.Sigmoid(), 
                           disentangle_network_params=disentangle_network_params,

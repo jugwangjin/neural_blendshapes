@@ -123,14 +123,110 @@ def run_video(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, 
     exps_facs = {}
     exps_facs['happiness'] = ['cheekSquint_L', 'cheekSquint_R', 'mouthSmile_L', 'mouthSmile_R']
     exps_facs['sadness'] = ['browInnerUp_L', 'browInnerUp_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
-    exps_facs['surprise'] = ['browInnerUp_L', 'browInnerUp_R', 'browOuterUp_L', 'browOuterUp_R', 'eyeWide_L', 'eyeWide_R', 'jawOpen']
-    exps_facs['disgust'] = ['noseSneer_L', 'noseSneer_R', 'mouthFrown_L', 'mouthFrown_R', 'mouthLowerDown_L', 'mouthLowerDown_R']
+    exps_facs['disgust'] = ['noseSneer_L', 'noseSneer_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
 
-    facs_codes = {}
+    exps_facs['wink'] = ['eyeBlink_L', 'cheekSquint_L', 'mouthSmile_L']
+
+    poses = []
+
+    facs_codes = []
+
+    basic_pose = torch.zeros(1, 10)
+    basic_pose[0, 6] = 1 # scale
+
+    cur_facs = torch.zeros(1,53)
+
     for exp in exps_facs:
-        facs_codes[exp] = torch.zeros(1, 53)
+        for i in range(30):
+            facs_codes.append(cur_facs.clone())
+            poses.append(basic_pose.clone())
         for fac in exps_facs[exp]:
-            facs_codes[exp][0, ict_facekit.expression_names.tolist().index(fac)] = 0.7
+            for i in range(15):
+                cur_facs[0, ict_facekit.expression_names.tolist().index(fac)] = 0.5 * (i+1)/15
+                facs_codes.append(cur_facs.clone())
+                poses.append(basic_pose.clone())
+
+        cur_exp_facs = cur_facs.clone()
+        for i in range(15):
+            cur_facs = cur_exp_facs * (1 + (i+1) / 30)
+            facs_codes.append(cur_facs.clone())
+            poses.append(basic_pose.clone())
+
+        for i in range(150):
+            facs_codes.append(cur_facs.clone())
+            poses.append(basic_pose.clone())
+            
+        cur_exp_facs = cur_facs.clone()
+        for i in range(30):
+            cur_facs = cur_exp_facs * (1 - (i+1) / 30)
+            facs_codes.append(cur_facs.clone())
+            poses.append(basic_pose.clone())
+
+        for i in range(30):
+            facs_codes.append(cur_facs.clone())
+            poses.append(basic_pose.clone())
+
+    for i in range(30):
+        facs_codes.append(cur_facs.clone())
+        poses.append(basic_pose.clone())
+
+
+    for i in range(30):
+        facs_codes.append(torch.zeros(1, 53))
+        y_rot = -0.8 * ((i+1) / 30)
+        tmp_pose = basic_pose.clone()
+        tmp_pose[:, 0] = y_rot
+        poses.append(tmp_pose)
+    
+    for i in range(60):
+        facs_codes.append(torch.zeros(1, 53))
+        y_rot = -0.8
+        tmp_pose = basic_pose.clone()
+        tmp_pose[:, 0] = y_rot
+        poses.append(tmp_pose)
+
+    for i in range(30):
+        facs_codes.append(torch.zeros(1, 53))
+        y_rot = -0.8 * (1 - (i+1) / 30)
+        tmp_pose = basic_pose.clone()
+        tmp_pose[:, 0] = y_rot
+        poses.append(tmp_pose)
+
+
+    # draw bars for each expression for each frame. 
+    # put text use - ict_face_kit.expression_names.tolist()
+    # put thin black bar
+    # put a slider for each frame - accoring to the expression value, move the slider
+    import cv2
+    stacked_exp_facs = torch.cat(facs_codes, dim=0) # num frmaes x 53
+    stacked_exp_facs = stacked_exp_facs.cpu().data.numpy()
+    for i in range(stacked_exp_facs.shape[1]):
+        import os
+        exp_values = stacked_exp_facs[:, i]
+
+        # if all frames are same, continue
+        if len(set(exp_values)) == 1:
+            continue
+
+        os.makedirs(transfer_save_dir / f"expression_{i}", exist_ok=True)
+
+        for frame_num, exp_value in enumerate(exp_values):
+            blank_img = np.ones((100, 300, 3), np.uint8) * 255
+            cv2.putText(blank_img, ict_facekit.expression_names.tolist()[i], (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+            cv2.rectangle(blank_img, (10, 50), (290, 70), (0, 0, 0), -1)
+            cv2.rectangle(blank_img, (10, 50), (10 + int(280 * exp_value), 70), (190, 190, 190), -1)
+            cv2.imwrite(transfer_save_dir / f"expression_{i}" / f"{frame_num:05d}.png", blank_img)
+
+    
+
+    facs_sequence = facs_codes
+
+
+    # facs_codes = {}
+    # for exp in exps_facs:
+    #     facs_codes[exp] = torch.zeros(1, 53)
+    #     for fac in exps_facs[exp]:
+    #         facs_codes[exp][0, ict_facekit.expression_names.tolist().index(fac)] = 0.75
 
     pose = torch.zeros(1, 10)
     pose[0, 6] = 1 # scale
@@ -140,17 +236,19 @@ def run_video(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, 
         fixed_view = view
         break
 
-    # zero - one expression - zero - to another expression .. make sequence
-    facs_sequence = []
-    num_interp = 15 # 0.5 sec
-    for exp in exps_facs:
-        for i in range(num_interp):
-            facs_sequence.append(facs_codes[exp] * (i/(num_interp-1)))
-        for i in range(num_interp):
-            facs_sequence.append(facs_codes[exp] * (1 - i/(num_interp-1)))
+    # # zero - one expression - zero - to another expression .. make sequence
+    # facs_sequence = []
+    # num_interp = 15 # 0.5 sec
+    # for exp in exps_facs:
+    #     for i in range(num_interp):
+    #         facs_sequence.append(facs_codes[exp] * (i/(num_interp-1)))
+    #     for i in range(num_interp):
+    #         facs_sequence.append(facs_codes[exp] * (1 - i/(num_interp-1)))
 
-    for i, facs in enumerate(facs_sequence):
-        return_dict = neural_blendshapes(features = torch.cat([facs[None].to(neural_blendshapes.device), pose.to(neural_blendshapes.device)], dim=-1))
+    import tqdm
+    for i, facs in tqdm.tqdm(enumerate(facs_sequence)):
+        return_dict = neural_blendshapes(features = torch.cat([facs.to(device), poses[i].to(device)], dim=-1))
+        # return_dict = neural_blendshapes(features = torch.cat([facs.to(device), pose.to(device)], dim=-1))
 
         gbuffer = renderer.render_batch(fixed_view['flame_camera'], return_dict['expression_mesh_posed'].contiguous(), mesh.fetch_all_normals(return_dict['ict_mesh_w_temp_posed'], mesh), 
                                 channels=channels_gbuffer+['segmentation'], with_antialiasing=True, 
@@ -166,19 +264,18 @@ def run_video(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, 
             convert_uint_255 = lambda x: (x * 255).to(torch.uint8)
 
             
-            for i in range(len(gbuffer_mask)):
-                mask = gbuffer_mask[i].cpu()
-                id = int(i)
+            mask = gbuffer_mask[0].cpu()
+            id = int(i)
 
-                # rgb prediction
-                imageio.imsave(transfer_save_dir / "rgb" / f'{id:05d}.png', convert_uint(torch.cat([rgb_pred[i].cpu(), mask], -1))) 
+            # rgb prediction
+            imageio.imsave(transfer_save_dir / "rgb" / f'{id:05d}.png', convert_uint(torch.cat([rgb_pred[0].cpu(), mask], -1))) 
 
-                ##normal
-                normal = (normals[i] + 1.) / 2.
-                normal = torch.cat([normal.cpu(), mask], -1)
-                imageio.imsave(transfer_save_dir / "normal" / f'{id:05d}.png', convert_uint_255(normal))
-    
+            ##normal
+            normal = (normals[0] + 1.) / 2.
+            normal = torch.cat([normal.cpu(), mask], -1)
+            imageio.imsave(transfer_save_dir / "normal" / f'{id:05d}.png', convert_uint_255(normal))
 
+            print(transfer_save_dir / "rgb" / f'{id:05d}.png')
 
 
 
@@ -192,6 +289,8 @@ if __name__ == '__main__':
     if torch.cuda.is_available() and args.device >= 0:
         device = torch.device(f'cuda:{args.device}')
     print(f"Using device {device}")
+
+    args.batch_size = 1
 
     ## ============== Dir ==============================
     run_name = args.run_name if args.run_name is not None else args.input_dir.parent.name
@@ -237,18 +336,12 @@ if __name__ == '__main__':
     # ==============================================================================================
     # deformation 
     # ==============================================================================================
-
+    
     model_path = Path(experiment_dir / "stage_1" / "network_weights" / f"neural_blendshapes.pt")
+    print(os.listdir(Path(experiment_dir / "stage_1" / "network_weights")))
     neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, exp_dir = experiment_dir, lambda_=args.lambda_, aabb = ict_mesh_aabb, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
     neural_blendshapes = neural_blendshapes.to(device)
-
-    target_model_path = Path(args.target_model_dir)
-    target_neural_blendshapes = get_neural_blendshapes(model_path=target_model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, exp_dir = experiment_dir, lambda_=args.lambda_, aabb = ict_mesh_aabb, device=device)
-    target_neural_blendshapes = target_neural_blendshapes.to(device)
-
-    # copy paramters of target_neural_blendshapes.encoder to neural_blendshapes.encoder
-    neural_blendshapes.encoder.load_state_dict(target_neural_blendshapes.encoder.state_dict())
 
 
     # ==============================================================================================
@@ -267,7 +360,7 @@ if __name__ == '__main__':
 
     # Create the optimizer for the neural shader
     # shader = NeuralShader(fourier_features=args.fourier_features,
-    shader = NeuralShader(fourier_features='positional',
+    shader = NeuralShader(fourier_features=args.fourier_features,
                           activation=args.activation,
                           last_activation=torch.nn.Sigmoid(), 
                           disentangle_network_params=disentangle_network_params,

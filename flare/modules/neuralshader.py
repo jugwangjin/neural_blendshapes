@@ -181,7 +181,7 @@ class NeuralShader(torch.nn.Module):
         # color = diffuse
         # color = diffuse * diffuse_light + specular_intensity * specular_light
 
-        lights = torch.cat([diffuse_light, specular_light, specular_mlp_output], dim=1)
+        lights = torch.cat([diffuse_light, specular_light], dim=1)
 
         return color, specular_intensity, lights
 

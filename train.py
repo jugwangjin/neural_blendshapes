@@ -694,7 +694,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # if args.grad_scale and args.fourier_features == "hashgrid":
             #     shader.fourier_feature_transform.params.grad /= 8.0
                 
-            clip_grad(neural_blendshapes, shader, norm=10.0)
+            clip_grad(neural_blendshapes, shader, norm=2.0)
             
             optimizer_neural_blendshapes.step()
             scheduler_neural_blendshapes.step()
@@ -1124,7 +1124,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # multiply the weights
             # increase from 0 when hashgrid shader is used.
             # incrase to 1 to the end of training
-            albedo_weight = torch.clamp((iteration - (3 * (args.iterations // 4))) / (args.iterations // 4), 0.0, 1.0)
+            
+            progress = iteration / args.iterations
+            progress = (progress - 0.75) * 4
+            albedo_weight = min(max(progress, 0.0), 1.0)
             losses['albedo_regularization'] *= albedo_weight
 
             losses['roughness_regularization'] = roughness_loss + ict_roughness_loss
@@ -1240,7 +1243,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # if args.grad_scale and args.fourier_features == "hashgrid":
             #     shader.fourier_feature_transform.params.grad /= 8.0
 
-            clip_grad(neural_blendshapes, shader, norm=10.0)
+            clip_grad(neural_blendshapes, shader, norm=2.0)
                 
             
 

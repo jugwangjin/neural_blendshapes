@@ -1,6 +1,6 @@
-run_name = fully_neural_v1
+run_name = nha_1
 
-input_dir = /Bean/data/gwangjin/2024/subject_3/subject_3/
+input_dir = /Bean/data/gwangjin/2024/nbshape_additional/imavatar_videos/nha_1/nha_1
 train_dir = ["train"]
 eval_dir = ["test"]
 working_dir = .

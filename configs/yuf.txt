@@ -1,6 +1,6 @@
 run_name = fully_neural_v1
 
-input_dir = /data1/gwangjin/flare/yufeng/
+input_dir = /Bean/data/gwangjin/2024/yufeng/yufeng/
 train_dir = ["MVI_1814", "MVI_1810"]
 eval_dir = ["MVI_1812"]
 working_dir = .
