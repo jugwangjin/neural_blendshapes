@@ -284,7 +284,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     neural_blendshapes_params = list(neural_blendshapes.parameters())
     neural_blendshapes_expression_params = list(neural_blendshapes.expression_deformer.parameters())
     neural_blendshapes_template_params = list(neural_blendshapes.template_deformer.parameters())
-    neural_blendshapes_pe = list(neural_blendshapes.fourier_feature_transform.parameters())
+    neural_blendshapes_pe = list(set(neural_blendshapes.fourier_feature_transform.parameters()).union(set(neural_blendshapes.fourier_feature_transform2.parameters())))
     neural_blendshapes_pose_weight_params = list(neural_blendshapes.pose_weight.parameters())
     neural_blendshapes_others_params = list(set(neural_blendshapes_params) - set(neural_blendshapes_expression_params) - set(neural_blendshapes_template_params) - set(neural_blendshapes_pe) - set(neural_blendshapes_pose_weight_params)) 
     optimizer_neural_blendshapes = torch.optim.Adam([
@@ -359,6 +359,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "white_lgt_regularization": args.weight_white_lgt_regularization,
         "roughness_regularization": args.weight_roughness_regularization,
         "fresnel_coeff": args.weight_fresnel_coeff,
+        "albedo_regularization": args.weight_albedo_regularization,
     }
 
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
@@ -690,8 +691,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             torch.cuda.synchronize()
             
-            if args.grad_scale and args.fourier_features == "hashgrid":
-                shader.fourier_feature_transform.params.grad /= 8.0
+            # if args.grad_scale and args.fourier_features == "hashgrid":
+            #     shader.fourier_feature_transform.params.grad /= 8.0
                 
             clip_grad(neural_blendshapes, shader, norm=10.0)
             
@@ -916,6 +917,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 white_light_loss = white_light_regularization(cbuffers['light'])
                 # roughness_loss = material_regularization_function(cbuffers['material'][..., 3], views_subset['skin_mask'], gbuffer_mask, roughness=True)
                 specular_loss = material_regularization_function(cbuffers['material'], views_subset['skin_mask'], gbuffer_mask, specular=True)
+                albedo_loss = albedo_regularization(None, shader, mesh, device, None, None)
+
                 
                 normal_laplacian_loss = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
                 inverted_normal_loss = inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
@@ -946,9 +949,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 perceptual_loss = torch.tensor(0., device=device)
                 white_light_loss = torch.tensor(0., device=device)
                 specular_loss = torch.tensor(0., device=device)
+                albedo_loss = torch.tensor(0., device=device)
                 normal_laplacian_loss = torch.tensor(0., device=device)
                 inverted_normal_loss = torch.tensor(0., device=device)
                 eyeball_normal_loss = torch.tensor(0., device=device)
+
 
             roughness_loss = torch.tensor(0., device=device)
 
@@ -959,6 +964,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             ict_shading_loss = shading_loss
             ict_perceptual_loss = perceptual_loss
             ict_white_light_loss = white_light_loss
+            ict_albedo_loss = albedo_loss
             ict_roughness_loss = roughness_loss
             ict_specular_loss = specular_loss
             ict_normal_laplacian_loss = normal_laplacian_loss
@@ -1001,6 +1007,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 white_light_loss = white_light_regularization(cbuffers['light'])
                 # roughness_loss = material_regularization_function(cbuffers['material'][..., 3], views_subset['skin_mask'], gbuffer_mask, roughness=True)
                 specular_loss = material_regularization_function(cbuffers['material'], views_subset['skin_mask'], gbuffer_mask, specular=True)
+                albedo_loss = albedo_regularization(None, shader, mesh, device, None, None)
 
 
                 normal_laplacian_loss = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
@@ -1016,6 +1023,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 perceptual_loss = torch.tensor(0., device=device)
                 white_light_loss = torch.tensor(0., device=device)
                 specular_loss = torch.tensor(0., device=device)
+                albedo_loss = torch.tensor(0., device=device)
                 normal_laplacian_loss = torch.tensor(0., device=device)
                 inverted_normal_loss = torch.tensor(0., device=device)
                 eyeball_normal_loss = torch.tensor(0., device=device)
@@ -1111,6 +1119,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['linearity_regularization'] = l1_regularization  
 
             losses['white_lgt_regularization'] = white_light_loss + ict_white_light_loss
+            losses['albedo_regularization'] = albedo_loss + ict_albedo_loss
+
+            # multiply the weights
+            # increase from 0 when hashgrid shader is used.
+            # incrase to 1 to the end of training
+            albedo_weight = torch.clamp((iteration - (3 * (args.iterations // 4))) / (args.iterations // 4), 0.0, 1.0)
+            losses['albedo_regularization'] *= albedo_weight
+
             losses['roughness_regularization'] = roughness_loss + ict_roughness_loss
             losses['fresnel_coeff'] = specular_loss + ict_specular_loss
 
@@ -1221,8 +1237,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             torch.cuda.synchronize()
             
-            if args.grad_scale and args.fourier_features == "hashgrid":
-                shader.fourier_feature_transform.params.grad /= 8.0
+            # if args.grad_scale and args.fourier_features == "hashgrid":
+            #     shader.fourier_feature_transform.params.grad /= 8.0
 
             clip_grad(neural_blendshapes, shader, norm=10.0)
                 

@@ -63,18 +63,18 @@ def cbuffers_regularization(cbuffers):
 def albedo_regularization(_adaptive, shader, mesh, device, displacements, iteration=0):
     position = mesh.vertices
     
-    pe_input = shader.apply_pe(position=position)
-    kd = shader.material_mlp(pe_input)[..., :4]
+    pe_input = shader.apply_pe(position=position, normalize=True)
+    kd = shader.diffuse_mlp(pe_input)[..., :3]
 
     # add jitter for loss function
     jitter_pos = position + torch.normal(mean=0, std=0.01, size=position.shape, device=device)
     jitter_pe_input = shader.apply_pe(position=jitter_pos)
 
-    kd_jitter = shader.material_mlp(jitter_pe_input)[..., :4]
+    kd_jitter = shader.diffuse_mlp(jitter_pe_input)[..., :3]
     loss_fn = torch.nn.MSELoss(reduction='none')
     kd_grad = loss_fn(kd_jitter, kd)
-    loss = torch.mean(_adaptive.lossfun(kd_grad.view(-1, 4)))
-    return loss * min(1.0, iteration / 500)
+    loss = torch.mean(kd_grad.view(-1, 3))
+    return loss
 
 
 def white_light(cbuffers):

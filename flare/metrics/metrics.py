@@ -418,7 +418,7 @@ def run(output_dir, gt_dir, subfolders, load_npz=False):
 
 
 
-def run_one_folder(output_dir, gt_dir, save_dir, is_insta):
+def run_one_folder(output_dir, gt_dir, save_dir, is_insta, no_cloth):
     ############
     # testing extreme poses
     ############
@@ -428,7 +428,7 @@ def run_one_folder(output_dir, gt_dir, save_dir, is_insta):
     files = os.listdir(os.path.join(output_dir))
     use_mask = True
     only_face_interior = False
-    no_cloth_mask = False
+    no_cloth_mask = no_cloth
 
     def _load_img(imgpath):
         image = imread(imgpath).astype(np.float32)
@@ -595,9 +595,10 @@ if __name__ == '__main__':
     parser.add_argument('--gt_dir', type=str, help='.')
     parser.add_argument('--save_dir', type=str)
     parser.add_argument('--is_insta', action='store_true')
+    parser.add_argument('--no_cloth', action='store_true')
 
     args = parser.parse_args()
     os.makedirs(args.save_dir, exist_ok=True)
-    _,_, _, _ = run_one_folder(args.data_dir, args.gt_dir, args.save_dir, args.is_insta)
+    _,_, _, _ = run_one_folder(args.data_dir, args.gt_dir, args.save_dir, args.is_insta, args.no_cloth)
 
     

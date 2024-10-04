@@ -98,7 +98,7 @@ class MLPTemplate(nn.Module):
             nn.Linear(128, 128),
             mygroupnorm(num_groups=2, num_channels=128),
             nn.Softplus(beta=100),
-            nn.Linear(128, 3)
+            nn.Linear(128, 3, bias=False)
         )
 
     def forward(self, x):
@@ -187,7 +187,7 @@ class NeuralBlendshapes(nn.Module):
             nn.Linear(256, 256),
             mygroupnorm(num_groups=2, num_channels=256),
             nn.Softplus(beta=100),
-            nn.Linear(256, 53*3)
+            nn.Linear(256, 53*3, bias=False)
             # nn.Linear(512, 53*3)
         )
         self.template_deformer = MLPTemplate(self.inp_size)
@@ -218,7 +218,7 @@ class NeuralBlendshapes(nn.Module):
 
         initialize_weights(self.template_deformer, gain=0.01)
         # self.template_deformer.mlp[-1].weight.data.zero_()
-        self.template_deformer.mlp[-1].bias.data.zero_()
+        # self.template_deformer.mlp[-1].bias.data.zero_()
 
         # by default, weight to almost ones
         initialize_weights(self.pose_weight, gain=0.01)

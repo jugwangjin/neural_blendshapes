@@ -95,16 +95,16 @@ class NeuralShader(torch.nn.Module):
         # ==============================================================================================
         # self.material_mlp_ch = disentangle_network_params['material_mlp_ch']
         self.diffuse_mlp_ch = 4 # diffuse 3 and roughness 1
-        self.diffuse_mlp = FC(self.inp_size, self.inp_size, self.disentangle_network_params["material_mlp_dims"], self.activation, None).to(self.device) #sigmoid
+        self.diffuse_mlp = FC(self.inp_size, 20, self.disentangle_network_params["material_mlp_dims"], self.activation, None).to(self.device) #sigmoid
         self.last_act = make_module(self.last_activation)
         
         # self.brdf_mlp = FC(2, 3, self.disentangle_network_params["brdf_mlp_dims"], self.activation, self.last_activation).to(self.device) # inp size for coords, 20 for normal and reflvec
 
         # if fourier_features == "hashgrid":
-            # self.gradient_scaling = 4.0
-            # self.diffuse_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
+        #     self.gradient_scaling = 4.0
+        #     self.diffuse_mlp.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling, ))
 
-        self.specular_mlp = FC(self.inp_size + 20 + 20, 3, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) # reflvec / normal for input
+        self.specular_mlp = FC(20 + 20 + 20, 3, self.disentangle_network_params["light_mlp_dims"], activation=self.activation, last_activation=self.last_activation).to(self.device) # reflvec / normal for input
 
 
         print(disentangle_network_params)

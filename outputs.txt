@@ -1,0 +1,7 @@
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/pointavatar/marcel/pointavatar/MVI_1797+MVI_1801/eval/MVI_1802/epoch_62/rgb_erode_dilate --gt_dir /Bean/data/gwangjin/2024/marcel/marcel/MVI_1802 --save_dir ./quant/pointavatar_marcel
+Written result to  ./quant/pointavatar_marcel/results_rgb.npy
+nan	nan	nan	nan
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/pointavatar/marcel/pointavatar/MVI_1797+MVI_1801/eval/MVI_1802/epoch_62/rgb_erode_dilate --gt_dir /Bean/data/gwangjin/2024/marcel/marcel/MVI_1802 --save_dir ./quant/pointavatar_marcel --no_cloth
+Written result to  ./quant/pointavatar_marcel/results_no_cloth_rgb.npy
+nan	nan	nan	nan
+python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/pointavatar/subject_3/pointavatar/train/eval/test/epoch_62/rgb_erode_dilate --gt_dir /Bean/data/gwangjin/2024/subject_3/subject_3/test --save_dir ./quant/pointavatar_subject_3

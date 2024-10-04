@@ -41,10 +41,10 @@ weight_semantic_stat = 1e-0
 weight_flame_regularization = 30
 
 
-
-
 light_mlp_ch = 3
-light_mlp_dims = [64,64]
-material_mlp_dims = [256,256,256,256]
+light_mlp_dims = [64, 64]
+material_mlp_dims = [128, 128, 128, 128]
 material_mlp_ch = 4
 brdf_mlp_dims = [32, 32]
+
+
