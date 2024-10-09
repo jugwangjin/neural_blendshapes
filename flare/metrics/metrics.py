@@ -416,8 +416,6 @@ def run(output_dir, gt_dir, subfolders, load_npz=False):
 
 
 
-
-
 def run_one_folder(output_dir, gt_dir, save_dir, is_insta, no_cloth):
     ############
     # testing extreme poses
@@ -461,10 +459,27 @@ def run_one_folder(output_dir, gt_dir, save_dir, is_insta, no_cloth):
     result_filenames = list()
 
     import tqdm
-    for file in tqdm.tqdm(os.listdir(output_dir)):
+
+    filenames = os.listdir(output_dir)
+
+    filenames_padded = {}
+    for filename in filenames:
+        if not filename.endswith(".png") and not filename.endswith(".jpg"):
+            continue
+        filenames_padded[filename] = str(int(filename[:-4]) + 1) + ".png"
+    
+    filenames = [filename for filename in filenames if filename.endswith('.png')]
+    # sort filenames by the padded number
+    filenames = sorted(filenames, key=lambda x: int(x[:-4]))
+
+    n = 0
+
+    for file in tqdm.tqdm(filenames):
         if not file.endswith(".png") and not file.endswith(".jpg"):
             continue
-
+        n += 1
+        if n > 300:
+            break
         try:
             pred_image = os.path.join(output_dir, file)
             # inverse of zfill?
@@ -583,7 +598,6 @@ def run_one_folder(output_dir, gt_dir, save_dir, is_insta, no_cloth):
 
     print("{}\t{}\t{}\t{}".format(np.mean(mae_l), np.mean(perceptual_l), np.mean(ssim_l), np.mean(psnr_l)))
     return np.mean(mae_l), np.mean(perceptual_l), np.mean(ssim_l), np.mean(psnr_l)
-
 
 
 

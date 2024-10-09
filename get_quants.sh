@@ -61,3 +61,17 @@
  echo python flare/metrics/metrics.py --data_dir /Bean/data/gwangjin/2024/insta_data/subject_3/experiments/insta/debug/overlayrgb --gt_dir /Bean/data/gwangjin/2024/subject_3/subject_3/test --save_dir ./quant/insta_subject_3 --is_insta  --no_cloth
  python flare/metrics/metrics.py --data_dir /Bean/data/gwangjin/2024/insta_data/subject_3/experiments/insta/debug/overlayrgb --gt_dir /Bean/data/gwangjin/2024/subject_3/subject_3/test --save_dir ./quant/insta_subject_3 --is_insta  --no_cloth
  
+
+
+ 
+ python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/neural_blendshapes/yuf_albedo_insta_shading_5/images_evaluation/qualitative_results/rgb --gt_dir /Bean/data/gwangjin/2024/yufeng/yufeng/MVI_1812 --save_dir ./quant/ours_yufeng   --no_cloth
+ python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/neural_blendshapes/yuf_albedo_insta_shading_5/images_evaluation/qualitative_results/rgb --gt_dir /Bean/data/gwangjin/2024/yufeng/yufeng/MVI_1812 --save_dir ./quant/ours_yufeng  
+ 
+
+ 
+ python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/neural_blendshapes/mar_albedo_insta_shading_5/images_evaluation/qualitative_results/rgb --gt_dir /Bean/data/gwangjin/2024/marcel/marcel/MVI_1802 --save_dir ./quant/ours_marcel   --no_cloth
+ python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/neural_blendshapes/mar_albedo_insta_shading_5/images_evaluation/qualitative_results/rgb --gt_dir /Bean/data/gwangjin/2024/marcel/marcel/MVI_1802 --save_dir ./quant/ours_marcel  
+
+ 
+ python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/neural_blendshapes/sub3_albedo_insta_shading_5/images_evaluation/qualitative_results/rgb --gt_dir /Bean/data/gwangjin/2024/subject_3/subject_3/test --save_dir ./quant/ours_subject_3   --no_cloth
+ python flare/metrics/metrics.py --data_dir /Bean/log/gwangjin/2024/neural_blendshapes/sub3_albedo_insta_shading_5/images_evaluation/qualitative_results/rgb --gt_dir /Bean/data/gwangjin/2024/subject_3/subject_3/test --save_dir ./quant/ours_subject_3

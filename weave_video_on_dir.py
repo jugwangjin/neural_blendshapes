@@ -7,6 +7,8 @@ if __name__ == "__main__":
     input_dir = sys.argv[1]
 
     for d in os.listdir(input_dir):
+        if d != 'rgb':
+            continue
         real_input_dir = os.path.join(input_dir, d)
         if not os.path.isdir(real_input_dir):
             continue

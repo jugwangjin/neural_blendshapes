@@ -8,7 +8,13 @@ if __name__ == '__main__':
     # set: config, run_name,   /  eval_dir, input_dir, target_model_path,  /   transfer_out_name
     output_dir = '/Bean/log/gwangjin/2024/neural_blendshapes'
 
-    names = ['marcel', 'yufeng', 'sub3', 'nha_0', 'nha_1', 'nerface_1']
+    names = ['marcel', 'yufeng', 'sub3',]
+    full_names = {}
+    full_names['marcel'] = 'marcel'
+    full_names['yufeng'] = 'yufeng'
+    full_names['sub3'] = 'subject_3'
+
+    # names = ['marcel', 'yufeng', 'sub3', 'nha_0', 'nha_1', 'nerface_1']
 
     config_files = {}
     config_files['marcel'] = './configs/mar.txt'
@@ -19,9 +25,9 @@ if __name__ == '__main__':
     config_files['nerface_1'] = './configs/nerface_1.txt'
 
     run_names = {}
-    run_names['marcel'] = 'mar_albedo_insta_shading_2'
-    run_names['yufeng'] = 'yuf_albedo_insta_shading_2'
-    run_names['sub3'] = 'sub3_albedo_insta_shading_2'
+    run_names['marcel'] = 'mar_albedo_insta_shading_5'
+    run_names['yufeng'] = 'yuf_albedo_insta_shading_5'
+    run_names['sub3'] = 'sub3_albedo_insta_shading_5'
     run_names['nha_0'] = 'nha_0'
     run_names['nha_1'] = 'nha_1'
     run_names['nerface_1'] = 'nerface_1'
@@ -35,7 +41,7 @@ if __name__ == '__main__':
     eval_dirs['nerface_1'] = ['train', 'test']
 
     target_model_paths = {}
-    for k in run_names.keys():
+    for k in names:
         target_model_paths[k] = os.path.join(output_dir, run_names[k], 'stage_1', 'network_weights', 'neural_blendshapes.pt')
 
 
@@ -50,16 +56,19 @@ if __name__ == '__main__':
         config = config_files[source_name]
         run_name = run_names[source_name]
 
+
         for target_name in names:
-            if source_name == target_name:
-                continue
+            # if source_name != 'sub3' and target_name != 'sub3':
+                # continue
+            # if source_name == target_name:
+            #     continue
             target_model_path = target_model_paths[target_name]
             for eval_dir in eval_dirs[target_name]:
                 if target_name in ['marcel', 'yufeng', 'sub3']:
-                    input_dir = os.path.join('/Bean/data/gwangjin/2024', target_name, eval_dir)
+                    input_dir = os.path.join('/Bean/data/gwangjin/2024', full_names[target_name], eval_dir)
                 else:
                     input_dir = os.path.join('/Bean/data/gwangjin/2024/nbshape_additional/imavatar_videos', target_name, eval_dir)
-                input_dir = os.path.join('/Bean/data/gwangjin/2024', target_name, target_name)
+                input_dir = os.path.join('/Bean/data/gwangjin/2024', full_names[target_name], full_names[target_name])
                 transfer_out_name = f'{source_name}_{target_name}_{eval_dir}'
                 lambda_ = 0
 

@@ -125,8 +125,6 @@ def run_video(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, 
     exps_facs['sadness'] = ['browInnerUp_L', 'browInnerUp_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
     exps_facs['disgust'] = ['noseSneer_L', 'noseSneer_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
 
-    exps_facs['wink'] = ['eyeBlink_L', 'cheekSquint_L', 'mouthSmile_L']
-
     poses = []
 
     facs_codes = []
