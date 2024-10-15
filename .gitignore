@@ -10,6 +10,11 @@ out
 ICT_FaceKit
 ICT-FaceKit
 
+figures/*
+figures
+quant/*
+quant
+
 # large files
 assets
 large-steps-pytorch

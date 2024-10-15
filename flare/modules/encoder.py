@@ -10,250 +10,73 @@ HALF_PI = torch.pi / 2
 import pytorch3d.transforms as p3dt
 import pytorch3d.ops as p3do
 
-class mygroupnorm(nn.Module):
-    def __init__(self, num_groups, num_channels):
-        super().__init__()
+from . import resnet
 
-        assert num_channels % num_groups == 0
+class DECAEncoder(nn.Module):
+    def __init__(self, outsize, last_op=None):
+        super(DECAEncoder, self).__init__()
+        feature_size = 2048
+        self.encoder = resnet.load_ResNet50Model() #out: 2048
+        ### regressor
+        self.layers = nn.Sequential(
+            nn.Linear(feature_size, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, outsize)
+        )
+        self.last_op = last_op
 
-        self.num_groups = num_groups
-        self.num_channels = num_channels
-        self.groupnorm = nn.GroupNorm(num_groups, num_channels)
-    def forward(self, x):
-        if len(x.shape) == 3:
-            b, v, c = x.shape
-            x = x.reshape(b*v, c)
-            x = self.groupnorm(x)
-            x = x.reshape(b, v, c)
-            return x
-        else:
-            return self.groupnorm(x)
-        
+    def forward(self, inputs):
+        with torch.no_grad():
+            features = self.encoder(inputs)
+        parameters = self.layers(features)
+        if self.last_op:
+            parameters = self.last_op(parameters)
+        return parameters
 
-def initialize_weights(m, gain=0.1):
-
-    # iterate over layers, apply if it is nn.Linear
-
-    for l in m.children():
-        if isinstance(l, nn.Linear):
-            # nn.init.xavier_uniform_(l.weight, gain=gain)
-            try:
-                l.bias.data.zero_()
-            except:
-                pass
-
-
-class ModulationActivation(nn.Module):
-    def __init__(self, alpha=None):
-        super().__init__()
-
-        self.elu = nn.ELU(alpha=alpha if alpha is not None else 1.0)
-        
-    def forward(self, x):
-        # for elements where x>0, torch.log1p(x). For elements where x<0, self.elu(x)
-        ret = torch.where(x > 0, torch.log1p(x), self.elu(x))
-        return ret
-
-
-
-class bshape_act(nn.Module):
-    def __init__(self, k=6, d=-0.5):
-        super().__init__()
-        self.sigmoid = nn.Sigmoid()
-        self.k = k
-        self.d = d
-        # self.k = k
-        # self.s = lambda x: 1 / (1 + torch.exp(- self.k * x))
-        # self.y = lambda x: x * self.s(x) * (1 - self.s(x-1)) + self.s(x-1)
-
-    def forward(self, x):
-        return self.sigmoid(self.k * (x + self.d))
-    
-
-class GaussianActivation(nn.Module):
-    def __init__(self, a=1., trainable=True):
-        super().__init__()
-        self.register_parameter('a', nn.Parameter(a*torch.ones(1), trainable))
-
-    def forward(self, x):
-        return torch.exp(-x**2/(2*self.a**2))
 
 class ResnetEncoder(nn.Module):
     def __init__(self, outsize, ict_facekit):
         super(ResnetEncoder, self).__init__()
 
         self.ict_facekit = ict_facekit
-        self.tail = nn.Sequential(
-                    nn.Linear(7 + 68*3 + 7 + 3, 512),
-                    mygroupnorm(num_groups=4, num_channels=512),
-                    nn.Softplus(100),
-                    nn.Linear(512, 512),
-                    mygroupnorm(num_groups=4, num_channels=512),
-                    nn.Softplus(100),
-                    nn.Linear(512, 512),
-                    mygroupnorm(num_groups=4, num_channels=512),
-                    nn.Softplus(100),
-                    nn.Linear(512, 512),
-                    mygroupnorm(num_groups=4, num_channels=512),
-                    nn.Softplus(100),
-                    nn.Linear(512, 9)
-        )
         
-        self.bshape_modulator = nn.Sequential(
-                    nn.Linear(68*3 + 53 + 7 + 7 + 3, 512),
-                    mygroupnorm(num_groups=4, num_channels=512),
-                    nn.Softplus(100),
-                    nn.Linear(512, 512),
-                    mygroupnorm(num_groups=4, num_channels=512),
-                    nn.Softplus(100),
-                    nn.Linear(512, 512),
-                    mygroupnorm(num_groups=4, num_channels=512),
-                    nn.Softplus(100),
-                    nn.Linear(512, 512),
-                    mygroupnorm(num_groups=4, num_channels=512),
-                    nn.Softplus(100),
-                    nn.Linear(512, 53)
-        )
-
-
-        # for layer in self.tail:
-        #     if isinstance(layer, nn.Linear):
-        #         layer.weight.register_hook(lambda grad: grad * 0.01)
-        #         if layer.bias is not None:
-        #             layer.bias.register_hook(lambda grad: grad * 0.01)
-
-
-        initialize_weights(self.tail, gain=0.01)
-        self.tail[-1].weight.data.zero_()
-        self.tail[-1].bias.data.zero_()
-
-        initialize_weights(self.bshape_modulator, gain=0.01)
-
-        for l in self.bshape_modulator.children():
-            if isinstance(l, nn.Linear):
-                # nn.init.xavier_uniform_(l.weight, gain=gain)
-                try:
-                    # multiply 0.1 to the weights data
-                    scale = ((1 / l.in_features)**0.5) * 0.1
-                    # Initialize weights and biases with the new scale
-                    nn.init.uniform_(l.weight, -scale, scale)
-                    l.bias.data.zero_()
-                except Exception as e:
-                    print("Error in initializing weights", e)
-                    pass
-
-
-        self.bshape_modulator[-1].weight.data.zero_()
-        self.bshape_modulator[-1].bias.data.zero_()
-            
-        self.softplus = nn.Softplus(beta=50)
-        self.elu = nn.ELU()
-        # self.register_buffer('scale', torch.zeros(1))
-        self.scale = torch.nn.Parameter(torch.zeros(1))
-        global_translation = torch.zeros(3)
-        self.register_buffer('global_translation', global_translation)
-        # self.global_translation = torch.nn.Parameter(torch.zeros(3))
-
-        self.leaky_relu = nn.LeakyReLU(0.01)
-
-        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.40, -0.20]))
-        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
-        self.register_buffer('transform_origin', torch.tensor([0., -0.05, -0.25]))
-        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.05, -0.25]))
-        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.05, -0.25]))
-        # self.transform_origin.data = torch.tensor([0., -0.40, -0.20])
-        # self.register_buffer('transform_origin', torch.tensor([0., -0.40, -0.20]))
-
-        self.identity_code = nn.Parameter(torch.zeros(self.ict_facekit.num_identity))
-
-        self.bshapes_multiplier = torch.nn.Parameter(torch.zeros(53))
-
+        self.encoder = DECAEncoder(outsize = 6 + 53, last_op = None)
+        self.sigmoid = nn.Sigmoid()
         self.tanh = nn.Tanh()
 
-        self.relu = nn.ReLU()
-
-        self.gelu = nn.GELU()
-
-        self.modulation_activation = ModulationActivation()
-        self.silu = nn.SiLU()
+        self.register_buffer('transform_origin', torch.tensor([0., -0.05, -0.25]))
 
         self.register_buffer('identity_weights', torch.zeros(self.ict_facekit.num_identity, device='cuda'))
-        # self.identity_weights.register_hook(lambda grad: grad*0.25)
-        # self.identity_weights = nn.Parameter(torch.zeros(self.ict_facekit.num_identity, device='cuda'))
-        # self.identity_weights.register_hook(lambda grad: grad*0.25)
-
-        self.bshapes_multiplier = nn.Parameter(torch.zeros(53))
-
-        # hook gradient of bshapes_multiplier and multiply by 10
-        # self.bshapes_multiplier.register_hook(lambda grad: grad*10)
-        self.bshape_act = bshape_act()
         
+        self.scale = torch.nn.Parameter(torch.zeros(1))
+
+        self.transform = torch.nn.functional.interpolate
+        
+        self.load_deca_encoder()
+
+        
+    def load_deca_encoder(self):
+        model_path = './assets/deca_model.tar'
+        deca_ckpt = torch.load(model_path)
+        encoder_state_dict = {k: v for k, v in deca_ckpt['E_flame'].items() if k.startswith('encoder.')}
+        self.encoder.encoder.load_state_dict(encoder_state_dict, strict=False)
+    
 
     def forward(self, views):
+        img = views['img']
 
-        # with torch.no_grad():
-
-        blendshape = views['mp_blendshape'][..., self.ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
-        # mp_landmark = views['mp_landmark'].reshape(-1, 478*3).detach()
-        transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
-
-        camera_t = []
-        for i in range(len(views['flame_camera'])):
-            camera_t.append(views['flame_camera'][i].t)
-        camera_t = torch.stack(camera_t, dim=0).to(transform_matrix.device)
-        camera_t[:, -1] -= 3
-
-
-        detected_landmarks = views['landmark'].clone().detach()[:, :, :3]
-        detected_landmarks[..., :-1] = detected_landmarks[..., :-1] - 0.5 # center
-        detected_landmarks[..., -1] *= -1 
-        detected_landmarks = detected_landmarks.reshape(-1, 68*3).detach()
-
-        square_indices = [39, 42, 35, 31, 27, 33]
-        fixed_square = detected_landmarks.reshape(-1, 68, 3)[:, square_indices, :3]
-        square_target = torch.tensor([[-0.2, -0.2, 0], [0.2, -0.2, 0], [0.2, 0.2, 0], [-0.2, 0.2, 0], [0, -0.2, 0], [0, 0.2, 0]], device='cuda')[None].repeat(detected_landmarks.shape[0], 1, 1)
-
-        alignment = p3do.corresponding_points_alignment(fixed_square, square_target, estimate_scale = True)
-        aligned_landmarks = alignment.s[:, None, None] * torch.einsum('bdk, bkl->bdl', detected_landmarks.reshape(-1, 68, 3).clone().detach(), alignment.R) + alignment.T[:, None]
-
-        # print(torch.amin(aligned_landmarks.reshape(-1, 3), dim=0), torch.amax(aligned_landmarks.reshape(-1, 3), dim=0))
-        # print(torch.std(aligned_landmarks.reshape(-1, 3), dim=0), torch.mean(aligned_landmarks.reshape(-1, 3), dim=0))
-
-        align_rotation = p3dt.matrix_to_euler_angles(alignment.R, convention='XYZ')
-        align_info = torch.cat([alignment.s[:, None]*0, align_rotation, alignment.T * 0.2], dim=-1)
-
-
-        scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
-        translation = transform_matrix[:, :3, 3]
-        rotation_matrix = transform_matrix[:, :3, :3]
-        rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
-
-        rotation_matrix = rotation_matrix.permute(0, 2, 1)
-        rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
-        
-        translation[:, -1] += 28
-        translation *= 0
-
-        # features = self.tail(torch.cat([rotation, translation, scale, align_info], dim=-1))
-        features = self.tail(torch.cat([detected_landmarks, rotation, translation, scale, align_info, camera_t], dim=-1))
-        
-        bshape_modulation = (self.bshape_modulator(torch.cat([blendshape, aligned_landmarks.reshape(-1, 68*3), rotation, translation, scale, align_info, camera_t], dim=-1)))
-        # blendshape = blendshape + bshape_modulation
-        # blendshape = blendshape * (1+self.gelu(self.bshapes_multiplier[None])) 
-        # blendshape = blendshape + bshape_modulation
-        blendshape = blendshape * (1+self.softplus(self.bshapes_multiplier[None])) + bshape_modulation
-        # blendshape = self.bshape_act(blendshape)
+        img = self.transform(img.permute(0,3,1,2), mode='bilinear', size=(256, 256), align_corners=False)
+        features = self.encoder(img)
+        blendshapes = self.sigmoid(features[:, :53])
+        rotation = self.tanh(features[:, 53:56]) * 1.75
+        translation = features[:, 56:59]
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
-        rotation = rotation + features[:, :3]
-        translation = features[:, 3:6] 
-        # translation[..., -1] *= 0.2
-        before_translation = features[:, 6:9]
+        out_features = torch.cat([blendshapes, rotation, translation, scale], dim=-1)
 
-        out_features = torch.cat([blendshape, rotation, translation, scale, before_translation], dim=-1)
+        return out_features
 
-        return out_features, bshape_modulation
 
     def save(self, path):
         data = {
