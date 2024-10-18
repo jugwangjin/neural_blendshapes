@@ -150,7 +150,9 @@ class Renderer:
         return deformed_vertices_clip_space
 
 
-    def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx, canonical_uv, deformed_vertices_clip_space=None):
+    def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx, 
+                     deformed_normals_exp_no_pose, deformed_normals_temp_pose, deformed_vertices_exp_no_pose, deformed_vertices_temp_pose,
+                     canonical_uv, deformed_vertices_clip_space=None):
         """ Render G-buffers from a set of views.
 
         Args:
@@ -163,6 +165,10 @@ class Renderer:
 
         canonical_verts_batch = canonical_v.unsqueeze(0).repeat(batch_size, 1, 1)
         deformed_vertices_clip_space = Renderer.transform_pos_batch(P_batch, deformed_vertices) if deformed_vertices_clip_space is None else deformed_vertices_clip_space
+
+        # deformed_vertices_clip_space_exp_no_pose = Renderer.transform_pos_batch(P_batch, deformed_vertices)
+        # deformed_vertices_clip_space_temp_pose = Renderer.transform_pos_batch(P_batch, deformed_vertices)
+# 
         idx = canonical_idx.int()
         face_idx = deformed_normals["face_idx"].int()
         rast, rast_out_db = dr.rasterize(self.glctx, deformed_vertices_clip_space, idx, resolution=resolution)
@@ -178,10 +184,18 @@ class Renderer:
             position, _ = dr.interpolate(deformed_vertices, rast, idx)
             gbuffer["position"] = dr.antialias(position, rast, deformed_vertices_clip_space, idx) if with_antialiasing else position
 
+            # position_exp_no_pose, _ = dr.interpolate(deformed_vertices_exp_no_pose, rast, idx)
+            # gbuffer["position_exp_no_pose"] = dr.antialias(position_exp_no_pose, rast, deformed_vertices_clip_space, idx) if with_antialiasing else position_exp_no_pose
+
+            # position_temp_pose, _ = dr.interpolate(deformed_vertices_temp_pose, rast, idx)
+            # gbuffer["position_temp_pose"] = dr.antialias(position_temp_pose, rast, deformed_vertices_clip_space, idx) if with_antialiasing else position_temp_pose
+            
+
         # canonical points in G-buffer
         if "canonical_position" in channels:
             canonical_position, _ = dr.interpolate(canonical_verts_batch, rast, idx, rast_db=rast_out_db, diff_attrs='all')
-            gbuffer["canonical_position"] = dr.antialias(canonical_position, rast, deformed_vertices_clip_space, idx) if with_antialiasing else canonical_position
+            gbuffer["canonical_position"] = canonical_position
+            # gbuffer["canonical_position"] = dr.antialias(canonical_position, rast, deformed_vertices_clip_space, idx) if with_antialiasing else canonical_position
 
         # normals in G-buffer
         if "normal" in channels:
@@ -191,6 +205,21 @@ class Renderer:
             gbuffer["vertex_normals"] = vertex_normals
             gbuffer["face_normals"] = face_normals
             gbuffer["tangent_normals"] = tangent_normals
+
+            vertex_normals_exp_no_pose, _ = dr.interpolate(deformed_normals_exp_no_pose["vertex_normals"], rast, idx)
+            face_normals_exp_no_pose, _ = dr.interpolate(deformed_normals_exp_no_pose["face_normals"], rast, face_idx) 
+            tangent_normals_exp_no_pose, _ = dr.interpolate(deformed_normals_exp_no_pose["tangent_normals"], rast, idx)
+            gbuffer["vertex_normals_exp_no_pose"] = vertex_normals_exp_no_pose
+            gbuffer["face_normals_exp_no_pose"] = face_normals_exp_no_pose
+            gbuffer["tangent_normals_exp_no_pose"] = tangent_normals_exp_no_pose
+
+            vertex_normals_temp_pose, _ = dr.interpolate(deformed_normals_temp_pose["vertex_normals"], rast, idx)
+            face_normals_temp_pose, _ = dr.interpolate(deformed_normals_temp_pose["face_normals"], rast, face_idx)
+            tangent_normals_temp_pose, _ = dr.interpolate(deformed_normals_temp_pose["tangent_normals"], rast, idx)
+            gbuffer["vertex_normals_temp_pose"] = vertex_normals_temp_pose
+            gbuffer["face_normals_temp_pose"] = face_normals_temp_pose
+            gbuffer["tangent_normals_temp_pose"] = tangent_normals_temp_pose
+            
 
         # mask of mesh in G-buffer
         if "mask" in channels:
@@ -218,7 +247,7 @@ class Renderer:
             segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
             gbuffer['segmentation'] = segmentation
             
-            # eyes seg map 
+            # eyes
             valid_idx_tensor = torch.zeros(b, h, w, 1).to(self.device)
             valid_idx_tensor[valid_idx < 24591] = 1.
             valid_idx_tensor[valid_idx < 21451] = 0.
@@ -226,10 +255,50 @@ class Renderer:
 
             mask = (rast[..., -1:] > 0.).float()
             segmentation = mask * valid_idx_tensor
+
+            # save mask, valid_idx_tensor, segmentation
+
+            # rendered_eye_seg_ = rendered_eye_seg.cpu().data.numpy()
+            # rendered_eye_seg_ = rendered_eye_seg_ * 255
+            # rendered_eye_seg_ = rendered_eye_seg_.astype("uint8")
+            # for i in range(rendered_eye_seg_.shape[0]):
+            #     cv2.imwrite(f"debug/rendered_eye_seg_{i}.png", rendered_eye_seg_[i])
+
+            # mask
+            # import cv2
+            # mask_ = mask.cpu().data.numpy()
+            # mask_ = mask_ * 255
+            # mask_ = mask_.astype("uint8")
+            # for i in range(mask_.shape[0]):
+            #     cv2.imwrite(f"debug/mask_{i}.png", mask_[i, ..., 0])
+
+            # # valid_idx_tensor
+            # valid_idx_tensor_ = valid_idx_tensor.cpu().data.numpy()
+            # valid_idx_tensor_ = valid_idx_tensor_ * 255
+            # valid_idx_tensor_ = valid_idx_tensor_.astype("uint8")
+            # for i in range(valid_idx_tensor_.shape[0]):
+            #     cv2.imwrite(f"debug/valid_idx_tensor_{i}.png", valid_idx_tensor_[i, ..., 0])
+
+            # # segmentation
+            # segmentation_ = segmentation.cpu().data.numpy()
+            # segmentation_ = segmentation_ * 255
+            # segmentation_ = segmentation_.astype("uint8")
+            # for i in range(segmentation_.shape[0]):
+            #     cv2.imwrite(f"debug/segmentation_{i}.png", segmentation_[i, ..., 0])
+
             segmentation = torch.lerp(torch.zeros((batch_size, h, w, 1)).to(self.device), 
                                         torch.ones((batch_size, h, w, 1)).to(self.device), segmentation.float())
             
             segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
+
+            # # segmentation_w_alias
+            # segmentation_w_alias_ = segmentation.cpu().data.numpy()
+            # segmentation_w_alias_ = segmentation_w_alias_ * 255
+            # segmentation_w_alias_ = segmentation_w_alias_.astype("uint8")
+            # for i in range(segmentation_w_alias_.shape[0]):
+            #     cv2.imwrite(f"debug/segmentation_w_alias_{i}.png", segmentation_w_alias_[i, ..., 0])
+            # exit()
+
             gbuffer['eyes'] = segmentation
 
             # mouth: 
@@ -239,7 +308,6 @@ class Renderer:
             valid_idx_tensor[valid_idx < 13294] = 1.
             valid_idx_tensor[valid_idx < 11248] = 0.
 
-            # segmentation will be the intersection of valid_idx < 11248 and mask > 0
             mask = (rast[..., -1:] > 0.).float()
             segmentation = mask * valid_idx_tensor
             segmentation = torch.lerp(torch.zeros((batch_size, h, w, 1)).to(self.device), 
@@ -248,20 +316,6 @@ class Renderer:
             segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
             gbuffer['mouth'] = segmentation
 
-            # zero tensor size of b, h*w, 1
-            # fill ones on valid_idx < 11248
-
-            # valid_idx_tensor = torch.zeros(b, h, w, 1).to(self.device)
-            # valid_idx_tensor[valid_idx < 6706] = 1.
-            # valid_idx_tensor = valid_idx_tensor
-
-            # segmentation = mask * valid_idx_tensor
-            # segmentation = torch.lerp(torch.zeros((batch_size, h, w, 1)).to(self.device), 
-            #                             torch.ones((batch_size, h, w, 1)).to(self.device), segmentation.float())
-
-            # ### we antialias the final color here (!)
-            # segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
-            # gbuffer['narrow_face'] = segmentation
 
         try:
             uv_coordinates, _ = dr.interpolate(canonical_uv, rast, idx, rast_db=rast_out_db, diff_attrs='all')
@@ -273,6 +327,8 @@ class Renderer:
         # to antialias texture and mask after computing the color 
         gbuffer["rast"] = rast
         gbuffer["deformed_verts_clip_space"] = deformed_vertices_clip_space
+        # gbuffer["deformed_verts_clip_space_exp_no_pose"] = deformed_vertices_clip_space_exp_no_pose
+        # gbuffer["deformed_verts_clip_space_temp_pose"] = deformed_vertices_clip_space_temp_pose
         gbuffer["view_pos_gl"] = Rt[:, :3, 3]
 
         return gbuffer

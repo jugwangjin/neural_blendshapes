@@ -25,7 +25,7 @@ import torch
     # need to exclude eyeball, mouth cavity for stability
 
 def normal_loss(gbuffers, views_subset, gbuffer_mask, device):
-    return torch.tensor(0.0, device=device)
+    # return torch.tensor(0.0, device=device)
     # print(views_subset.keys())
     # print(gbuffers.keys())
     # exit()
@@ -80,24 +80,37 @@ def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
 
         normal_cam = torch.einsum('bhwc, cj->bhwj', torch.einsum('bhwc, bcj->bhwj', normal, camera), R.T) # shape of B, H, W, 3
 
-        # for where z negative
-        # deformed_verts_clip_space should move to its world coordinate normal direction 
-        #where normal z negative, multiply minus 1 to the normal
         mask_cam   = (normal_cam[..., 2] < -1e-2).float()
         normal = normal * (1 - mask_cam[..., None]) + normal * mask_cam [..., None] * -1
 
-    # loss objective is : 
-    # where rendered_eye_seg is 1 and gt_eye_seg is 0
-    # apply move it to the inverse direction of the normal.
-    # for where mask is 1, find position
         target_position = position - normal
 
-
-
-
-
     mask = ((1 - gt_eye_seg) * rendered_eye_seg).float()
-    eye_loss = torch.mean(torch.pow(position - target_position, 2) * mask) * 1e2
+
+    # # save mask
+    # import cv2
+    # mask_ = mask.cpu().data.numpy()
+    # mask_ = mask_ * 255
+    # mask_ = mask_.astype("uint8")
+    # for i in range(mask_.shape[0]):
+    #     cv2.imwrite(f"debug/mask_{i}.png", mask_[i])
+    
+    # # also save gt_eye_seg and rendered_eye_seg
+    # gt_eye_seg_ = gt_eye_seg.cpu().data.numpy()
+    # gt_eye_seg_ = gt_eye_seg_ * 255
+    # gt_eye_seg_ = gt_eye_seg_.astype("uint8")
+    # for i in range(gt_eye_seg_.shape[0]):
+    #     cv2.imwrite(f"debug/gt_eye_seg_{i}.png", gt_eye_seg_[i])
+
+    # rendered_eye_seg_ = rendered_eye_seg.cpu().data.numpy()
+    # rendered_eye_seg_ = rendered_eye_seg_ * 255
+    # rendered_eye_seg_ = rendered_eye_seg_.astype("uint8")
+    # for i in range(rendered_eye_seg_.shape[0]):
+    #     cv2.imwrite(f"debug/rendered_eye_seg_{i}.png", rendered_eye_seg_[i])
+
+    # exit()
+
+    eye_loss = torch.mean(torch.pow(position - target_position, 2) * mask) 
 
     # for 4:5, mouth.
     gt_mouth_seg = views_subset["skin_mask"][..., 4:5]
@@ -106,7 +119,7 @@ def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
     mask = ((1 - gt_mouth_seg) * rendered_mouth_seg).float()
     with torch.no_grad():
         target_position = position - normal 
-    mouth_loss = torch.mean(torch.pow(position - target_position, 2) * mask) * 1e2
+    mouth_loss = torch.mean(torch.pow(position - target_position, 2) * mask) 
     return eye_loss + mouth_loss
 
 
@@ -127,29 +140,31 @@ def inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
     # deformed_verts_clip_space should move to its world coordinate normal direction 
     with torch.no_grad():
         mask = (normal[..., 2] < -1e-2).float()
+
         mask = mask[..., None] * gbuffer_mask
         target_position = position + gbuffers["normal"] 
 
-    loss = torch.mean(torch.pow(position - target_position, 2) * mask) * 1e2
+    loss = torch.mean(torch.pow(position - target_position, 2) * mask) 
     return loss
 
     # save z component
     import cv2
-    normal_ = (normal[..., 2] * 2).clamp(0)
+    
+    normal_ = (normal[..., 2] + 1).clamp(0)
     normal_ = normal_.cpu().data.numpy()
     normal_ = normal_ * 127
     normal_ = normal_.astype("uint8")
     for i in range(normal_.shape[0]):
         cv2.imwrite(f"debug/normal_{i}_axis_2.png", normal_[i])
 
-    normal_ = (normal[..., 1] * 2).clamp(0)
+    normal_ = (normal[..., 1] + 1).clamp(0)
     normal_ = normal_.cpu().data.numpy()
     normal_ = normal_ * 127
     normal_ = normal_.astype("uint8")
     for i in range(normal_.shape[0]):
         cv2.imwrite(f"debug/normal_{i}_axis_1.png", normal_[i])
 
-    normal_ = (normal[..., 0] * 2).clamp(0)
+    normal_ = (normal[..., 0] + 1).clamp(0)
     normal_ = normal_.cpu().data.numpy()
     normal_ = normal_ * 127
     normal_ = normal_.astype("uint8")
@@ -171,5 +186,3 @@ def inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
     for i in range(normal_.shape[0]):
         cv2.imwrite(f"debug/normal_{i}_rgb_world.png", normal_[i])
 
-
-    exit()

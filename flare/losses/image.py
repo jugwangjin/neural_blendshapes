@@ -89,7 +89,7 @@ def image_loss_fn(img, target):
     return out, img, target
 
 
-def mask_loss_function(masks, gbuffers, loss_function = torch.nn.MSELoss()):
+def mask_loss_function(masks, gbuffers, epsilon=1e-8, loss_function = torch.nn.MSELoss()):
     """ Compute the mask term as the mean difference between the original masks and the rendered masks.
     
     Args:
@@ -98,6 +98,16 @@ def mask_loss_function(masks, gbuffers, loss_function = torch.nn.MSELoss()):
         loss_function (Callable): Function for comparing the masks or generally a set of pixels
     """
     
+    intersection = (masks * gbuffers).sum(dim=(1, 2, 3))
+    union = (masks + gbuffers - masks * gbuffers).sum(dim=(1, 2, 3)) + epsilon
+
+    # Compute the loss
+    iou_loss = 1 - (intersection / union).mean()
+    
+    mse_loss = (masks - gbuffers).pow(2).mean()
+
+    return (iou_loss + mse_loss) / 2
+
     return (masks - gbuffers).pow(2).mean()
     loss = []
     for gt_mask, gbuffer_mask in zip(masks, gbuffers):

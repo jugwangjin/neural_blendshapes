@@ -27,7 +27,8 @@ import os
 import mediapipe as mp
 
 from PIL import Image
-
+from skimage.io import imread
+from skimage.transform import estimate_transform, warp, resize, rescale
 
 # Select the device
 device = torch.device('cpu')
@@ -99,6 +100,7 @@ class DatasetLoader(Dataset):
 
         self.face_alignment = face_alignment.FaceAlignment(face_alignment.LandmarksType.THREE_D, flip_input=False, 
                                                             device='cuda' if torch.cuda.is_available() else 'cpu')
+        self.scale = 1.25
 
         BaseOptions = mp.tasks.BaseOptions
         FaceLandmarker = mp.tasks.vision.FaceLandmarker
@@ -120,12 +122,14 @@ class DatasetLoader(Dataset):
             self.all_images, self.all_masks, self.all_skin_mask, \
             self.all_camera, self.frames, self.all_landmarks,\
             self.all_mp_landmarks, self.all_mp_blendshapes, self.all_mp_transform_matrix, \
-            self.all_normals, self.all_flame_expression, self.all_flame_pose, self.all_flame_camera = [], [], [], [], [], [], [], [], [], [], [], [], []
+            self.all_normals, self.all_flame_expression, self.all_flame_pose, self.all_flame_camera. \
+            self.all_img_decas = [], [], [], [], [], [], [], [], [], [], [], [], [], []
             
             print('loading all images from all_img_path')
             for i in tqdm(range(len(self.all_img_path))):
                 img, mask, skin_mask, camera, frame_name, landmark, \
-                    mp_landmark, mp_blendshape, mp_transform_matrix, normal, flame_expression, flame_pose, flame_camera = self._parse_frame_single(i)
+                    mp_landmark, mp_blendshape, mp_transform_matrix, normal, flame_expression, flame_pose, flame_camera, \
+                    img_deca = self._parse_frame_single(i)
                 self.all_images.append(img)
                 self.all_masks.append(mask)
                 self.all_skin_mask.append(skin_mask)
@@ -139,6 +143,7 @@ class DatasetLoader(Dataset):
                 self.all_flame_expression.append(flame_expression)
                 self.all_flame_pose.append(flame_pose)
                 self.all_flame_camera.append(flame_camera)
+                self.all_img_decas.append(img_deca)
 
 
             self.len_img = len(self.all_images)    
@@ -221,6 +226,7 @@ class DatasetLoader(Dataset):
             flame_expression = self.all_flame_expression[itr % self.len_img]
             flame_pose = self.all_flame_pose[itr % self.len_img]
             flame_camera = self.all_flame_camera[itr % self.len_img]
+            img_deca = self.all_img_decas[itr % self.len_img]
         else:
             flip = False
             if self.flip and torch.rand(1) > 0.5:
@@ -230,7 +236,8 @@ class DatasetLoader(Dataset):
                 self.loaded[flip][local_itr] = self._parse_frame_single(local_itr, flip)
             img, mask, skin_mask, camera, frame_name, landmark,\
             mp_landmark, mp_blendshape, mp_transform_matrix, \
-            normal, flame_expression, flame_pose, flame_camera = self.loaded[flip][local_itr]
+            normal, flame_expression, flame_pose, flame_camera, \
+            img_deca = self.loaded[flip][local_itr]
 
         # facs = (facs / self.facs_range).clamp(0, 1)
 
@@ -248,7 +255,8 @@ class DatasetLoader(Dataset):
             'normal': normal,
             'flame_expression': flame_expression,
             'flame_pose' : flame_pose,
-            'flame_camera': flame_camera
+            'flame_camera': flame_camera,
+            'img_deca': img_deca,
         }
 
 
@@ -299,7 +307,39 @@ class DatasetLoader(Dataset):
         mp_landmark, mp_blendshape, mp_transform_matrix = parse_mediapipe_output(face_landmarker_result)
 
         # ignore frames where no face is detected, just re-route to the next frame
-        if mp_landmark is None:
+        offset = 1
+        while mp_landmark is None:
+            sub_idx = idx - offset
+            if sub_idx >= 0:
+                json_dict_ = self.all_img_path[sub_idx]
+
+                img_path_ = self.base_dir / json_dict_["dir"] / Path(json_dict_["file_path"] + ".png")
+                
+                mp_image = Image.open(img_path_)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.asarray(mp_image))
+                face_landmarker_result = self.mediapipe.detect(mp_image)
+                mp_landmark, mp_blendshape, mp_transform_matrix = parse_mediapipe_output(face_landmarker_result)
+
+                if mp_landmark is not None:
+                    break
+            sub_idx = idx + offset
+            if sub_idx < len(self.all_img_path):
+                json_dict_ = self.all_img_path[sub_idx]
+
+                img_path_ = self.base_dir / json_dict_["dir"] / Path(json_dict_["file_path"] + ".png")
+                
+                mp_image = Image.open(img_path_)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.asarray(mp_image))
+                face_landmarker_result = self.mediapipe.detect(mp_image)
+                mp_landmark, mp_blendshape, mp_transform_matrix = parse_mediapipe_output(face_landmarker_result)
+
+                if mp_landmark is not None:
+                    break
+            
+            offset += 1
+            
+        
+
             # print(flip)
             # # save the mp_image, to debug folder 
             # mp_image = Image.open(img_path)
@@ -308,7 +348,6 @@ class DatasetLoader(Dataset):
             #     mp_image = mp_image.transpose(Image.FLIP_LEFT_RIGHT)
             #     mp_image.save(f'./debug/no_face/{json_dict["dir"]}_{img_path.stem}_mp_flip.png')
             # raise ValueError('No face detected')
-            return self._parse_frame_single(idx+1)
         
         # ================ semantics =======================
         semantic_parent = img_path.parent.parent / "semantic"
@@ -391,6 +430,34 @@ class DatasetLoader(Dataset):
                 return self._parse_frame_single(idx+1)
             else:
                 landmark = torch.tensor(landmarks[0], dtype=torch.float32)
+
+                img_deca = np.array(imread(img_path))
+
+                kpt = landmark.cpu().numpy()[:, :2]
+                left = np.min(kpt[:,0]); right = np.max(kpt[:,0]); 
+                top = np.min(kpt[:,1]); bottom = np.max(kpt[:,1])
+                bbox = [left,top, right, bottom]
+                
+                old_size, center = bbox2point(left, right, top, bottom, type='kpt68')
+                size = int(old_size*self.scale)
+                src_pts = np.array([[center[0]-size/2, center[1]-size/2], [center[0] - size/2, center[1]+size/2], [center[0]+size/2, center[1]-size/2]])
+                DST_PTS = np.array([[0,0], [0,224 - 1], [224 - 1, 0]])
+
+                tform = estimate_transform('similarity', src_pts, DST_PTS)
+                img_deca = img_deca / 255.
+                img_deca = warp(img_deca, tform.inverse, output_shape=(224, 224))
+
+                # to visualize, save img_deca
+                # img_deca = Image.fromarray((img_deca * 255).astype(np.uint8))
+                # os.makedirs('./debug/img_deca', exist_ok=True)
+                # img_deca.save(f'./debug/img_deca/{frame_name}.png')
+
+                # exit()
+
+                img_deca = torch.tensor(img_deca, dtype=torch.float32).permute(2,0,1) # H, W, C -> C, H, W
+
+
+
                 # print(torch.amin(landmark, dim=0), torch.amax(landmark, dim=0))
                 landmark = landmark / img.size(1)
                 if landmark.size(-1) == 3:
@@ -399,12 +466,30 @@ class DatasetLoader(Dataset):
                 # print(landmark.shape, score.shape)
                 landmark = torch.cat([landmark, score[:, None]], dim=1).data
 
+                # deca img
+
+                
+
 
         return img[None, ...], mask[None, ...], semantic[None, ...], \
                 camera, frame_name, landmark[None, ...], \
                 mp_landmark[None, ...], mp_blendshape[None, ...], mp_transform_matrix[None, ...], normal[None, ...], flame_expression[None, ...], flame_pose[None, ...], \
-                flame_camera
+                flame_camera, img_deca[None, ...]
                     # Add batch dimension
+
+
+def bbox2point(left, right, top, bottom, type='bbox'):
+    ''' bbox from detector and landmarks are different
+    '''
+    if type=='kpt68':
+        old_size = (right - left + bottom - top)/2*1.1
+        center = np.array([right - (right - left) / 2.0, bottom - (bottom - top) / 2.0 ])
+    elif type=='bbox':
+        old_size = (right - left + bottom - top)/2
+        center = np.array([right - (right - left) / 2.0, bottom - (bottom - top) / 2.0  + old_size*0.12])
+    else:
+        raise NotImplementedError
+    return old_size, center
 
 from skimage import io
 from skimage import color

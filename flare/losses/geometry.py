@@ -88,18 +88,6 @@ def laplacian_loss_two_meshes(mesh, vertices1, vertices2, L, head_index=14062):
         mesh (Mesh): Mesh used to build the differential coordinates.
     """
 
-    # L = mesh.laplacian
-    # L = L.coalesce()
-
-    # ind = L.indices()
-    # val = L.values()
-
-    # mask = (ind[0] < head_index) & (ind[1] < head_index)
-
-    # ind = ind[:, mask]
-    # val = val[mask]
-
-    # L = torch.sparse_coo_tensor(ind, val, (head_index, head_index))
     L = mesh.laplacian
     
     V1 = vertices1

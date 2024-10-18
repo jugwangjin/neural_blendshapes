@@ -46,6 +46,10 @@ import open3d as o3d
 # evaluation
 # ==============================================================================================    
 def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt):
+
+    neural_blendshapes.eval()
+    shader.eval()
+
     return_dict = neural_blendshapes(views["img"].to(device), views)
     # print(return_dict['features'][:, 53:])
 
@@ -55,7 +59,12 @@ def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, de
     ## ============== Rasterize ==============================
     gbuffers = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
                         channels=channels_gbuffer, with_antialiasing=True, 
-                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh)
+                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh,
+                        deformed_normals_exp_no_pose = mesh.fetch_all_normals(return_dict['expression_mesh'], mesh),
+                        deformed_normals_temp_pose = mesh.fetch_all_normals(return_dict['template_mesh_posed'], mesh),
+                        deformed_vertices_exp_no_pose = return_dict['expression_mesh'],
+                        deformed_vertices_temp_pose = return_dict['template_mesh_posed'],
+                        )
     
     ## ============== predict color ==============================
     rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffers, views, mesh, args.finetune_color, lgt)
@@ -88,6 +97,10 @@ def quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blend
     import tqdm
     for it, views in tqdm.tqdm(enumerate(dataloader_validate)):
         with torch.no_grad():
+            
+            neural_blendshapes.eval()
+            shader.eval()
+
             rgb_pred, gbuffer, cbuffer = run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, 
                     channels_gbuffer, lgt=lgt)
 

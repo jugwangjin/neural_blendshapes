@@ -25,6 +25,11 @@ def safe_normalize(x: torch.Tensor, eps: float =1e-20) -> torch.Tensor:
 
 
 def white_light_regularization(lights):
+    # gray light regularization.
+
+    lights_gray = lights.mean(dim=-1, keepdim=True)
+    return (lights - lights_gray).pow(2).mean()
+
     return lights.pow(2).mean()
     diffuse_shading = lights[..., 6:]
 

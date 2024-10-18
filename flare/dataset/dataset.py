@@ -47,4 +47,5 @@ class Dataset(torch.utils.data.Dataset):
             'flame_expression' : torch.cat(list([item['flame_expression'] for item in batch]), dim=0).to(device),
             'flame_pose' : torch.cat(list([item['flame_pose'] for item in batch]), dim=0).to(device),
             'flame_camera': list([item['flame_camera'] for item in batch]),
+            'img_deca': torch.cat(list([item['img_deca'] for item in batch]), dim=0).to(device),
         }

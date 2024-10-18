@@ -165,6 +165,9 @@ def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images
     R = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], device=device, dtype=torch.float32)
     normal_image = (0.5*(debug_gbuffer["normal"] @ debug_view["camera"][0].R.T @ R.T + 1)) * gbuffer_mask 
 
+    normal_temp_pose_image = (0.5*(debug_gbuffer["normal_temp_pose"] @ debug_view["camera"][0].R.T @ R.T + 1)) * gbuffer_mask
+    normal_exp_no_pose_image = (0.5*(debug_gbuffer["normal_exp_no_pose"] @ debug_view["camera"][0].R.T @ R.T + 1)) * gbuffer_mask
+
     shading = add_directionlight(debug_gbuffer["normal"].reshape([1, -1, 3]), device)
     shading = shading.reshape(debug_gbuffer["normal"].shape)
     shading = shading * gbuffer_mask 
@@ -202,12 +205,6 @@ def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images
             normal_image[i, y_-1:y_+2, x_-1:x_+2] = torch.tensor([0, 1, 0], device=device) * confidences
             shading[i, y_-1:y_+2, x_-1:x_+2] = torch.tensor([0, 1, 0], device=device) * confidences
 
-
-
-
-    
-
-
     save_individual_img(shaded_image, debug_view, normal_image, gbuffer_mask, cbuffers, grid_path_each)
     color_list = []
     color_list += [list_torchgrid(convert_uint(org_images), grid_path, save_name=None, nrow=1, save=False, scale_factor=1).unsqueeze(0)]
@@ -219,6 +216,10 @@ def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images
     #     add_buffer(cbuffers, gbuffer_mask, color_list, convert_uint) ## visualize roughness and specular intensity
     color_list += [list_torchgrid(normal_image, grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
     color_list += [list_torchgrid(shading.to(device), grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
+
+    color_list += [list_torchgrid(normal_temp_pose_image, grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
+    color_list += [list_torchgrid(normal_exp_no_pose_image, grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
+
     if save_name is None:
         save_name = f'grid_{iteration}.png'
     else:
