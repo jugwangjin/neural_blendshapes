@@ -64,6 +64,7 @@ def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, de
                         deformed_normals_temp_pose = mesh.fetch_all_normals(return_dict['template_mesh_posed'], mesh),
                         deformed_vertices_exp_no_pose = return_dict['expression_mesh'],
                         deformed_vertices_temp_pose = return_dict['template_mesh_posed'],
+                        mesh=mesh
                         )
     
     ## ============== predict color ==============================

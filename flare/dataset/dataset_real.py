@@ -214,6 +214,48 @@ class DatasetLoader(Dataset):
     def __len__(self):
         return self.len_img
 
+
+    def get_bshapes_mode(self):
+        bshapes = []
+        for i in tqdm(range(self.len_img)):
+            if i not in self.loaded[False]:
+                self.loaded[False][i] = self._parse_frame_single(i)
+            _, _, _, _, _, _, _, mp_blendshape, _, _, _, _, _, _ = self.loaded[False][i]
+            bshapes.append(mp_blendshape)
+        
+        bshapes = torch.cat(bshapes, dim=0).cpu().data.numpy()
+
+        from scipy.stats import gaussian_kde
+        modes = []
+        for au in tqdm(range(52)):
+            # KDE-based mode estimation
+            kde = gaussian_kde(bshapes[:, au])
+            intensity_range = np.linspace(0, 1, 51)
+            kde_values = kde(intensity_range)
+            mode_index = np.argmax(kde_values)
+            mode_kde = intensity_range[mode_index]
+
+            modes.append(mode_kde)
+
+        print('mode of blendshapes:', modes)
+        self.bshapes_mode = torch.tensor(modes, dtype=torch.float32)
+
+        # mode = torch.tensor(modes, dtype=torch.float32)
+
+        return modes
+
+
+    def get_bshapes_lower_bounds(self):
+        bshapes = []
+        for i in range(self.len_img):
+            if i not in self.loaded[False]:
+                self.loaded[False][i] = self._parse_frame_single(i)
+            _, _, _, _, _, _, _, mp_blendshape, _, _, _, _, _, _ = self.loaded[False][i]
+            bshapes.append(mp_blendshape)
+        
+        bshapes = torch.stack(bshapes)
+        return torch.amin(bshapes, dim=0)
+
     def __getitem__(self, itr):
         if self.pre_load:
             img = self.all_images[itr % self.len_img]
@@ -337,7 +379,7 @@ class DatasetLoader(Dataset):
                     break
             
             offset += 1
-            
+
         
 
             # print(flip)
@@ -447,18 +489,9 @@ class DatasetLoader(Dataset):
                 img_deca = img_deca / 255.
                 img_deca = warp(img_deca, tform.inverse, output_shape=(224, 224))
 
-                # to visualize, save img_deca
-                # img_deca = Image.fromarray((img_deca * 255).astype(np.uint8))
-                # os.makedirs('./debug/img_deca', exist_ok=True)
-                # img_deca.save(f'./debug/img_deca/{frame_name}.png')
-
-                # exit()
 
                 img_deca = torch.tensor(img_deca, dtype=torch.float32).permute(2,0,1) # H, W, C -> C, H, W
 
-
-
-                # print(torch.amin(landmark, dim=0), torch.amax(landmark, dim=0))
                 landmark = landmark / img.size(1)
                 if landmark.size(-1) == 3:
                     landmark[..., 2] = landmark[..., 2] - torch.mean(landmark[..., 2], dim=0, keepdim=True)

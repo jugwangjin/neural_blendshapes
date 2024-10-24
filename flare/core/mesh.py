@@ -31,7 +31,7 @@ class Mesh:
         device (torch.device): Device where the mesh buffers are stored
     """
 
-    def __init__(self, vertices, indices, ict_facekit=None, device='cpu'):
+    def __init__(self, vertices, indices, ict_facekit=None, face_labels=None, device='cpu'):
         self.device = device
 
         self.vertices = vertices.to(device, dtype=torch.float32) if torch.is_tensor(vertices) else torch.tensor(vertices, dtype=torch.float32, device=device)
@@ -45,12 +45,43 @@ class Mesh:
         self._laplacian = None
         self._faces_idx = None
         self.vmapping = None
+        self.ict_facekit = ict_facekit
         if ict_facekit is None:
             self._uv_coords = None
             self._uv_idx = None
+
+            self.face_labels = None
         else:
             self._uv_coords = ict_facekit.uvs.to(device, dtype=torch.float32) if torch.is_tensor(ict_facekit.uvs) else torch.tensor(ict_facekit.uvs, dtype=torch.float32, device=device)
             self._uv_idx = ict_facekit.uv_faces.to(device, dtype=torch.int64) if torch.is_tensor(ict_facekit.uv_faces) else torch.tensor(ict_facekit.uv_faces, dtype=torch.int64, device=device)
+
+            if face_labels is None:
+                self.face_labels = torch.zeros(indices.shape[0], device=device, dtype=torch.long) # 0: face, 1: mouth, 2: eyeball
+                
+
+                vertex_labels = torch.zeros(self.vertices.shape[0], device=device, dtype=torch.long)  # Create labels for each vertex
+
+                # Assign labels to vertices based on the given segmentation
+                vertex_labels[0:11248] = 0  # Head
+                vertex_labels[11248:13294] = 1  # Mouth
+                vertex_labels[13294:14062] = 2  # Eyes
+                vertex_labels[14062:21451] = 1  # Mouth
+                vertex_labels[21451:24591] = 2  # Eyes
+
+                for i in range(indices.shape[0]):
+                    vertex_indices = self.indices[i]
+
+                    # Get the labels of the three vertices
+                    vertex_label_set = vertex_labels[vertex_indices]
+
+                    # Assign the most frequent label to the face
+                    # In case of a tie, PyTorch's `mode()` function returns the smallest value among the tied elements
+                    face_label = torch.mode(vertex_label_set).values
+
+                    self.face_labels[i] = face_label
+            else:
+                self.face_labels = face_labels
+
 
     def to(self, device):
         mesh = Mesh(self.vertices.to(device), self.indices.to(device), device=device)
@@ -84,7 +115,7 @@ class Mesh:
             vertices (tensor): New vertex positions (Vx3)
         """
         assert len(vertices) == len(self.vertices)
-        mesh_new = Mesh(vertices, self.indices, device=self.device)
+        mesh_new = Mesh(vertices, self.indices, ict_facekit = self.ict_facekit, face_labels = self.face_labels, device=self.device)
         mesh_new._edges = self._edges
         mesh_new._connected_faces = self._connected_faces
         mesh_new._laplacian = self._laplacian

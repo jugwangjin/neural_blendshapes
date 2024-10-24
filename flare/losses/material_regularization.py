@@ -26,10 +26,21 @@ def safe_normalize(x: torch.Tensor, eps: float =1e-20) -> torch.Tensor:
 
 def white_light_regularization(lights):
     # gray light regularization.
+    self_occ_color = lights[..., :3]
+    env_light_color = lights[..., 3:6]
+
+    # self_occ_color to be gray and ones
+    self_occ_loss = (self_occ_color - self_occ_color.mean(dim=-1, keepdim=True)).pow(2).mean() + (1 - self_occ_color).pow(2).mean()
+
+    # env light to be gray and zero
+    env_light_loss = (env_light_color - env_light_color.mean(dim=-1, keepdim=True)).pow(2).mean() + env_light_color.pow(2).mean()
+
+    return self_occ_loss + env_light_loss
 
     lights_gray = lights.mean(dim=-1, keepdim=True)
-    return (lights - lights_gray).pow(2).mean()
+    return (lights - lights_gray).pow(2).mean() + (1 - lights).pow(2).mean()
 
+    lights = torch.cat([self_occ_color, env_light_color], dim=-1)
     return lights.pow(2).mean()
     diffuse_shading = lights[..., 6:]
 

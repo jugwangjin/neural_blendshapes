@@ -95,12 +95,12 @@ class NeuralShader(torch.nn.Module):
         # ==============================================================================================
         # self.material_mlp_ch = disentangle_network_params['material_mlp_ch']
         self.diffuse_mlp_ch = 4 # diffuse 3 and roughness 1
-        self.diffuse_mlp = FC(self.inp_size, 20, self.disentangle_network_params["material_mlp_dims"], self.activation, None).to(self.device) #sigmoid
+        self.diffuse_mlp = FC(self.inp_size, 32, self.disentangle_network_params["material_mlp_dims"], self.activation, None).to(self.device) #sigmoid
         self.last_act = make_module(self.last_activation)
         
-        self.env_light_mlp = FC(20 + 20, 20, self.disentangle_network_params["light_mlp_dims"], self.activation, None).to(self.device) #sigmoid
+        self.env_light_mlp = FC(20 + 32, 3, self.disentangle_network_params["light_mlp_dims"], self.activation, None).to(self.device) #sigmoid
 
-        self.self_occ_mlp = FC(20 + 20, 3, self.disentangle_network_params["light_mlp_dims"], self.activation, None).to(self.device) # reflvec / normal for input
+        self.self_occ_mlp = FC(20 + 32, 3, self.disentangle_network_params["light_mlp_dims"], self.activation, None).to(self.device) # reflvec / normal for input
 
 
         if fourier_features == "hashgrid":
@@ -156,7 +156,7 @@ class NeuralShader(torch.nn.Module):
         '''
         normal_bend_exp_no_pose = self.get_shading_normals(deformed_position, view_dir, gbuffer, mesh, target='exp_no_pose')
         normal_bend_exp_no_pose_enc = self.dir_enc_func(normal_bend_exp_no_pose.view(-1, 3), roughness.view(-1, 1))
-        self_occ_mlp_input = torch.cat([env_light_mlp_output, normal_bend_exp_no_pose_enc], dim=1)
+        self_occ_mlp_input = torch.cat([diffuse_mlp_output, normal_bend_exp_no_pose_enc], dim=1)
 
         self_occ_mlp_output = self.self_occ_mlp(self_occ_mlp_input)
         self_occ_color = self.last_act(self_occ_mlp_output)
@@ -164,9 +164,9 @@ class NeuralShader(torch.nn.Module):
         '''
         summary
         '''
-        color = diffuse_color * self_occ_color * env_light_color  # the diffuse color -> when the light is maximum. the others decrease the value according to normals
+        color = diffuse_color * self_occ_color + env_light_color  # the diffuse color -> when the light is maximum. the others decrease the value according to normals
 
-        lights = torch.cat([self_occ_color, env_light_color], dim=0)
+        lights = torch.cat([self_occ_color, env_light_color], dim=-1)
 
         '''
         for normal visualization

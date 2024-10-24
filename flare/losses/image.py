@@ -106,7 +106,7 @@ def mask_loss_function(masks, gbuffers, epsilon=1e-8, loss_function = torch.nn.M
     
     mse_loss = (masks - gbuffers).pow(2).mean()
 
-    return (iou_loss + mse_loss) / 2
+    return (iou_loss + mse_loss)
 
     return (masks - gbuffers).pow(2).mean()
     loss = []

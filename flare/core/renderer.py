@@ -152,7 +152,7 @@ class Renderer:
 
     def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx, 
                      deformed_normals_exp_no_pose, deformed_normals_temp_pose, deformed_vertices_exp_no_pose, deformed_vertices_temp_pose,
-                     canonical_uv, deformed_vertices_clip_space=None):
+                     canonical_uv, mesh, deformed_vertices_clip_space=None):
         """ Render G-buffers from a set of views.
 
         Args:
@@ -166,12 +166,38 @@ class Renderer:
         canonical_verts_batch = canonical_v.unsqueeze(0).repeat(batch_size, 1, 1)
         deformed_vertices_clip_space = Renderer.transform_pos_batch(P_batch, deformed_vertices) if deformed_vertices_clip_space is None else deformed_vertices_clip_space
 
-        # deformed_vertices_clip_space_exp_no_pose = Renderer.transform_pos_batch(P_batch, deformed_vertices)
-        # deformed_vertices_clip_space_temp_pose = Renderer.transform_pos_batch(P_batch, deformed_vertices)
-# 
         idx = canonical_idx.int()
         face_idx = deformed_normals["face_idx"].int()
         rast, rast_out_db = dr.rasterize(self.glctx, deformed_vertices_clip_space, idx, resolution=resolution)
+
+        # import time
+
+        # start = time.time()
+
+        face_ids = rast[..., -1].long()
+        # Flatten the face_ids to easily work with indexing
+        face_ids_flat = face_ids.view(-1)  # Shape: (batch_size * height * width)
+
+        # Create a segmentation map initialized to -1 (indicating background)
+        segmentation_map = torch.full((batch_size, resolution[0], resolution[1]), fill_value=-1, dtype=torch.long, device=face_ids.device)
+
+        # Flatten segmentation_map for easier indexing
+        segmentation_map_flat = segmentation_map.view(-1)
+
+        # Create a mask for valid faces (face_ids >= 0)
+        invalid_mask = torch.all(rast == 0, dim=-1) # B H W mask
+        # negate 
+        valid_mask = ~invalid_mask
+        valid_mask = valid_mask.view(-1)
+
+        # Update segmentation map for valid face pixels using mesh.face_labels
+        valid_face_ids = face_ids_flat[valid_mask]  # Extract valid face indices (1D tensor)
+        segmentation_map_flat[valid_mask] = mesh.face_labels[valid_face_ids]  # Assign labels based on face indices
+
+        # Reshape segmentation_map back to (batch_size, height, width)
+        segmentation_map = segmentation_map_flat.view(batch_size, resolution[0], resolution[1])
+
+        # print(f"Segmentation map computation time: {time.time() - start}")
 
         view_dir = torch.cat([v.center.unsqueeze(0) for v in views], dim=0)
         view_dir = view_dir[:, None, None, :]
@@ -184,18 +210,11 @@ class Renderer:
             position, _ = dr.interpolate(deformed_vertices, rast, idx)
             gbuffer["position"] = dr.antialias(position, rast, deformed_vertices_clip_space, idx) if with_antialiasing else position
 
-            # position_exp_no_pose, _ = dr.interpolate(deformed_vertices_exp_no_pose, rast, idx)
-            # gbuffer["position_exp_no_pose"] = dr.antialias(position_exp_no_pose, rast, deformed_vertices_clip_space, idx) if with_antialiasing else position_exp_no_pose
-
-            # position_temp_pose, _ = dr.interpolate(deformed_vertices_temp_pose, rast, idx)
-            # gbuffer["position_temp_pose"] = dr.antialias(position_temp_pose, rast, deformed_vertices_clip_space, idx) if with_antialiasing else position_temp_pose
-            
 
         # canonical points in G-buffer
         if "canonical_position" in channels:
             canonical_position, _ = dr.interpolate(canonical_verts_batch, rast, idx, rast_db=rast_out_db, diff_attrs='all')
             gbuffer["canonical_position"] = canonical_position
-            # gbuffer["canonical_position"] = dr.antialias(canonical_position, rast, deformed_vertices_clip_space, idx) if with_antialiasing else canonical_position
 
         # normals in G-buffer
         if "normal" in channels:
@@ -227,95 +246,50 @@ class Renderer:
 
         if 'mask' in channels and 'canonical_position' in channels and 'segmentation' in channels:            
 
-            canonical_positions = gbuffer['canonical_position']
-            b, h, w, c=  canonical_positions.shape
-            canonical_positions = canonical_positions.reshape(b, h*w, c)
-            _, valid_idx, _ = knn_points(canonical_positions, canonical_verts_batch, K=1, return_nn=False)
-            valid_idx = valid_idx[:, :, 0].reshape(b, h, w)[..., None] # shape of N, P1, K -> b, h*w
+            segmentation = (segmentation_map[..., None] == 0).float() # face W/O eyes and mouth.
+            segmentation = dr.antialias(segmentation.float(), rast, deformed_vertices_clip_space, idx)
 
-            # no eye/mouth
-            valid_idx_tensor = torch.zeros(b, h, w, 1).to(self.device)
-            valid_idx_tensor[valid_idx < 11248] = 1.
-            valid_idx_tensor = valid_idx_tensor
-
-            mask = (rast[..., -1:] > 0.).float()
-            segmentation = mask * valid_idx_tensor
-
-            segmentation = torch.lerp(torch.zeros((batch_size, h, w, 1)).to(self.device), 
-                                        torch.ones((batch_size, h, w, 1)).to(self.device), segmentation.float())
-
-            segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
             gbuffer['segmentation'] = segmentation
-            
-            # eyes
-            valid_idx_tensor = torch.zeros(b, h, w, 1).to(self.device)
-            valid_idx_tensor[valid_idx < 24591] = 1.
-            valid_idx_tensor[valid_idx < 21451] = 0.
-            valid_idx_tensor = valid_idx_tensor
 
-            mask = (rast[..., -1:] > 0.).float()
-            segmentation = mask * valid_idx_tensor
+            mouth_segmentation = (segmentation_map[..., None] == 1).float() # mouth
+            mouth_segmentation = dr.antialias(mouth_segmentation.float(), rast, deformed_vertices_clip_space, idx)
 
-            # save mask, valid_idx_tensor, segmentation
+            gbuffer['mouth'] = mouth_segmentation
 
-            # rendered_eye_seg_ = rendered_eye_seg.cpu().data.numpy()
-            # rendered_eye_seg_ = rendered_eye_seg_ * 255
-            # rendered_eye_seg_ = rendered_eye_seg_.astype("uint8")
-            # for i in range(rendered_eye_seg_.shape[0]):
-            #     cv2.imwrite(f"debug/rendered_eye_seg_{i}.png", rendered_eye_seg_[i])
 
-            # mask
+            eyes_segmentation = (segmentation_map[..., None] == 2).float() # eyes
+            eyes_segmentation = dr.antialias(eyes_segmentation.float(), rast, deformed_vertices_clip_space, idx)
+
+            gbuffer['eyes'] = eyes_segmentation
+
+            # # to debug, save the segmentation maps on debug directory
             # import cv2
-            # mask_ = mask.cpu().data.numpy()
-            # mask_ = mask_ * 255
-            # mask_ = mask_.astype("uint8")
-            # for i in range(mask_.shape[0]):
-            #     cv2.imwrite(f"debug/mask_{i}.png", mask_[i, ..., 0])
-
-            # # valid_idx_tensor
-            # valid_idx_tensor_ = valid_idx_tensor.cpu().data.numpy()
-            # valid_idx_tensor_ = valid_idx_tensor_ * 255
-            # valid_idx_tensor_ = valid_idx_tensor_.astype("uint8")
-            # for i in range(valid_idx_tensor_.shape[0]):
-            #     cv2.imwrite(f"debug/valid_idx_tensor_{i}.png", valid_idx_tensor_[i, ..., 0])
-
-            # # segmentation
-            # segmentation_ = segmentation.cpu().data.numpy()
-            # segmentation_ = segmentation_ * 255
-            # segmentation_ = segmentation_.astype("uint8")
-            # for i in range(segmentation_.shape[0]):
-            #     cv2.imwrite(f"debug/segmentation_{i}.png", segmentation_[i, ..., 0])
-
-            segmentation = torch.lerp(torch.zeros((batch_size, h, w, 1)).to(self.device), 
-                                        torch.ones((batch_size, h, w, 1)).to(self.device), segmentation.float())
+            # import numpy as np
             
-            segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
+            # # Make sure segmentation maps are on CPU and convert to NumPy
+            # segmentation_map_face_np = segmentation.clamp(0, 1).squeeze().cpu().numpy()  # Shape: (height, width)
+            # segmentation_map_mouth_np = mouth_segmentation.clamp(0, 1).squeeze().cpu().numpy()  # Shape: (height, width)
+            # segmentation_map_eyes_np = eyes_segmentation.clamp(0, 1).squeeze().cpu().numpy()  # Shape: (height, width)
 
-            # # segmentation_w_alias
-            # segmentation_w_alias_ = segmentation.cpu().data.numpy()
-            # segmentation_w_alias_ = segmentation_w_alias_ * 255
-            # segmentation_w_alias_ = segmentation_w_alias_.astype("uint8")
-            # for i in range(segmentation_w_alias_.shape[0]):
-            #     cv2.imwrite(f"debug/segmentation_w_alias_{i}.png", segmentation_w_alias_[i, ..., 0])
+            # # Convert segmentation maps to uint8 format (e.g., scale from [0, 1] to [0, 255])
+            # segmentation_map_face_np = (segmentation_map_face_np * 255).astype(np.uint8)
+            # segmentation_map_mouth_np = (segmentation_map_mouth_np * 255).astype(np.uint8)
+            # segmentation_map_eyes_np = (segmentation_map_eyes_np * 255).astype(np.uint8)
+
+            # for i in range(batch_size):
+            #     # Optional: Apply a colormap to better visualize segmentation (OpenCV colormap)
+            #     # segmentation_map_face_color = cv2.applyColorMap(segmentation_map_face_np[i], cv2.COLORMAP_JET)
+            #     # segmentation_map_mouth_color = cv2.applyColorMap(segmentation_map_mouth_np[i], cv2.COLORMAP_JET)
+            #     # segmentation_map_eyes_color = cv2.applyColorMap(segmentation_map_eyes_np[i], cv2.COLORMAP_JET)
+
+            #     # Save the segmentation maps as image files
+            #     cv2.imwrite(f'debug/segmentation_face_{i}.png', segmentation_map_face_np[i])
+            #     cv2.imwrite(f'debug/segmentation_mouth_{i}.png', segmentation_map_mouth_np[i])
+            #     cv2.imwrite(f'debug/segmentation_eyes_{i}.png', segmentation_map_eyes_np[i])
+
             # exit()
-
-            gbuffer['eyes'] = segmentation
-
-            # mouth: 
-            valid_idx_tensor = torch.zeros(b, h, w, 1).to(self.device)
-            valid_idx_tensor[valid_idx < 21451] = 1.
-            valid_idx_tensor[valid_idx < 14062] = 0.
-            valid_idx_tensor[valid_idx < 13294] = 1.
-            valid_idx_tensor[valid_idx < 11248] = 0.
-
-            mask = (rast[..., -1:] > 0.).float()
-            segmentation = mask * valid_idx_tensor
-            segmentation = torch.lerp(torch.zeros((batch_size, h, w, 1)).to(self.device), 
-                                        torch.ones((batch_size, h, w, 1)).to(self.device), segmentation.float())
             
-            segmentation = dr.antialias(segmentation.contiguous(), rast, deformed_vertices_clip_space, idx)
-            gbuffer['mouth'] = segmentation
-
+            
 
         try:
             uv_coordinates, _ = dr.interpolate(canonical_uv, rast, idx, rast_db=rast_out_db, diff_attrs='all')
@@ -327,8 +301,6 @@ class Renderer:
         # to antialias texture and mask after computing the color 
         gbuffer["rast"] = rast
         gbuffer["deformed_verts_clip_space"] = deformed_vertices_clip_space
-        # gbuffer["deformed_verts_clip_space_exp_no_pose"] = deformed_vertices_clip_space_exp_no_pose
-        # gbuffer["deformed_verts_clip_space_temp_pose"] = deformed_vertices_clip_space_temp_pose
         gbuffer["view_pos_gl"] = Rt[:, :3, 3]
 
         return gbuffer

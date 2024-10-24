@@ -13,8 +13,8 @@ iterations = 10000
 upsample_iterations = [500]
 
 lr_shader = 1e-3
-lr_deformer = 3e-4
-lr_jacobian = 1e-4
+lr_deformer = 4e-4
+lr_jacobian = 2e-4
 
 weight_shading = 1.0
 weight_perceptual_loss = 1e-2
@@ -31,14 +31,14 @@ weight_feature_regularization = 1e-4
 
 weight_geometric_regularization = 1e-5
 weight_normal = 0.25
-weight_normal_laplacian = 1e-1
+weight_normal_laplacian = 1e1
 weight_landmark = 2
 weight_closure = 2
 
 weight_segmentation = 1e-0
 weight_semantic_stat = 1e-0
 
-weight_flame_regularization = 10
+weight_flame_regularization = 2
 
 
 light_mlp_ch = 3
