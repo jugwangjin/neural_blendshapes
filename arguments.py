@@ -111,4 +111,7 @@ def config_parser():
     parser.add_argument('--no-ghostbone', dest='ghostbone', action='store_false')
     parser.set_defaults(ghostbone=True)
     parser.add_argument('--lambda_', type=int, default=16, help="Total number of iterations")
+
+
+    parser.add_argument('--compute_mode', action='store_true', help="skip eval")
     return parser

@@ -99,7 +99,6 @@ def hash_arguments(arguments):
     return hasher.hexdigest()
 
 
-
 def compute_laplacian_uniform_filtered(mesh, head_index=11248):
     """
     Computes the laplacian in packed form.
@@ -170,6 +169,32 @@ def clip_grad(neural_blendshapes, shader, norm=1.0):
     return
 
 
+def save_blendshape_figure(bshapes, names, title, save_path):
+
+    plt.clf()
+    plt.figsize=(8,8)
+    plt.bar(np.arange(53), bshapes)
+    plt.ylim(0, 1)
+    plt.xticks(np.arange(53), names, rotation=90, fontsize=6)
+    plt.title(title)
+    plt.savefig(str(save_path))
+
+
+def visualize_specific_traininig(mesh_key_name, return_dict, renderer, shader, ict_facekit, views_subset, mesh, save_name, images_save_path, iteration, lgt):
+    debug_gbuffer = renderer.render_batch(views_subset['flame_camera'], return_dict[mesh_key_name+'_posed'].contiguous(), mesh.fetch_all_normals(return_dict[mesh_key_name+'_posed'], mesh),
+                            channels=channels_gbuffer + ['segmentation'], with_antialiasing=True, 
+                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                            deformed_normals_exp_no_pose=mesh.fetch_all_normals(return_dict[mesh_key_name], mesh),
+                            deformed_normals_temp_pose=mesh.fetch_all_normals(return_dict['template_mesh_posed'], mesh),
+                            deformed_vertices_exp_no_pose=return_dict[mesh_key_name],
+                            deformed_vertices_temp_pose=return_dict['template_mesh_posed'],
+                            mesh=mesh
+                            )
+    debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, views_subset, mesh, args.finetune_color, lgt)
+    visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, views_subset, images_save_path, iteration, ict_facekit=ict_facekit, save_name=save_name)
+
+    return debug_gbuffer
+
 def main(args, device, dataset_train, dataloader_train, debug_views):
 
 
@@ -188,6 +213,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     print("hashing done")
     final_hash = hashlib.sha256((directory_hash + arguments_hash).encode()).hexdigest()
 
+    mode = dataset_train.get_bshapes_mode(args.compute_mode)
 
     ## =================== Load FLAME ==============================
     flame_path = args.working_dir / 'flame/FLAME2020/generic_model.pkl'
@@ -380,17 +406,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
         mesh = ict_canonical_mesh.with_vertices(ict_canonical_mesh.vertices)
         return_dict_ = neural_blendshapes(debug_views['img'], debug_views)
-        debug_gbuffer = renderer.render_batch(debug_views['flame_camera'], return_dict_['ict_mesh_w_temp_posed'].contiguous(), mesh.fetch_all_normals(return_dict_['ict_mesh_w_temp_posed'], mesh), 
-                                channels=channels_gbuffer+['segmentation'], with_antialiasing=True, 
-                                canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                deformed_normals_exp_no_pose=mesh.fetch_all_normals(return_dict_['ict_mesh_w_temp'], mesh),
-                                deformed_normals_temp_pose=mesh.fetch_all_normals(return_dict_['template_mesh_posed'], mesh),
-                                deformed_vertices_exp_no_pose=return_dict_['ict_mesh_w_temp'],
-                                deformed_vertices_temp_pose=return_dict_['template_mesh_posed'],
-                                mesh=mesh
-                                ) 
-        debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, debug_views, mesh, args.finetune_color, lgt)
-        visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, 0, ict_facekit=ict_facekit, save_name='only_flame')
+
+        visualize_specific_traininig('expression_mesh', return_dict_, renderer, shader, ict_facekit, debug_views, mesh, 'only_flame', images_save_path, 0, lgt)
 
         filename = os.path.join(images_save_path, "grid", f"grid_0_only_flame.png")
         target_filename = os.path.join(images_save_path, "grid", f"a_ict_init.png")
@@ -398,52 +415,18 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         os.rename(filename, target_filename)
 
         for ith in range(return_dict_['features'].shape[0]):
+            names = ict_facekit.expression_names.tolist()
             bshapes = return_dict_['features'][ith, :53].detach().cpu().numpy()
             bshapes = np.round(bshapes, 2)
             
-            names = ict_facekit.expression_names.tolist()
-            
-            plt.clf()
-            plt.figsize=(8,8)
-            plt.bar(np.arange(53), bshapes)
-            # y range [0, 1]
-            plt.ylim(0, 1)
-            plt.xticks(np.arange(53), names, rotation=90, fontsize=6)
-            plt.title(f"Blendshapes Activation_{ith}")
-            plt.savefig(str(images_save_path / "grid" / f"flame_init_blendshapes_activation_{ith}.png"))
+            save_blendshape_figure(bshapes, names, f"Blendshapes Activation_{ith}", images_save_path / "grid" / f"flame_init_blendshapes_activation_{ith}.png")
 
             bshapes = debug_views['mp_blendshape'][ith, ict_facekit.mediapipe_to_ict].detach().cpu().numpy()
             bshapes = np.round(bshapes, 2)
 
-            plt.clf()
-            plt.figsize=(8,8)
-            plt.bar(np.arange(53), bshapes)
-            plt.ylim(0, 1)
-            plt.xticks(np.arange(53), names, rotation=90, fontsize=6)
-            plt.title(f"Blendshapes Activation_{ith}")
-            plt.savefig(str(images_save_path / "grid" / f"mediapipe_blendshapes_activation_{ith}.png"))
-                
-        flame_gt, _, _ = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
-
-        for num_flame in range(flame_gt.shape[0]):
-            flame_tmp_mesh = o3d.geometry.TriangleMesh()
-            flame_tmp_mesh.vertices = o3d.utility.Vector3dVector(flame_gt[num_flame].cpu().numpy())
-            flame_tmp_mesh.triangles = o3d.utility.Vector3iVector(FLAMEServer.faces_tensor.cpu().numpy())
-            o3d.io.write_triangle_mesh(f'debug/debug_view_{num_flame}_flame_gt.obj', flame_tmp_mesh)
-
-            ict_tmp_mesh = o3d.geometry.TriangleMesh()
-            ict_tmp_mesh.vertices = o3d.utility.Vector3dVector(return_dict_['ict_mesh_w_temp_posed'][num_flame].cpu().numpy())
-            ict_tmp_mesh.triangles = o3d.utility.Vector3iVector(ict_facekit.faces.cpu().numpy())
-            o3d.io.write_triangle_mesh(f'debug/debug_view_{num_flame}_ict_gt.obj', ict_tmp_mesh)
+            save_blendshape_figure(bshapes, names, f"Blendshapes Activation_{ith}", images_save_path / "grid" / f"mediapipe_blendshapes_activation_{ith}.png")
             
-
-            flame_tmp_gt = flame_gt[num_flame, flame_pair_indices]
-            ict_tmp_taget = return_dict_['ict_mesh_w_temp_posed'][num_flame, ict_pair_indices]
-
-            lineset = o3d.geometry.LineSet()
-            lineset.points = o3d.utility.Vector3dVector(torch.cat([flame_tmp_gt, ict_tmp_taget], 0).cpu().numpy())
-            lineset.lines = o3d.utility.Vector2iVector(np.array([np.arange(flame_tmp_gt.shape[0]), np.arange(flame_tmp_gt.shape[0], flame_tmp_gt.shape[0] + ict_tmp_taget.shape[0])]).T)
-            o3d.io.write_line_set(f'debug/debug_view_{num_flame}_pair.ply', lineset)
+        flame_gt, _, _ = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
 
         neural_blendshapes.train()
         shader.train()
@@ -453,7 +436,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         bshapes_multipliers.append([])
 
     use_jaw=True
-
 
     '''
     encoder pretraining
@@ -479,7 +461,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     epsilon = 1e-4
 
     iteration = 0
-    target_res = (128, 128)
+    target_res = (64, 64)
     for epoch in progress_bar:
         importance = importance / (importance.mean() + epsilon)
         dataset_sampler = torch.utils.data.WeightedRandomSampler(importance, dataset_train.len_img, replacement=True)
@@ -513,25 +495,18 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             
             _, _, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
 
-            flame_gt, _, _ = FLAMEServer(views_subset['flame_expression'], views_subset['flame_pose'])
-                
-            ict_gt = flame_gt[:, flame_pair_indices]
-            flame_loss = (deformed_vertices[:, ict_pair_indices] * 1 - ict_gt * 1) 
 
-            flame_loss = torch.sqrt(flame_loss.pow(2) + 1e-8).mean()
+            flame_loss = FLAME_loss_function(FLAMEServer, views_subset['flame_expression'], views_subset['flame_pose'], deformed_vertices, flame_pair_indices, ict_pair_indices)
 
             zero_pose_w_jaw = torch.zeros_like(views_subset['flame_pose'])
             zero_pose_w_jaw[:, 6:9] = views_subset['flame_pose'][:, 6:9]
-            flame_gt_no_pose, _, _ = FLAMEServer(views_subset['flame_expression'], zero_pose_w_jaw)
 
-            ict_gt = flame_gt_no_pose[:, flame_pair_indices]
+            flame_loss_no_pose = FLAME_loss_function(FLAMEServer, views_subset['flame_expression'], zero_pose_w_jaw, return_dict['ict_mesh_w_temp'], flame_pair_indices, ict_pair_indices)
 
-            flame_loss_no_pose = (return_dict['ict_mesh_w_temp'][:, ict_pair_indices] * 1 - ict_gt * 1)
-            flame_loss_no_pose = torch.sqrt(flame_loss_no_pose.pow(2) + 1e-8).mean()
 
             template_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, ict_facekit.neutral_mesh_canonical[0], return_dict['template_mesh'], filtered_lap, head_index=ict_canonical_mesh.vertices.shape[0]) 
             feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], facs_weight=0, mult=1e1)
+                                                                neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], facs_weight=0, mult=1)
 
             template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
             # normal_reg_tiemr = time.time()
@@ -629,18 +604,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             return_dict_ = neural_blendshapes(debug_views['img'], debug_views)
             
-
-            debug_gbuffer = renderer.render_batch(debug_views['flame_camera'], return_dict_['ict_mesh_w_temp_posed'].contiguous(), mesh.fetch_all_normals(return_dict_['ict_mesh_w_temp_posed'], mesh), 
-                                    channels=channels_gbuffer+['segmentation'], with_antialiasing=True, 
-                                    canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                    deformed_normals_exp_no_pose = mesh.fetch_all_normals(return_dict_['ict_mesh_w_temp'], mesh),
-                                    deformed_normals_temp_pose = mesh.fetch_all_normals(return_dict_['template_mesh_posed'], mesh),
-                                    deformed_vertices_exp_no_pose=return_dict_['ict_mesh_w_temp'],
-                                    deformed_vertices_temp_pose=return_dict_['template_mesh_posed'],
-                                    mesh=mesh
-                                    ) 
-            debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, debug_views, mesh, args.finetune_color, lgt)
-            visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, epoch, ict_facekit=ict_facekit, save_name='only_flame')
+            debug_gbuffer = visualize_specific_traininig('ict_mesh_w_temp', return_dict_, renderer, shader, ict_facekit, debug_views, mesh, 'only_flame', images_save_path, epoch, lgt)
 
             filename = os.path.join(images_save_path, "grid", f"grid_{epoch}_only_flame.png")
             target_filename = os.path.join(images_save_path, "grid", f"a_flame_epoch_{epoch}.png")
@@ -650,22 +614,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             flame_gt, _, _ = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
 
             for num_flame in range(flame_gt.shape[0]):
-                # ict_tmp_mesh = o3d.geometry.TriangleMesh()
-                # ict_tmp_mesh.vertices = o3d.utility.Vector3dVector(return_dict_['ict_mesh_w_temp_posed'][num_flame].cpu().numpy())
-                # ict_tmp_mesh.triangles = o3d.utility.Vector3iVector(ict_facekit.faces.cpu().numpy())
-                # o3d.io.write_triangle_mesh(f'debug/debug_view_{num_flame}_ict_gt_epoch{epoch}.obj', ict_tmp_mesh)
-                
-
                 flame_tmp_gt = flame_gt[num_flame, flame_pair_indices]
                 ict_tmp_taget = return_dict_['ict_mesh_w_temp_posed'][num_flame, ict_pair_indices]
 
-                # lineset = o3d.geometry.LineSet()
-                # lineset.points = o3d.utility.Vector3dVector(torch.cat([flame_tmp_gt, ict_tmp_taget], 0).cpu().numpy())
-                # lineset.lines = o3d.utility.Vector2iVector(np.array([np.arange(flame_tmp_gt.shape[0]), np.arange(flame_tmp_gt.shape[0], flame_tmp_gt.shape[0] + ict_tmp_taget.shape[0])]).T)
-                # o3d.io.write_line_set(f'debug/debug_view_{num_flame}_pair_epoch{epoch}.ply', lineset)
-                
                 seg = debug_gbuffer['segmentation'][num_flame, ..., 0]
-                # seg = debug_gbuffer['narrow_face'][ith, ..., 0]
                 seg = seg * 255
                 seg = seg.cpu().numpy().astype(np.uint8)
                 gt_seg = debug_views['skin_mask'][num_flame, ..., 0]
@@ -680,13 +632,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 
                 names = ict_facekit.expression_names.tolist()
 
-                plt.clf()
-                plt.figsize=(8,8)
-                plt.bar(np.arange(53), bshapes)
-                plt.ylim(0, 1)
-                plt.xticks(np.arange(53), names, rotation=90, fontsize=5)
-                plt.title(f"Blendshapes Activation_{num_flame}")
-                plt.savefig(str(images_save_path / "grid" / f"a_flame_epoch_{epoch}_blendshapes_activation_{num_flame}.png"))
+                save_blendshape_figure(bshapes, names, f"Blendshapes Activation_{num_flame}", images_save_path / "grid" / f"a_flame_epoch_{epoch}_blendshapes_activation_{num_flame}.png")
 
             neural_blendshapes.train()
             shader.train()                
@@ -727,15 +673,17 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
 
             if iteration < args.iterations // 4:
+                target_res = (64, 64)
+            elif iteration < args.iterations // 3:
                 target_res = (128, 128)
-            elif iteration < args.iterations // 2:
+            elif iteration < (2 * (args.iterations // 3)):
                 target_res = (256, 256)
             else:
                 target_res = None
 
             super_flame = False
-            pretrain = iteration < args.iterations // 3
-            if iteration == args.iterations // 3:
+            pretrain = iteration < args.iterations // 2
+            if iteration == args.iterations // 2:
                 # neural_blendshapes_tail_params = list(neural_blendshapes.encoder.tail.parameters())
                 optimizer_neural_blendshapes = torch.optim.AdamW([
                                                                 {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
@@ -745,7 +693,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                                 weight_decay=1e-3
                                                                 )
                                                      
-            if iteration == 3 * (args.iterations // 4) and args.fourier_features != "positional":
+            if iteration == 4 * (args.iterations // 5) and args.fourier_features != "positional":
                 del shader
                 del optimizer_shader
 
@@ -848,7 +796,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             random_blendshapes = torch.rand(views_subset['mp_blendshape'].shape[0], 53, device=device)
             
             expression_delta_random = neural_blendshapes.get_expression_delta(blendshapes=random_blendshapes)
-            l1_regularization = expression_delta_random.abs().mean() * 1e-5
+            l1_regularization = expression_delta_random.pow(2).mean() * 1e-3
 
 
             template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
@@ -860,27 +808,19 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 flame_loss_no_pose = torch.tensor(0., device=device)
 
             else:
-                flame_gt, _, _ = FLAMEServer(views_subset['flame_expression'], views_subset['flame_pose'])
-                ict_gt = flame_gt[:, flame_pair_indices]
-                flame_loss = (deformed_vertices[:, ict_pair_indices] * 1 - ict_gt * 1) 
                 if not flame_loss_full_head and flame_loss_tight_face:
-                    flame_loss = flame_loss[:, tight_face_ict_flame]
+                    target_range = tight_face_ict_flame
                 elif not flame_loss_full_head and not flame_loss_tight_face:
-                    flame_loss = flame_loss[:, full_face_ict_flame] 
-                flame_loss = torch.sqrt(flame_loss.pow(2) + 1e-8).mean()
-                    
+                    target_range = full_face_ict_flame
+                else:
+                    target_range = None
+                
+                flame_loss = FLAME_loss_function(FLAMEServer, views_subset['flame_expression'], views_subset['flame_pose'], deformed_vertices, flame_pair_indices, ict_pair_indices, target_range=target_range)
+                
                 zero_pose_w_jaw = torch.zeros_like(views_subset['flame_pose'])
                 zero_pose_w_jaw[:, 6:9] = views_subset['flame_pose'][:, 6:9]
-                flame_gt_no_pose, _, _ = FLAMEServer(views_subset['flame_expression'], zero_pose_w_jaw)
 
-                ict_gt = flame_gt_no_pose[:, flame_pair_indices]
-
-                flame_loss_no_pose = (deformed_vertices_no_pose[:, ict_pair_indices] * 1 - ict_gt * 1)
-                if not flame_loss_full_head and flame_loss_tight_face:
-                    flame_loss_no_pose = flame_loss_no_pose[:, tight_face_ict_flame]
-                elif not flame_loss_full_head and not flame_loss_tight_face:
-                    flame_loss_no_pose = flame_loss_no_pose[:, full_face_ict_flame]
-                flame_loss_no_pose = torch.sqrt(flame_loss_no_pose.pow(2) + 1e-8).mean()
+                flame_loss_no_pose = FLAME_loss_function(FLAMEServer, views_subset['flame_expression'], zero_pose_w_jaw, deformed_vertices_no_pose, flame_pair_indices, ict_pair_indices, target_range=target_range)
 
 
             losses['feature_regularization'] = feature_regularization
@@ -1020,20 +960,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     shader.eval()
 
                     return_dict_ = neural_blendshapes(views_subset['img'], views_subset)
-                    debug_gbuffer = renderer.render_batch(views_subset['flame_camera'], return_dict_['expression_mesh_posed'].contiguous(), mesh.fetch_all_normals(return_dict_['expression_mesh_posed'], mesh),
-                                            channels=channels_gbuffer + ['segmentation'], with_antialiasing=True, 
-                                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                            deformed_normals_exp_no_pose=mesh.fetch_all_normals(return_dict_['expression_mesh'], mesh),
-                                            deformed_normals_temp_pose=mesh.fetch_all_normals(return_dict_['template_mesh_posed'], mesh),
-                                            deformed_vertices_exp_no_pose=return_dict_['expression_mesh'],
-                                            deformed_vertices_temp_pose=return_dict_['template_mesh_posed'],
-                                            mesh=mesh
-                                            )
-                    debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, views_subset, mesh, args.finetune_color, lgt)
-                    visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, views_subset, images_save_path, iteration, ict_facekit=ict_facekit, save_name='training')
+
+                    visualize_specific_traininig('expression_mesh', return_dict_, renderer, shader, ict_facekit, views_subset, mesh, 'training', images_save_path, iteration, lgt)
                     
+
                     return_dict_ = neural_blendshapes(debug_views['img'], debug_views)
-                    
+
                     bshapes = return_dict_['features'][:, :53].detach().cpu().numpy()
                     bshapes = np.round(bshapes, 2)
                     jawopen = bshapes[:, ict_facekit.expression_names.tolist().index('jawOpen')]
@@ -1042,30 +974,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     
                     print(f"JawOpen: {jawopen}, EyeBlink_L: {eyeblink_l}, EyeBlink_R: {eyeblink_r}")
 
-                    debug_gbuffer = renderer.render_batch(debug_views['flame_camera'], return_dict_['ict_mesh_w_temp_posed'].contiguous(), mesh.fetch_all_normals(return_dict_['ict_mesh_w_temp_posed'], mesh), 
-                                            channels=channels_gbuffer+['segmentation'], with_antialiasing=True, 
-                                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                            deformed_normals_exp_no_pose=mesh.fetch_all_normals(return_dict_['ict_mesh_w_temp'], mesh),
-                                            deformed_normals_temp_pose=mesh.fetch_all_normals(return_dict_['template_mesh_posed'], mesh),
-                                            deformed_vertices_exp_no_pose=return_dict_['ict_mesh_w_temp'],
-                                            deformed_vertices_temp_pose=return_dict_['template_mesh_posed'],
-                                            mesh=mesh
-                                            )
-                     
-                    debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, debug_views, mesh, args.finetune_color, lgt)
-                    visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration, ict_facekit=ict_facekit, save_name='ict_w_temp')
+                    visualize_specific_traininig('ict_mesh_w_temp', return_dict_, renderer, shader, ict_facekit, debug_views, mesh, 'ict_w_temp', images_save_path, iteration, lgt)
 
-                    debug_gbuffer = renderer.render_batch(debug_views['flame_camera'], return_dict_['expression_mesh_posed'].contiguous(), mesh.fetch_all_normals(return_dict_['expression_mesh_posed'], mesh),
-                                            channels=channels_gbuffer + ['segmentation'], with_antialiasing=True, 
-                                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                            deformed_normals_exp_no_pose = mesh.fetch_all_normals(return_dict_['expression_mesh'], mesh),
-                                            deformed_normals_temp_pose = mesh.fetch_all_normals(return_dict_['template_mesh_posed'], mesh),
-                                            deformed_vertices_exp_no_pose = return_dict_['expression_mesh'],
-                                            deformed_vertices_temp_pose = return_dict_['template_mesh_posed'],
-                                            mesh=mesh
-                                            )
-                    debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, debug_views, mesh, args.finetune_color, lgt)
-                    visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration, ict_facekit=ict_facekit, save_name='expression')
+                    debug_gbuffer = visualize_specific_traininig('expression_mesh', return_dict_, renderer, shader, ict_facekit, debug_views, mesh, 'expression', images_save_path, iteration, lgt)
 
 
                     for ith in range(debug_views['img'].shape[0]):
@@ -1085,23 +996,17 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                         
                         names = ict_facekit.expression_names.tolist()
 
-                        plt.clf()
-                        plt.figsize=(8,8)
-                        plt.bar(np.arange(53), bshapes)
-                        plt.ylim(0, 1)
-                        plt.xticks(np.arange(53), names, rotation=90, fontsize=5)
-                        plt.title(f"Blendshapes Activation_{ith}")
-                        plt.savefig(str(images_save_path / "grid" / f"grid_{iteration}_blendshapes_activation_{ith}.png"))
+                        save_blendshape_figure(bshapes, names, f"Blendshapes Activation_{ith}", images_save_path / "grid" / f"grid_{iteration}_blendshapes_activation_{ith}.png")
+                                            
 
-                    for n in range(debug_views['img'].shape[0]):                            
-                        if n != 0:
-                            break      
-                        write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp.obj", mesh.with_vertices(return_dict_['expression_mesh'][n]).detach().to('cpu'))                    
-                        # save the posed meshes as well
-                        write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp_posed.obj", mesh.with_vertices(return_dict_['expression_mesh_posed'][n]).detach().to('cpu'))
+                        n = ith                     
+                        if n == 0: 
+                            write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp.obj", mesh.with_vertices(return_dict_['expression_mesh'][n]).detach().to('cpu'))                    
+                            # save the posed meshes as well
+                            write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp_posed.obj", mesh.with_vertices(return_dict_['expression_mesh_posed'][n]).detach().to('cpu'))
 
                     write_mesh(meshes_save_path / f"mesh_{iteration:06d}_temp.obj", mesh.with_vertices(return_dict_['template_mesh']).detach().to('cpu'))                                
-                    del debug_gbuffer, debug_cbuffers, debug_rgb_pred, return_dict_
+                    del debug_gbuffer, return_dict_
 
                     neural_blendshapes.train()
                     shader.train()
@@ -1180,7 +1085,6 @@ if __name__ == '__main__':
     
     # lbs = dataset_train.get_bshapes_lower_bounds()
     # print(lbs)
-    mode = dataset_train.get_bshapes_mode()
     
     # exit()
 

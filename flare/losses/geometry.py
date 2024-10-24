@@ -142,24 +142,17 @@ def normal_reg_loss(mesh, mesh1, mesh2, head_index=14062):
     return loss
 
 
-# def normal_reg_loss(mesh, vertices1, vertices2, head_index=11248):
-#     if len(vertices1.shape) == 2:
-#         vertices1 = vertices1.unsqueeze(0)
-#         vertices2 = vertices2.unsqueeze(0)
+def FLAME_loss_function(FLAMEServer,flame_expression, flame_pose, deformed_vertices, flame_pair_indices, ict_pair_indices, target_range=None):
+    flame_gt, _, _ = FLAMEServer(flame_expression, flame_pose)
+    ict_gt = flame_gt[:, flame_pair_indices]
+    flame_loss = (deformed_vertices[:, ict_pair_indices] - ict_gt)
+    
+    if target_range is not None:
+        flame_loss = flame_loss[:, target_range]
+    flame_loss = torch.sqrt(flame_loss.pow(2) + 1e-8).mean()
+    return flame_loss
 
-#     for b in range(vertices1.shape[0]):
-#         mesh1 = mesh.with_vertices(vertices1[b])
-#         mesh2 = mesh.with_vertices(vertices2[b])
 
-#         loss = 1 - torch.cosine_similarity(mesh1.vertex_normals[:head_index], mesh2.vertex_normals[:head_index], dim=-1)
-#         loss = loss**2
-#         loss = loss.mean()
-#         if b == 0:
-#             total_loss = loss
-#         else:
-#             total_loss += loss
-
-#     return total_loss / vertices1.shape[0]
 
 def normal_consistency_loss(mesh: Mesh):
     """ Compute the normal consistency term as the cosine similarity between neighboring face normals.

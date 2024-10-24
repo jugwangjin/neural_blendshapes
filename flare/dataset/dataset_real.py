@@ -215,7 +215,11 @@ class DatasetLoader(Dataset):
         return self.len_img
 
 
-    def get_bshapes_mode(self):
+    def get_bshapes_mode(self, compute_mode):
+        if compute_mode is False:
+            self.bshapes_mode = torch.zeros(53, dtype=torch.float32)
+            return self.bshapes_mode    
+        
         bshapes = []
         for i in tqdm(range(self.len_img)):
             if i not in self.loaded[False]:
@@ -239,8 +243,6 @@ class DatasetLoader(Dataset):
 
         print('mode of blendshapes:', modes)
         self.bshapes_mode = torch.tensor(modes, dtype=torch.float32)
-
-        # mode = torch.tensor(modes, dtype=torch.float32)
 
         return modes
 

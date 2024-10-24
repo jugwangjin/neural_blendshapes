@@ -100,7 +100,7 @@ class NeuralShader(torch.nn.Module):
                     "per_level_scale" : per_level_scale
                 }
 
-                self.gradient_scaling = 1.0
+                self.gradient_scaling = 64.0
                 self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to(self.device)
                 # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / gradient_scaling, ))
                 self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))

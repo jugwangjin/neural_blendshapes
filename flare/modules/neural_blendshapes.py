@@ -92,16 +92,16 @@ class MLPTemplate(nn.Module):
     def __init__(self, inp_dim):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(inp_dim, 128),
-            # nn.LayerNorm(128),
+            nn.Linear(inp_dim, 256),
+            # nn.LayerNorm(256),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            # nn.LayerNorm(128),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            # nn.LayerNorm(128),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
             nn.Softplus(beta=100),
-            nn.Linear(128, 3, bias=False)
+            nn.Linear(256, 3, bias=False)
         )
 
     def forward(self, x):
@@ -157,6 +157,7 @@ class NeuralBlendshapes(nn.Module):
         self.fourier_feature_transform2 = tcnn.Encoding(3, enc_cfg).to('cuda')
         self.inp_size = self.fourier_feature_transform.n_output_dims
 
+
         self.include_identity_on_encoding = True
 
         if self.include_identity_on_encoding:
@@ -169,19 +170,19 @@ class NeuralBlendshapes(nn.Module):
 
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(self.inp_size, 128),
-            # nn.LayerNorm(128),
+            nn.Linear(self.inp_size, 256),
+            # nn.LayerNorm(256),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            # nn.LayerNorm(128),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            # nn.LayerNorm(128),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            # nn.LayerNorm(128),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
             nn.Softplus(beta=100),
-            nn.Linear(128, 54*3, bias=False)
+            nn.Linear(256, 54*3, bias=False)
         )
         self.template_deformer = MLPTemplate(3)
         self.template_embedder = Identity()
@@ -194,6 +195,14 @@ class NeuralBlendshapes(nn.Module):
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
+
+
+
+        self.gradient_scaling = 64.0
+    
+        self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+        self.fourier_feature_transform2.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+        self.expression_deformer.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling if grad_i[0] is not None else None, ))
 
         # Initialize weights and biases for expression deformer
         for layer in self.expression_deformer:
