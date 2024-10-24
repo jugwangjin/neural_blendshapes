@@ -22,6 +22,22 @@ import nvdiffrec.render.renderutils.ops as ru
 import nvdiffrast.torch as dr
 # from . import util
 from nvdiffrec.render import util
+import torch.nn.functional as F
+
+
+
+high_res = (512, 512)
+def upsample(buffer, high_res):
+    if buffer.shape[1] == high_res[0] and buffer.shape[2] == high_res[1]:
+        return buffer
+    # Convert from (B, H, W, C) -> (B, C, H, W)
+    buffer = buffer.permute(0, 3, 1, 2)
+    
+    # Perform bilinear upsampling
+    upsampled = F.interpolate(buffer, size=high_res, mode='bilinear', align_corners=False)
+    
+    # Convert back from (B, C, H, W) -> (B, H, W, C)
+    return upsampled.permute(0, 2, 3, 1)
 
 
 def make_module(module):
@@ -98,9 +114,9 @@ class NeuralShader(torch.nn.Module):
         self.diffuse_mlp = FC(self.inp_size, 32, self.disentangle_network_params["material_mlp_dims"], self.activation, None).to(self.device) #sigmoid
         self.last_act = make_module(self.last_activation)
         
-        self.env_light_mlp = FC(20 + 32, 3, self.disentangle_network_params["light_mlp_dims"], self.activation, None).to(self.device) #sigmoid
+        self.env_light_mlp = FC(3 + 32, 3, self.disentangle_network_params["light_mlp_dims"], self.activation, None).to(self.device) #sigmoid
 
-        self.self_occ_mlp = FC(20 + 32, 3, self.disentangle_network_params["light_mlp_dims"], self.activation, None).to(self.device) # reflvec / normal for input
+        self.self_occ_mlp = FC(3 + 32, 3, self.disentangle_network_params["light_mlp_dims"], self.activation, None).to(self.device) # reflvec / normal for input
 
 
         if fourier_features == "hashgrid":
@@ -145,8 +161,8 @@ class NeuralShader(torch.nn.Module):
         env light
         '''
         normal_bend_temp_pose = self.get_shading_normals(deformed_position, view_dir, gbuffer, mesh, target='temp_pose')
-        normal_bend_temp_pose_enc = self.dir_enc_func(normal_bend_temp_pose.view(-1, 3), roughness.view(-1, 1))
-        env_light_mlp_input = torch.cat([diffuse_mlp_output, normal_bend_temp_pose_enc], dim=1)
+        # normal_bend_temp_pose_enc = self.dir_enc_func(normal_bend_temp_pose.view(-1, 3), roughness.view(-1, 1))
+        env_light_mlp_input = torch.cat([diffuse_mlp_output, normal_bend_temp_pose.view(-1, 3)], dim=1)
 
         env_light_mlp_output = self.env_light_mlp(env_light_mlp_input)
         env_light_color = self.last_act(env_light_mlp_output[..., :3])
@@ -155,8 +171,8 @@ class NeuralShader(torch.nn.Module):
         self-occlusion -> normals
         '''
         normal_bend_exp_no_pose = self.get_shading_normals(deformed_position, view_dir, gbuffer, mesh, target='exp_no_pose')
-        normal_bend_exp_no_pose_enc = self.dir_enc_func(normal_bend_exp_no_pose.view(-1, 3), roughness.view(-1, 1))
-        self_occ_mlp_input = torch.cat([diffuse_mlp_output, normal_bend_exp_no_pose_enc], dim=1)
+        # normal_bend_exp_no_pose_enc = self.dir_enc_func(normal_bend_exp_no_pose.view(-1, 3), roughness.view(-1, 1))
+        self_occ_mlp_input = torch.cat([diffuse_mlp_output, normal_bend_exp_no_pose.view(-1, 3)], dim=1)
 
         self_occ_mlp_output = self.self_occ_mlp(self_occ_mlp_input)
         self_occ_color = self.last_act(self_occ_mlp_output)
@@ -195,6 +211,7 @@ class NeuralShader(torch.nn.Module):
     # ==============================================================================================    
     def shade(self, gbuffer, views, mesh, finetune_color, lgt):
 
+
         positions = gbuffer["canonical_position"]
         # positions = dr.antialias(positions, gbuffer['rast'], gbuffer['deformed_vertices_clip_space'], mesh.indices) 
 
@@ -216,12 +233,14 @@ class NeuralShader(torch.nn.Module):
 
         ### !! we mask directly with alpha values from the rasterizer !! ###
         pred_color_masked = torch.lerp(torch.zeros((batch_size, H, W, 4)).to(self.device), 
-                                    torch.concat([pred_color, torch.ones_like(pred_color[..., 0:1]).to(self.device)], axis=3), gbuffer["mask"].float())
+                                    torch.concat([pred_color, torch.ones_like(pred_color[..., 0:1]).to(self.device)], axis=3), gbuffer["mask_low_res"].float())
         
     
         ### we antialias the final color here (!)
         pred_color_masked = dr.antialias(pred_color_masked.contiguous(), gbuffer["rast"], gbuffer["deformed_verts_clip_space"], mesh.indices.int())
         
+        pred_color_masked = upsample(pred_color_masked, high_res)
+
         cbuffers = {}
         cbuffers['material'] = material
         cbuffers['light'] = light
@@ -330,10 +349,9 @@ class NeuralShader(torch.nn.Module):
         '''
         normal = ru.prepare_shading_normal(position, view_dir, None, 
                                            v_norm, t_norm, f_norm, two_sided_shading=False, opengl=True, use_python=False)
-        
-
-        gbuffer[target_dict_name] =  dr.antialias(normal.contiguous(), gbuffer["rast"], gbuffer[clip_space_name], mesh.indices.int())
-        return gbuffer[target_dict_name]
+        ret_val = dr.antialias(normal.contiguous(), gbuffer["rast"], gbuffer[clip_space_name], mesh.indices.int())
+        gbuffer[target_dict_name] = upsample(ret_val, high_res)
+        return ret_val
     
     def apply_pe(self, position, normalize=False):
         ## normalize PE input 

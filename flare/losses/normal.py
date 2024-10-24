@@ -24,14 +24,49 @@ import torch
 
     # need to exclude eyeball, mouth cavity for stability
 
+import torch.nn.functional as F
+
+
+high_res = (512, 512)
+def upsample(buffer, high_res):
+    if buffer.shape[1] == high_res[0] and buffer.shape[2] == high_res[1]:
+        return buffer
+    # Convert from (B, H, W, C) -> (B, C, H, W)
+    buffer = buffer.permute(0, 3, 1, 2)
+    
+    # Perform bilinear upsampling
+    upsampled = F.interpolate(buffer, size=high_res, mode='bilinear', align_corners=False)
+    
+    # Convert back from (B, C, H, W) -> (B, H, W, C)
+    return upsampled.permute(0, 2, 3, 1)
+
+
 def normal_loss(gbuffers, views_subset, gbuffer_mask, device):
-    gt_normal = views_subset["normal"] # B, H, W, 3
     laplacian_kernel = torch.tensor([[0, -1, 0], [-1, 4, -1], [0, -1, 0]], device=device, dtype=torch.float32).view(1,1,3,3).repeat(3,3,1,1) / 4.
+
+    gt_normal = views_subset["normal"] # B, H, W, 3
     gt_normal = gt_normal.permute(0, 3, 1, 2) * 2 - 1 # shape of B, 3, H, W
     gt_normal_laplacian = torch.nn.functional.conv2d(gt_normal, laplacian_kernel, padding=1)
-    mask = ((torch.sum(views_subset["skin_mask"][..., 0]) * views_subset["skin_mask"][..., -1]) > 0).float() # shape of B H W
+    mask = ((torch.sum(views_subset["skin_mask"][..., 1:2], dim=-1) * views_subset["skin_mask"][..., -1]) > 0).float() # shape of B H W
     
+    # import cv2
+    # # save mask to debug
+    # mask_ = mask.cpu().data.numpy()
+    # mask_ = mask_ * 255
+    # mask_ = mask_.astype("uint8")
+    # for i in range(mask_.shape[0]):
+    #     cv2.imwrite(f"debug/normal_laplacian_mask_{i}.png", mask_[i])
+
+
     mask = mask[:, None] * gbuffer_mask.permute(0,3,1,2)
+
+    # # save mask to debug
+    # mask_ = mask.cpu().data.numpy()
+    # mask_ = mask_ * 255
+    # mask_ = mask_.astype("uint8")
+    # for i in range(mask_.shape[0]):
+    #     cv2.imwrite(f"debug/normal_laplacian_mask_gbuffer_{i}.png", mask_[i, 0])
+
     num_valid_pixel = torch.sum(mask)
     if num_valid_pixel < 1:
         return torch.tensor(0.0, device=device)
@@ -46,6 +81,26 @@ def normal_loss(gbuffers, views_subset, gbuffer_mask, device):
     estimated_normal = estimated_normal.permute(0, 3, 1, 2) # shape of B, 3, H, W
     estimated_normal_laplacian = torch.nn.functional.conv2d(estimated_normal, laplacian_kernel, padding=1)
 
+    # # visualize the estimated_normal, gt_normal, save to debug
+    # estimated_normal_ = estimated_normal * 0.5 + 0.5
+    # estimated_normal_ = estimated_normal_.permute(0, 2, 3, 1) # B, H, W, 3
+    # estimated_normal_ = estimated_normal_.cpu().data.numpy()
+    # estimated_normal_ = estimated_normal_ * 255
+    # estimated_normal_ = estimated_normal_.astype("uint8")
+    # for i in range(estimated_normal_.shape[0]):
+    #     cv2.imwrite(f"debug/normal_{i}_rgb.png", estimated_normal_[i])
+
+    # gt_normal_ = gt_normal / 2 + 0.5
+    # gt_normal_ = gt_normal_.permute(0, 2, 3, 1) # B, H, W, 3
+    # gt_normal_ = gt_normal_.cpu().data.numpy()
+    # gt_normal_ = gt_normal_ * 255
+    # gt_normal_ = gt_normal_.astype("uint8")
+    # for i in range(gt_normal_.shape[0]):
+    #     cv2.imwrite(f"debug/gt_normal_{i}_rgb.png", gt_normal_[i])
+
+    # exit()
+
+
     normal_laplacian_loss = torch.mean(torch.sqrt(torch.pow(gt_normal_laplacian - estimated_normal_laplacian, 2) + 1e-8) * mask)
     # normal_laplacian_loss = torch.nn.functional.huber_loss(gt_normal_laplacian * mask, estimated_normal_laplacian * mask, reduction='mean', delta=0.1)
 
@@ -59,7 +114,7 @@ def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
     rendered_eye_seg = gbuffers["eyes"]
 
 
-    position = gbuffers["position"]
+    position = upsample(gbuffers["position"], high_res)
     normal = gbuffers["normal"] # shape of B, H, W, 3
 
     with torch.no_grad():
@@ -117,7 +172,7 @@ def inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
     # get camera space normal
     camera = views_subset["camera"] # list of cameras.
 
-    position = gbuffers["position"]
+    position = upsample(gbuffers["position"], high_res)
     normal = gbuffers["normal"] # shape of B, H, W, 3
 
     # camera space normal

@@ -92,16 +92,16 @@ class MLPTemplate(nn.Module):
     def __init__(self, inp_dim):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(inp_dim, 256),
-            # nn.LayerNorm(256),
+            nn.Linear(inp_dim, 128),
+            # nn.LayerNorm(128),
             nn.Softplus(beta=100),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
+            nn.Linear(128, 128),
+            # nn.LayerNorm(128),
             nn.Softplus(beta=100),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
+            nn.Linear(128, 128),
+            # nn.LayerNorm(128),
             nn.Softplus(beta=100),
-            nn.Linear(256, 3, bias=False)
+            nn.Linear(128, 3, bias=False)
         )
 
     def forward(self, x):
@@ -140,7 +140,7 @@ class NeuralBlendshapes(nn.Module):
 
             self.register_buffer('M', compute_matrix(torch.from_numpy(vertices).to('cuda'), torch.from_numpy(faces).to('cuda'), lambda_, alpha=alpha, density=False))
 
-        desired_resolution = 4096
+        desired_resolution = 2048
         base_grid_resolution = 16
         num_levels = 16
         per_level_scale = np.exp(np.log(desired_resolution / base_grid_resolution) / (num_levels-1))
@@ -148,7 +148,7 @@ class NeuralBlendshapes(nn.Module):
             "otype": "HashGrid",
             "n_levels": num_levels,
             "n_features_per_level": 2,
-            "log2_hashmap_size": 19,
+            "log2_hashmap_size": 18,
             "base_resolution": base_grid_resolution,
             "per_level_scale" : per_level_scale
         }
@@ -300,6 +300,7 @@ class NeuralBlendshapes(nn.Module):
 
 
     def remove_teeth(self, face):
+        return face
         face[..., 17039:21451, :] = 0
         return face
 

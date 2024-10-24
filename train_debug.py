@@ -476,15 +476,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     progress_bar = tqdm(range(epochs))
     start = time.time()
 
-    epsilon = 1e-4
 
     iteration = 0
-    target_res = (128, 128)
     for epoch in progress_bar:
-        importance = importance / (importance.mean() + epsilon)
-        dataset_sampler = torch.utils.data.WeightedRandomSampler(importance, dataset_train.len_img, replacement=True)
-        dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, collate_fn=dataset_train.collate, drop_last=True, sampler=dataset_sampler)
-
         for iter_, views_subset in tqdm(enumerate(dataloader_train)):
             iteration += 1
 
@@ -508,7 +502,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                     deformed_normals_temp_pose = mesh.fetch_all_normals(return_dict['template_mesh_posed'], mesh),
                                     deformed_vertices_exp_no_pose=return_dict['ict_mesh_w_temp'],
                                     deformed_vertices_temp_pose=return_dict['template_mesh_posed'],
-                                    mesh=mesh, target_resolution=target_res
+                                    mesh=mesh
                                     )
             
             _, _, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
@@ -578,30 +572,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 print(f"JawOpen: {jawopen}, EyeBlink_L: {eyeblink_l}, EyeBlink_R: {eyeblink_r}")
 
                 print("=="*50)
-
-
-            decay_keys = ['flame_regularization']
-    
-            loss = torch.tensor(0., device=device) 
-            for k, v in losses.items():
-                if torch.isnan(v).any():
-                    print(f'NAN in {k}')
-                    print(losses)
-                    exit()
-                    continue
-                loss += v.mean() * loss_weights[k]
-            
-            loss += neural_blendshapes.encoder.identity_weights.pow(2).mean() * 1e-3
-            
-            # decay value is  the ten times of summation of loss for mask, segmentation, landmark, closure. 
-            decay_value = 0
-            for k in decay_keys:
-                decay_value += losses[k].mean() * loss_weights[k]
-            decay_value *= 3
-
-            for idx in views_subset['idx']:            
-                importance[idx] = torch.log(1 + ((1 - weight_decay_rate) * importance[idx] + \
-                                  weight_decay_rate * decay_value)).clamp(min=1e-2).item()
 
             # ==============================================================================================
             # Optimizer step
@@ -718,20 +688,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     iteration = 0
     for epoch in progress_bar:
-        importance = importance / (importance.mean() + epsilon)
-        dataset_sampler = torch.utils.data.WeightedRandomSampler(importance, dataset_train.len_img, replacement=True)
-        dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, collate_fn=dataset_train.collate, drop_last=True, sampler=dataset_sampler)
+        
         for iter_, views_subset in tqdm(enumerate(dataloader_train)):
             iteration += 1
             progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}')
             losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
-
-            if iteration < args.iterations // 4:
-                target_res = (128, 128)
-            elif iteration < args.iterations // 2:
-                target_res = (256, 256)
-            else:
-                target_res = None
 
             super_flame = False
             pretrain = iteration < args.iterations // 3
@@ -803,18 +764,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                         canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
                                         deformed_normals_exp_no_pose=deformed_normals_exp_no_pose, deformed_normals_temp_pose=deformed_normals_temp_pose,
                                         deformed_vertices_exp_no_pose=deformed_vertices_no_pose, deformed_vertices_temp_pose=template_mesh_posed,
-                                        mesh=mesh, target_resolution=target_res
+                                        mesh=mesh
                                         )
             pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
 
             landmark_loss, closure_loss = landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
-            # mask_loss = mask_loss_function(views_subset["mask"], gbuffer_mask)
+            mask_loss = mask_loss_function(views_subset["mask"], gbuffer_mask)
             mask_loss_segmentation = mask_loss_function(views_subset["skin_mask"][..., :1], gbuffers['segmentation'])
             shading_loss, pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
-
-            segmentation_loss = segmentation_loss_function(views_subset["skin_mask"][..., 3:4], gbuffers['eyes']) + \
-                                segmentation_loss_function(views_subset["skin_mask"][..., 4:5], gbuffers['mouth'])
-
             perceptual_loss = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
 
             white_light_loss = white_light_regularization(cbuffers['light'])
@@ -822,7 +779,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             albedo_loss = albedo_regularization(None, shader, mesh, device, None, None)
 
 
-            normal_laplacian_loss = normal_loss(gbuffers, views_subset, gbuffers['segmentation'], device) 
+            normal_laplacian_loss = normal_loss(gbuffers, views_subset, gbuffer_mask, device)
             inverted_normal_loss = inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
             eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
 
@@ -895,7 +852,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 losses['normal_regularization'] *= 1e1
                 # losses['geometric_regularization'] *= 1e2
 
-            losses['mask'] += mask_loss_segmentation + segmentation_loss
+            losses['mask'] += mask_loss_segmentation 
             # losses['mask'] += mask_loss + mask_loss_segmentation 
             losses['landmark'] += landmark_loss 
             losses['closure'] += closure_loss
@@ -917,7 +874,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             # losses['fresnel_coeff'] = specular_loss
 
-            decay_keys = ['mask', 'landmark', 'closure', 'flame_regularization']
+            decay_keys = ['mask', 'landmark', 'closure']
             
 
             loss = torch.tensor(0., device=device) 
@@ -938,9 +895,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             decay_value *= 3
 
             for idx in views_subset['idx']:            
-                importance[idx] = torch.log(1 + ((1 - weight_decay_rate) * importance[idx] + \
-                                  weight_decay_rate * decay_value)).clamp(min=1e-2).item()
-                
+                importance[idx] = ((1 - weight_decay_rate) * importance[idx] + weight_decay_rate * decay_value).clamp(min=5e-2).item()
+
             acc_losses.append(losses)
             acc_total_loss += loss.detach()
 
@@ -979,7 +935,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     print(f"{k}: {v.item() * loss_weights[k]}")
 
                 print("=="*50)
-
 
 
             # ==============================================================================================

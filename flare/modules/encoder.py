@@ -183,6 +183,8 @@ class ResnetEncoder(nn.Module):
             for cam in flame_cam:
                 ts.append(cam.t)
             ts = torch.stack(ts, dim=0)
+
+            ts[..., -1] -= 3
   
 
         features = self.encoder(img, mp_bshapes, mp_rotation, detected_landmarks)

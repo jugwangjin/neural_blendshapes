@@ -57,13 +57,14 @@ def landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
 
     starting_index = 0
 
-    landmark_loss = ((detected_landmarks[:, starting_index:, :3] - landmarks_on_clip_space[:, starting_index:, :3]).pow(2) * detected_landmarks[:, starting_index:, -1:])
-    if use_jaw:
-        landmark_loss[:, :17] *= 0.25
-    else:   
-        landmark_loss[:, :17] *= 0
-    landmark_loss[:, 17:27] *= 0.5
-    landmark_loss = landmark_loss.mean()
+
+    # landmark_loss = ((detected_landmarks[:, starting_index:, :3] - landmarks_on_clip_space[:, starting_index:, :3]).pow(2) * detected_landmarks[:, starting_index:, -1:])
+    # if use_jaw:
+    #     landmark_loss[:, :17] *= 0.25
+    # else:   
+    #     landmark_loss[:, :17] *= 0
+    # landmark_loss[:, 17:27] *= 0.5
+    # landmark_loss = landmark_loss.mean()
 
     closure_loss = 0
     for block in closure_blocks:
@@ -71,7 +72,18 @@ def landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
         estimated_closure = landmarks_on_clip_space[:, None, block, :-1] - landmarks_on_clip_space[:, block, None, :-1]
         confidence = torch.minimum(detected_landmarks[:, None, block, -1:], detected_landmarks[:, block, None, -1:])
 
-        closure_loss_ = ((estimated_closure - gt_closure).pow(2) * confidence)
-        closure_loss += closure_loss_.mean()
+        closure_loss += torch.nn.functional.huber_loss(estimated_closure, gt_closure)
+        # closure_loss += closure_loss_.mean()
         
+    if use_jaw:
+        detected_landmarks[:, :17, -1] *= 0.25
+    else:
+        detected_landmarks[:, :17, -1] *= 0
+
+    detected_landmarks = detected_landmarks[:, starting_index:, :3] * detected_landmarks[:, starting_index:, -1:]
+    landmarks_on_clip_space = landmarks_on_clip_space[:, starting_index:, :3] * detected_landmarks[:, starting_index:, -1:]
+    
+    landmark_loss = torch.nn.functional.huber_loss(detected_landmarks, landmarks_on_clip_space)
+
+
     return landmark_loss, closure_loss

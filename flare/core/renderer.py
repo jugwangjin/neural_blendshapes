@@ -4,7 +4,7 @@
 import nvdiffrast.torch as dr
 import torch
 from pytorch3d.ops import knn_points
-
+import torch.nn.functional as F
 class Renderer:
     """ Rasterization-based triangle mesh renderer that produces G-buffers for a set of views.
 
@@ -92,12 +92,14 @@ class Renderer:
 
         # since we have a single camera (!) same intrinsics!! 
         intrinsics = camera[0].K 
+        scale_x = resolution[1] / 512
+        scale_y = resolution[0] / 512
         device = camera[0].device
 
-        projection_matrix = Renderer.projection(fx=intrinsics[0,0],
-                                                fy=intrinsics[1,1],
-                                                cx=intrinsics[0,2],
-                                                cy=intrinsics[1,2],
+        projection_matrix = Renderer.projection(fx=intrinsics[0,0] * scale_x,
+                                                fy=intrinsics[1,1] * scale_y,
+                                                cx=intrinsics[0,2] * scale_x,
+                                                cy=intrinsics[1,2] * scale_y,
                                                 n=n,
                                                 f=f,
                                                 width=resolution[1],
@@ -152,7 +154,7 @@ class Renderer:
 
     def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx, 
                      deformed_normals_exp_no_pose, deformed_normals_temp_pose, deformed_vertices_exp_no_pose, deformed_vertices_temp_pose,
-                     canonical_uv, mesh, deformed_vertices_clip_space=None):
+                     canonical_uv, mesh, deformed_vertices_clip_space=None, target_resolution=None):
         """ Render G-buffers from a set of views.
 
         Args:
@@ -160,7 +162,22 @@ class Renderer:
         """
         batch_size = deformed_vertices.shape[0]
         # single fixed camera and for now we fix res also
-        resolution = (512, 512)
+
+        resolution = (512, 512) if target_resolution is None else target_resolution
+
+        high_res = (512, 512)
+        def upsample(buffer, high_res):
+            if buffer.shape[1] == high_res[0] and buffer.shape[2] == high_res[1]:
+                return buffer
+            # Convert from (B, H, W, C) -> (B, C, H, W)
+            buffer = buffer.permute(0, 3, 1, 2)
+            
+            # Perform bilinear upsampling
+            upsampled = F.interpolate(buffer, size=high_res, mode='bilinear', align_corners=False)
+            
+            # Convert back from (B, C, H, W) -> (B, H, W, C)
+            return upsampled.permute(0, 2, 3, 1)
+
         P_batch, Rt = Renderer.to_gl_camera_batch(views, resolution, n=self.near, f=self.far)
 
         canonical_verts_batch = canonical_v.unsqueeze(0).repeat(batch_size, 1, 1)
@@ -209,12 +226,13 @@ class Renderer:
         if "position" in channels or "depth" in channels:
             position, _ = dr.interpolate(deformed_vertices, rast, idx)
             gbuffer["position"] = dr.antialias(position, rast, deformed_vertices_clip_space, idx) if with_antialiasing else position
-
+            # gbuffer["position"] = upsample(gbuffer["position"], high_res)
 
         # canonical points in G-buffer
         if "canonical_position" in channels:
             canonical_position, _ = dr.interpolate(canonical_verts_batch, rast, idx, rast_db=rast_out_db, diff_attrs='all')
             gbuffer["canonical_position"] = canonical_position
+            # gbuffer["canonical_position"] = upsample(gbuffer["canonical_position"], high_res)
 
         # normals in G-buffer
         if "normal" in channels:
@@ -222,27 +240,38 @@ class Renderer:
             face_normals, _ = dr.interpolate(deformed_normals["face_normals"], rast, face_idx)
             tangent_normals, _ = dr.interpolate(deformed_normals["tangent_normals"], rast, idx)
             gbuffer["vertex_normals"] = vertex_normals
+            # gbuffer["vertex_normals"] = upsample(gbuffer["vertex_normals"], high_res)
             gbuffer["face_normals"] = face_normals
+            # gbuffer["face_normals"] = upsample(gbuffer["face_normals"], high_res)
             gbuffer["tangent_normals"] = tangent_normals
+            # gbuffer["tangent_normals"] = upsample(gbuffer["tangent_normals"], high_res)
 
             vertex_normals_exp_no_pose, _ = dr.interpolate(deformed_normals_exp_no_pose["vertex_normals"], rast, idx)
             face_normals_exp_no_pose, _ = dr.interpolate(deformed_normals_exp_no_pose["face_normals"], rast, face_idx) 
             tangent_normals_exp_no_pose, _ = dr.interpolate(deformed_normals_exp_no_pose["tangent_normals"], rast, idx)
             gbuffer["vertex_normals_exp_no_pose"] = vertex_normals_exp_no_pose
+            # gbuffer["vertex_normals_exp_no_pose"] = upsample(gbuffer["vertex_normals_exp_no_pose"], high_res)
             gbuffer["face_normals_exp_no_pose"] = face_normals_exp_no_pose
+            # gbuffer["face_normals_exp_no_pose"] = upsample(gbuffer["face_normals_exp_no_pose"], high_res)
             gbuffer["tangent_normals_exp_no_pose"] = tangent_normals_exp_no_pose
+            # gbuffer["tangent_normals_exp_no_pose"] = upsample(gbuffer["tangent_normals_exp_no_pose"], high_res)
 
             vertex_normals_temp_pose, _ = dr.interpolate(deformed_normals_temp_pose["vertex_normals"], rast, idx)
             face_normals_temp_pose, _ = dr.interpolate(deformed_normals_temp_pose["face_normals"], rast, face_idx)
             tangent_normals_temp_pose, _ = dr.interpolate(deformed_normals_temp_pose["tangent_normals"], rast, idx)
             gbuffer["vertex_normals_temp_pose"] = vertex_normals_temp_pose
+            # gbuffer["vertex_normals_temp_pose"] = upsample(gbuffer["vertex_normals_temp_pose"], high_res)
             gbuffer["face_normals_temp_pose"] = face_normals_temp_pose
+            # gbuffer["face_normals_temp_pose"] = upsample(gbuffer["face_normals_temp_pose"], high_res)
             gbuffer["tangent_normals_temp_pose"] = tangent_normals_temp_pose
+            # gbuffer["tangent_normals_temp_pose"] = upsample(gbuffer["tangent_normals_temp_pose"], high_res)
             
 
         # mask of mesh in G-buffer
         if "mask" in channels:
             gbuffer["mask"] = (rast[..., -1:] > 0.).float() 
+            gbuffer["mask_low_res"] = gbuffer["mask"]
+            gbuffer["mask"] = upsample(gbuffer["mask"], high_res)
 
         if 'mask' in channels and 'canonical_position' in channels and 'segmentation' in channels:            
 
@@ -250,50 +279,25 @@ class Renderer:
             segmentation = dr.antialias(segmentation.float(), rast, deformed_vertices_clip_space, idx)
 
             gbuffer['segmentation'] = segmentation
+            gbuffer['segmentation'] = upsample(gbuffer['segmentation'], high_res)
 
             mouth_segmentation = (segmentation_map[..., None] == 1).float() # mouth
             mouth_segmentation = dr.antialias(mouth_segmentation.float(), rast, deformed_vertices_clip_space, idx)
 
             gbuffer['mouth'] = mouth_segmentation
+            gbuffer['mouth'] = upsample(gbuffer['mouth'], high_res)
 
 
             eyes_segmentation = (segmentation_map[..., None] == 2).float() # eyes
             eyes_segmentation = dr.antialias(eyes_segmentation.float(), rast, deformed_vertices_clip_space, idx)
 
             gbuffer['eyes'] = eyes_segmentation
-
-            # # to debug, save the segmentation maps on debug directory
-            # import cv2
-            # import numpy as np
-            
-            # # Make sure segmentation maps are on CPU and convert to NumPy
-            # segmentation_map_face_np = segmentation.clamp(0, 1).squeeze().cpu().numpy()  # Shape: (height, width)
-            # segmentation_map_mouth_np = mouth_segmentation.clamp(0, 1).squeeze().cpu().numpy()  # Shape: (height, width)
-            # segmentation_map_eyes_np = eyes_segmentation.clamp(0, 1).squeeze().cpu().numpy()  # Shape: (height, width)
-
-            # # Convert segmentation maps to uint8 format (e.g., scale from [0, 1] to [0, 255])
-            # segmentation_map_face_np = (segmentation_map_face_np * 255).astype(np.uint8)
-            # segmentation_map_mouth_np = (segmentation_map_mouth_np * 255).astype(np.uint8)
-            # segmentation_map_eyes_np = (segmentation_map_eyes_np * 255).astype(np.uint8)
-
-            # for i in range(batch_size):
-            #     # Optional: Apply a colormap to better visualize segmentation (OpenCV colormap)
-            #     # segmentation_map_face_color = cv2.applyColorMap(segmentation_map_face_np[i], cv2.COLORMAP_JET)
-            #     # segmentation_map_mouth_color = cv2.applyColorMap(segmentation_map_mouth_np[i], cv2.COLORMAP_JET)
-            #     # segmentation_map_eyes_color = cv2.applyColorMap(segmentation_map_eyes_np[i], cv2.COLORMAP_JET)
-
-            #     # Save the segmentation maps as image files
-            #     cv2.imwrite(f'debug/segmentation_face_{i}.png', segmentation_map_face_np[i])
-            #     cv2.imwrite(f'debug/segmentation_mouth_{i}.png', segmentation_map_mouth_np[i])
-            #     cv2.imwrite(f'debug/segmentation_eyes_{i}.png', segmentation_map_eyes_np[i])
-
-            # exit()
-            
-            
+            gbuffer['eyes'] = upsample(gbuffer['eyes'], high_res)
 
         try:
             uv_coordinates, _ = dr.interpolate(canonical_uv, rast, idx, rast_db=rast_out_db, diff_attrs='all')
             gbuffer["uv_coordinates"] = dr.antialias(uv_coordinates, rast, deformed_vertices_clip_space, idx) if with_antialiasing else uv_coordinates
+            gbuffer["uv_coordinates"] = upsample(gbuffer["uv_coordinates"], high_res)
         except:
             pass
 

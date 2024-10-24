@@ -106,6 +106,22 @@ def mask_loss_function(masks, gbuffers, epsilon=1e-8, loss_function = torch.nn.M
     
     mse_loss = (masks - gbuffers).pow(2).mean()
 
+    # visualize mask and gbuffer.
+    # import cv2
+    # mask_ = masks.cpu().data.numpy()
+    # mask_ = mask_ * 255
+    # mask_ = mask_.astype("uint8")
+    # for i in range(mask_.shape[0]):
+    #     cv2.imwrite(f"debug/mask_{i}.png", mask_[i, ..., 0])
+
+    # gbuffer_ = gbuffers.cpu().data.numpy()
+    # gbuffer_ = gbuffer_ * 255
+    # gbuffer_ = gbuffer_.astype("uint8")
+    # for i in range(gbuffer_.shape[0]):
+    #     cv2.imwrite(f"debug/gbuffer_{i}.png", gbuffer_[i, ..., 0])
+
+    # exit()
+
     return (iou_loss + mse_loss)
 
     return (masks - gbuffers).pow(2).mean()
@@ -113,6 +129,10 @@ def mask_loss_function(masks, gbuffers, epsilon=1e-8, loss_function = torch.nn.M
     for gt_mask, gbuffer_mask in zip(masks, gbuffers):
         loss.append(loss_function(gt_mask, gbuffer_mask))
     return torch.cat(loss)
+
+
+def segmentation_loss_function(masks, gbuffers, epsilon=1e-8):
+    return (masks - gbuffers).pow(2).mean()
 
 
 def shading_loss_batch(pred_color_masked, views, batch_size):
