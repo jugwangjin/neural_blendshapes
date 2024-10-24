@@ -76,6 +76,7 @@ def config_parser():
     parser.add_argument('--weight_segmentation', type=float, default=1, help="Weight of the flame term")
     parser.add_argument('--weight_semantic_stat', type=float, default=1, help="Weight of the flame term")
     parser.add_argument('--weight_geometric_regularization', type=float, default=1e-3, help="Weight of the flame term")
+    parser.add_argument('--weight_linearity_regularization', type=float, default=1e-4, help="Weight of the flame term")
 
     parser.add_argument('--r_mean', type=float, default=0.500, help="mean roughness")
 
@@ -111,6 +112,9 @@ def config_parser():
     parser.add_argument('--no-ghostbone', dest='ghostbone', action='store_false')
     parser.set_defaults(ghostbone=True)
     parser.add_argument('--lambda_', type=int, default=16, help="Total number of iterations")
+
+    
+    parser.add_argument('--milestones', type=int, nargs='+', default=[2000, 4000, 8000, 12000, 16000, 20000])
 
 
     parser.add_argument('--compute_mode', action='store_true', help="skip eval")

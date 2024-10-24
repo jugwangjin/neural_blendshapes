@@ -15,12 +15,12 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     mode = mode.to(facs.device)
 
     facs_reg_weights = (gt_facs - mode[None]).clamp(0, 1)  # min 0, max 1.  for 0 -> high weight, for 1 -> low weight. exponential decay
-    facs_reg_weights = torch.exp(- 3 * facs_reg_weights)
+    facs_reg_weights = torch.exp(- 4 * facs_reg_weights)
     target_facs = (gt_facs - mode[None]).clamp(min=0, max=1)
     
     facs_reg = ((facs - target_facs).pow(2) * facs_reg_weights)
     facs_reg[:, eyeball_indices] *= 1e2
-    facs_reg = facs_reg.mean() * mult
+    facs_reg = facs_reg.mean() * mult * 1e1
  
     l1_reg = (facs.clamp(1e-3)).pow(0.75).mean() * 1e-1
     

@@ -184,7 +184,7 @@ class NeuralBlendshapes(nn.Module):
             nn.Softplus(beta=100),
             nn.Linear(256, 54*3, bias=False)
         )
-        self.template_deformer = MLPTemplate(3)
+        self.template_deformer = MLPTemplate(self.inp_size)
         self.template_embedder = Identity()
 
         self.pose_weight = nn.Sequential(
@@ -202,6 +202,7 @@ class NeuralBlendshapes(nn.Module):
     
         self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
         self.fourier_feature_transform2.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+        self.template_deformer.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling if grad_i[0] is not None else None, ))
         self.expression_deformer.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling if grad_i[0] is not None else None, ))
 
         # Initialize weights and biases for expression deformer
@@ -338,7 +339,7 @@ class NeuralBlendshapes(nn.Module):
         # encoded_points = torch.cat([self.encode_position(template)], dim=-1)
         encoded_points2 = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
-        template_mesh_u_delta = self.template_deformer(encoded_points)
+        template_mesh_u_delta = self.template_deformer(encoded_points2)
         
         template_mesh_delta = self.solve(template_mesh_u_delta) 
 
