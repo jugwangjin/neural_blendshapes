@@ -170,21 +170,21 @@ class NeuralBlendshapes(nn.Module):
 
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(self.inp_size, 256),
-            # nn.LayerNorm(256),
+            nn.Linear(3, 512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
+            nn.Linear(512, 512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
+            nn.Linear(512, 512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
+            nn.Linear(512, 512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(256, 54*3, bias=False)
+            nn.Linear(512, 54*3, bias=False)
         )
-        self.template_deformer = MLPTemplate(self.inp_size)
+        self.template_deformer = MLPTemplate(3)
         self.template_embedder = Identity()
 
         self.pose_weight = nn.Sequential(
@@ -195,37 +195,39 @@ class NeuralBlendshapes(nn.Module):
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
+        
+        nn.init.xavier_uniform_(self.expression_deformer[-1].weight)
+        nn.init.xavier_uniform_(self.template_deformer.mlp[-1].weight)
 
 
-
-        self.gradient_scaling = 64.0
+        self.gradient_scaling = 128.0
     
-        self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
-        self.fourier_feature_transform2.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
-        self.template_deformer.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling if grad_i[0] is not None else None, ))
-        self.expression_deformer.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling if grad_i[0] is not None else None, ))
+        # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+        # self.fourier_feature_transform2.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+        # self.template_deformer.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling if grad_i[0] is not None else None, ))
+        # self.expression_deformer.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling if grad_i[0] is not None else None, ))
 
         # Initialize weights and biases for expression deformer
-        for layer in self.expression_deformer:
-            if isinstance(layer, nn.Linear):
-                # Initialize weight and bias based on ForwardDeformer strategy
-                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-                torch.nn.init.normal_(layer.weight, 0.0, 0.5 / np.sqrt(layer.out_features))
+        # for layer in self.expression_deformer:
+        #     if isinstance(layer, nn.Linear):
+        #         # Initialize weight and bias based on ForwardDeformer strategy
+        #         torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
+        #         torch.nn.init.normal_(layer.weight, 0.0, 1 / np.sqrt(layer.out_features))
 
-        for layer in self.template_deformer.mlp:
-            if isinstance(layer, nn.Linear):
-                # Initialize weight and bias based on ForwardDeformer strategy
-                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-                torch.nn.init.normal_(layer.weight, 0.0, 0.5 / np.sqrt(layer.out_features))
+        # for layer in self.template_deformer.mlp:
+        #     if isinstance(layer, nn.Linear):
+        #         # Initialize weight and bias based on ForwardDeformer strategy
+        #         torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
+        #         torch.nn.init.normal_(layer.weight, 0.0, 1 / np.sqrt(layer.out_features))
 
         # apply zero bias and weight for the last layer
-        torch.nn.init.constant_(self.expression_deformer[-1].weight, 0.0)
-        if self.expression_deformer[-1].bias is not None:
-            torch.nn.init.constant_(self.expression_deformer[-1].bias, 0.0)
+        # torch.nn.init.constant_(self.expression_deformer[-1].weight, 0.0)
+        # if self.expression_deformer[-1].bias is not None:
+            # torch.nn.init.constant_(self.expression_deformer[-1].bias, 0.0)
 
-        torch.nn.init.constant_(self.template_deformer.mlp[-1].weight, 0.0)
-        if self.template_deformer.mlp[-1].bias is not None:
-            torch.nn.init.constant_(self.template_deformer.mlp[-1].bias, 0.0)    
+        # torch.nn.init.constant_(self.template_deformer.mlp[-1].weight, 0.0)
+        # if self.template_deformer.mlp[-1].bias is not None:
+            # torch.nn.init.constant_(self.template_deformer.mlp[-1].bias, 0.0)    
 
         initialize_weights(self.pose_weight, gain=0.01)
         self.pose_weight[-2].weight.data.zero_()
@@ -337,9 +339,10 @@ class NeuralBlendshapes(nn.Module):
 
         encoded_points = template
         # encoded_points = torch.cat([self.encode_position(template)], dim=-1)
-        encoded_points2 = torch.cat([self.encode_position(template, sec=True)], dim=-1)
+        encoded_points2 = template
+        # encoded_points2 = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
-        template_mesh_u_delta = self.template_deformer(encoded_points2)
+        template_mesh_u_delta = self.template_deformer(template)
         
         template_mesh_delta = self.solve(template_mesh_u_delta) 
 
@@ -347,7 +350,7 @@ class NeuralBlendshapes(nn.Module):
 
         template_mesh_posed = self.apply_deformation(template_mesh[None], features, pose_weight)
 
-        ict_mesh = self.ict_facekit(expression_weights = features[..., :53].clamp(0,1), identity_weights = self.encoder.identity_weights[None].repeat(bsize, 1))
+        ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(bsize, 1))
 
         ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
 
@@ -391,7 +394,8 @@ class NeuralBlendshapes(nn.Module):
 
         template = self.ict_facekit.canonical[0]
         uv_coords = self.ict_facekit.uv_neutral_mesh[0]
-        encoded_points = torch.cat([self.encode_position(template, sec=True)], dim=-1)
+        encoded_points = template
+        # encoded_points = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
         expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
                                         ], \

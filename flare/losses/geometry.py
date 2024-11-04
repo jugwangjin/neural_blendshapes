@@ -103,13 +103,14 @@ def laplacian_loss_two_meshes(mesh, vertices1, vertices2, L, head_index=14062):
     for b in range(V1.shape[0]):
         v1_lap = L.mm(V1[b])
         v2_lap = L.mm(V2[b])
-        loss = torch.norm(v1_lap - v2_lap, p=2, dim=1)
+        loss = torch.pow(v1_lap - v2_lap, 2)
         loss = loss.mean()
         if b == 0:
             total_loss = loss
         else:
             total_loss += loss
     return total_loss / V1.shape[0]
+
 
 def laplacian_loss_single_mesh(mesh, vertices1):
     """ Compute the Laplacian term as the mean squared Euclidean norm of the differential coordinates.
@@ -145,11 +146,15 @@ def normal_reg_loss(mesh, mesh1, mesh2, head_index=14062):
 def FLAME_loss_function(FLAMEServer,flame_expression, flame_pose, deformed_vertices, flame_pair_indices, ict_pair_indices, target_range=None):
     flame_gt, _, _ = FLAMEServer(flame_expression, flame_pose)
     ict_gt = flame_gt[:, flame_pair_indices]
-    flame_loss = (deformed_vertices[:, ict_pair_indices] - ict_gt)
-    
+    # flame_loss = (deformed_vertices[:, ict_pair_indices] - ict_gt)
+    deformed_vertices = deformed_vertices[:, ict_pair_indices]
     if target_range is not None:
-        flame_loss = flame_loss[:, target_range]
-    flame_loss = torch.sqrt(flame_loss.pow(2) + 1e-8).mean()
+        deformed_vertices = deformed_vertices[:, target_range]
+        ict_gt = ict_gt[:, target_range]
+
+    flame_loss = torch.nn.functional.huber_loss(deformed_vertices, ict_gt)
+
+    # flame_loss = flame_loss.pow(2).mean()
     return flame_loss
 
 

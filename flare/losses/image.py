@@ -99,30 +99,14 @@ def mask_loss_function(masks, gbuffers, epsilon=1e-8, loss_function = torch.nn.M
     """
     
     intersection = (masks * gbuffers).sum(dim=(1, 2, 3))
-    union = (masks + gbuffers - masks * gbuffers).sum(dim=(1, 2, 3)) + epsilon
+    dice_union = masks.sum(dim=(1, 2, 3)) + gbuffers.sum(dim=(1, 2, 3)) + epsilon
 
-    # Compute the loss
-    iou_loss = 1 - (intersection / union).mean()
-    
+    # Compute Dice-based loss (aligned with L_latent)
+    iou_loss = 1 - (2 * intersection / dice_union).mean() 
+        
     mse_loss = (masks - gbuffers).pow(2).mean()
 
-    # visualize mask and gbuffer.
-    # import cv2
-    # mask_ = masks.cpu().data.numpy()
-    # mask_ = mask_ * 255
-    # mask_ = mask_.astype("uint8")
-    # for i in range(mask_.shape[0]):
-    #     cv2.imwrite(f"debug/mask_{i}.png", mask_[i, ..., 0])
-
-    # gbuffer_ = gbuffers.cpu().data.numpy()
-    # gbuffer_ = gbuffer_ * 255
-    # gbuffer_ = gbuffer_.astype("uint8")
-    # for i in range(gbuffer_.shape[0]):
-    #     cv2.imwrite(f"debug/gbuffer_{i}.png", gbuffer_[i, ..., 0])
-
-    # exit()
-
-    return (iou_loss + mse_loss)
+    return (iou_loss * 0.1 + mse_loss)
 
     return (masks - gbuffers).pow(2).mean()
     loss = []
@@ -132,7 +116,15 @@ def mask_loss_function(masks, gbuffers, epsilon=1e-8, loss_function = torch.nn.M
 
 
 def segmentation_loss_function(masks, gbuffers, epsilon=1e-8):
-    return (masks - gbuffers).pow(2).mean()
+    intersection = (masks * gbuffers).sum(dim=(1, 2, 3))
+    dice_union = masks.sum(dim=(1, 2, 3)) + gbuffers.sum(dim=(1, 2, 3)) + epsilon
+
+    # Compute Dice-based loss (aligned with L_latent)
+    iou_loss = 1 - (2 * intersection / dice_union).mean()
+        
+    mse_loss = (masks - gbuffers).pow(2).mean()
+
+    return (iou_loss * 0.1 + mse_loss)
 
 
 def shading_loss_batch(pred_color_masked, views, batch_size):
@@ -147,7 +139,7 @@ def shading_loss_batch(pred_color_masked, views, batch_size):
 
     ssim_loss = (1.0 - ssim(input, target))
 
-    color_loss = 0.8 * color_loss + 0.2 * ssim_loss
+    color_loss = 0.95 * color_loss + 0.05 * ssim_loss
 
     return color_loss, pred_color_masked[..., :3], [tonemap_pred, tonemap_target]
 

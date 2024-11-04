@@ -100,8 +100,7 @@ def normal_loss(gbuffers, views_subset, gbuffer_mask, device):
 
     # exit()
 
-
-    normal_laplacian_loss = torch.mean(torch.sqrt(torch.pow(gt_normal_laplacian - estimated_normal_laplacian, 2) + 1e-8) * mask)
+    normal_laplacian_loss = torch.mean(torch.abs(gt_normal_laplacian - estimated_normal_laplacian) * mask)
     # normal_laplacian_loss = torch.nn.functional.huber_loss(gt_normal_laplacian * mask, estimated_normal_laplacian * mask, reduction='mean', delta=0.1)
 
     return normal_laplacian_loss 
@@ -128,7 +127,7 @@ def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
         mask_cam   = (normal_cam[..., 2] < -1e-2).float()
         normal = normal * (1 - mask_cam[..., None]) + normal * mask_cam [..., None] * -1
 
-        target_position = position - normal
+        target_position = position - normal * 1e-1
 
     mask = ((1 - gt_eye_seg) * rendered_eye_seg).float()
 
@@ -163,7 +162,7 @@ def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
 
     mask = ((1 - gt_mouth_seg) * rendered_mouth_seg).float()
     with torch.no_grad():
-        target_position = position - normal 
+        target_position = position - normal * 1e-1
     mouth_loss = torch.mean(torch.pow(position - target_position, 2) * mask) 
     return eye_loss + mouth_loss
 

@@ -20,38 +20,26 @@ class DECAEncoder(nn.Module):
         ### regressor
 
         self.encoder_bottleneck = nn.Sequential(
-            nn.Linear(2048, 512),  # Compress to 512 dimensions
-            nn.LayerNorm(512),
-            nn.ReLU(),
-            nn.Linear(512, 256),  # Compress to 512 dimensions
-            nn.LayerNorm(256),
-            nn.ReLU()
+            nn.Linear(2048, 1024),  # Compress to 512 dimensions
+            nn.LeakyReLU(),
         )
 
         # Final MLP to fuse all inputs and produce output
         # Concatenate the bottlenecked encoder output (512) + bshapes (53) + rotation (3) + landmarks (204)
-        input_size = 256 + 53 + 3 + 204
+        input_size = 1024 + 53 + 3 + 3 + 204
 
         self.layers = nn.Sequential(
-            nn.Linear(input_size, 256),  # Smaller hidden sizes for efficiency
-            nn.LayerNorm(256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.LayerNorm(128),
-            nn.ReLU(),
-            nn.Linear(128, outsize, bias=False)
+            nn.Linear(input_size, 1024),  # Smaller hidden sizes for efficiency
+            nn.LeakyReLU(),
+            nn.Linear(1024, 512),
+            nn.LeakyReLU(),
+            nn.Linear(512, outsize, bias=False)
         )
 
 
         self.last_op = last_op
 
-        self.gradient_scaling = 10.
+        # self.gradient_scaling = 10.
 
 
         # Initialize weights and biases for expression deformer
@@ -59,26 +47,29 @@ class DECAEncoder(nn.Module):
             if isinstance(layer, nn.Linear):
                 # Initialize weight and bias based on ForwardDeformer strategy
                 torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-                torch.nn.init.normal_(layer.weight, 0.0, np.sqrt(2) / np.sqrt(layer.out_features))
+                torch.nn.init.xavier_uniform_(layer.weight)
 
         for layer in self.layers:
             if isinstance(layer, nn.Linear):
                 # Initialize weight and bias based on ForwardDeformer strategy
                 torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-                torch.nn.init.normal_(layer.weight, 0.0, np.sqrt(2) / np.sqrt(layer.out_features))
+                torch.nn.init.xavier_uniform_(layer.weight)
 
-        nn.init.zeros_(self.layers[-1].weight)
-        # If the last layer has a bias, initialize it to zero as well
-        if hasattr(self.layers[-1], 'bias') and self.layers[-1].bias is not None:
-            nn.init.zeros_(self.layers[-1].bias)
+        # nn.init.xavier_uniform_(self.layers[-1].weight)
+
+        # nn.init.zeros_(self.layers[-1].weight)
+    
+        # # If the last layer has a bias, initialize it to zero as well
+        # if hasattr(self.layers[-1], 'bias') and self.layers[-1].bias is not None:
+        #     nn.init.zeros_(self.layers[-1].bias)
 
 
         for param in self.encoder.parameters():
             param.requires_grad = False  # Freeze all encoder parameters initially
 
-        # Optionally, selectively unfreeze later layers for fine-tuning
-        for param in self.encoder.layer4.parameters():  # Example: Last block of ResNet50
-            param.requires_grad = True
+        # # Optionally, selectively unfreeze later layers for fine-tuning
+        # for param in self.encoder.layer4.parameters():  # Example: Last block of ResNet50
+        #     param.requires_grad = True
 
 
         def freeze_gradients_hook(module, inputs):
@@ -87,15 +78,36 @@ class DECAEncoder(nn.Module):
         def unfreeze_gradients_hook(module, inputs):
             for param in module.parameters():
                 param.requires_grad = True
+
+        # # Define a function to replace BatchNorm2d with GroupNorm
+        # def replace_batchnorm_with_groupnorm(model, num_groups=32):
+        #     for name, module in model.named_children():
+        #         if isinstance(module, nn.BatchNorm2d):
+        #             # Replace with GroupNorm (e.g., 32 groups)
+        #             setattr(model, name, nn.GroupNorm(num_groups, module.num_features))
+        #         else:
+        #             # Recursively apply to submodules (e.g., ResNet blocks)
+        #             replace_batchnorm_with_groupnorm(module, num_groups)
+
+        # # Apply this to your encoder
+        # replace_batchnorm_with_groupnorm(self.encoder.layer4)
+
         # Register the hook on the encoder to ensure it stays frozen
         self.encoder.apply(lambda m: m.register_forward_pre_hook(freeze_gradients_hook))
-        self.encoder.layer4.apply(lambda m: m.register_forward_pre_hook(unfreeze_gradients_hook))
+        # self.encoder.layer4.apply(lambda m: m.register_forward_pre_hook(unfreeze_gradients_hook))
 
 
-        self.encoder.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+        # self.encoder.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
+
+    
+    def train(self, mode=True):
+        super().train(mode)
+        self.encoder.eval()
 
 
-    def forward(self, inputs, bshapes, rotation, landmarks):
+    def forward(self, inputs, bshapes, rotation, translation, landmarks):
+        rotation = rotation * 0
+        translation = translation * 0
         # Pass through encoder to get features
         encoder_features = self.encoder(inputs)
 
@@ -103,7 +115,7 @@ class DECAEncoder(nn.Module):
         bottlenecked_features = self.encoder_bottleneck(encoder_features)
 
         # Concatenate bottlenecked encoder features with additional inputs
-        concat_inputs = torch.cat([bottlenecked_features, bshapes, rotation, landmarks], dim=-1)
+        concat_inputs = torch.cat([bottlenecked_features, bshapes, rotation, translation, landmarks], dim=-1)
 
         # Pass through the final MLP
         parameters = self.layers(concat_inputs)
@@ -130,7 +142,7 @@ class ResnetEncoder(nn.Module):
         self.tanh = nn.Tanh()
         self.elu = nn.ELU()
 
-        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.1, -0.15]))
+        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.22, -0.35]))
         self.translation = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
         # self.register_buffer('transform_origin', torch.tensor([0., -0.05, -0.25]))
 
@@ -143,9 +155,11 @@ class ResnetEncoder(nn.Module):
         self.flame_cam_t = torch.nn.Sequential(
                             nn.Linear(3, 3)
                             )
-        self.flame_cam_t[0].weight.data = torch.eye(3)
+        self.flame_cam_t[0].weight.data = torch.eye(3) * 1e-1
         self.flame_cam_t[0].bias.data = torch.zeros(3)
 
+        self.blendshapes_multiplier = torch.nn.Parameter((-torch.ones(53)))
+        self.softplus = torch.nn.Softplus()
         
     def load_deca_encoder(self):
         model_path = './assets/deca_model.tar'
@@ -164,6 +178,11 @@ class ResnetEncoder(nn.Module):
             img = views['img_deca']
             transform_matrix = views['mp_transform_matrix'].clone().detach().reshape(-1, 4, 4)
             scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
+
+            mp_translation = transform_matrix[:, :3, 3]
+            mp_translation[..., -1] += 28
+            mp_translation = mp_translation * 0.2
+
             rotation_matrix = transform_matrix[:, :3, :3]
             rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
 
@@ -187,12 +206,13 @@ class ResnetEncoder(nn.Module):
             ts[..., -1] -= 3
   
 
-        features = self.encoder(img, mp_bshapes, mp_rotation, detected_landmarks)
+        features = self.encoder(img, mp_bshapes, mp_rotation, mp_translation, detected_landmarks) * 0.25
         # blendshapes = features[:, :53] + mp_bshapes
         # blendshapes = self.sigmoid(5 * (blendshapes - 0.5))
-        blendshapes = mp_bshapes + features[:, :53]
+        blendshapes = (self.softplus(self.blendshapes_multiplier)[None] + 1) * mp_bshapes + features[:, :53]
         # blendshapes = self.sigmoid(features[:, :53])
-        rotation = features[:, 53:56] + mp_rotation
+        rotation = features[:, 53:56] 
+        # rotation = features[:, 53:56] + mp_rotation
         # rotation = self.tanh(features[:, 53:56]) * 1.75
         translation = features[:, 56:59]
 
@@ -203,7 +223,7 @@ class ResnetEncoder(nn.Module):
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
-        out_features = torch.cat([blendshapes, rotation, translation, scale, features[:, 56:59]], dim=-1)
+        out_features = torch.cat([blendshapes, rotation, translation, scale, features[:, 56:59], features[:, :53]], dim=-1)
 
         return out_features
 

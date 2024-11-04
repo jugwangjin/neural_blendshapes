@@ -79,8 +79,9 @@ class DatasetLoader(Dataset):
         else:
             self.all_img_path = self.json_dict["frames"]
 
-        stem = lambda json_dict: str(self.base_dir / json_dict["dir"] / Path(json_dict["file_path"] + ".png").stem).zfill(6)
-    
+        stem = lambda json_dict: str(self.base_dir / json_dict["dir"] / str(Path(json_dict["file_path"] + ".png").stem).zfill(6))
+
+
         # sort self.all_img_path, by stem lambda function
         self.all_img_path = sorted(self.all_img_path, key=stem)
 
@@ -244,7 +245,7 @@ class DatasetLoader(Dataset):
         print('mode of blendshapes:', modes)
         self.bshapes_mode = torch.tensor(modes, dtype=torch.float32)
 
-        return modes
+        return self.bshapes_mode
 
 
     def get_bshapes_lower_bounds(self):
@@ -366,19 +367,19 @@ class DatasetLoader(Dataset):
 
                 if mp_landmark is not None:
                     break
-            sub_idx = idx + offset
-            if sub_idx < len(self.all_img_path):
-                json_dict_ = self.all_img_path[sub_idx]
+            # sub_idx = idx + offset
+            # if sub_idx < len(self.all_img_path):
+            #     json_dict_ = self.all_img_path[sub_idx]
 
-                img_path_ = self.base_dir / json_dict_["dir"] / Path(json_dict_["file_path"] + ".png")
+            #     img_path_ = self.base_dir / json_dict_["dir"] / Path(json_dict_["file_path"] + ".png")
                 
-                mp_image = Image.open(img_path_)
-                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.asarray(mp_image))
-                face_landmarker_result = self.mediapipe.detect(mp_image)
-                mp_landmark, mp_blendshape, mp_transform_matrix = parse_mediapipe_output(face_landmarker_result)
+            #     mp_image = Image.open(img_path_)
+            #     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.asarray(mp_image))
+            #     face_landmarker_result = self.mediapipe.detect(mp_image)
+            #     mp_landmark, mp_blendshape, mp_transform_matrix = parse_mediapipe_output(face_landmarker_result)
 
-                if mp_landmark is not None:
-                    break
+            #     if mp_landmark is not None:
+            #         break
             
             offset += 1
 
