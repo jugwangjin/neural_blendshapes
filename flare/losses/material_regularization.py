@@ -14,6 +14,23 @@
 
 import torch
 
+import torch.nn.functional as F
+
+high_res = (512, 512)
+def upsample(buffer, high_res):
+    if buffer.shape[1] == high_res[0] and buffer.shape[2] == high_res[1]:
+        return buffer
+    # Convert from (B, H, W, C) -> (B, C, H, W)
+    buffer = buffer.permute(0, 3, 1, 2)
+    
+    # Perform bilinear upsampling
+    upsampled = F.interpolate(buffer, size=high_res, mode='bilinear', align_corners=False)
+    
+    # Convert back from (B, C, H, W) -> (B, H, W, C)
+    return upsampled.permute(0, 2, 3, 1)
+
+
+
 def dot(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return torch.sum(x*y, -1, keepdim=True)
 
@@ -24,79 +41,27 @@ def safe_normalize(x: torch.Tensor, eps: float =1e-20) -> torch.Tensor:
     return x / length(x, eps)
 
 
-def white_light_regularization(lights):
-    # gray light regularization.
-    self_occ_color = lights[..., :3]
-    env_light_color = lights[..., 3:6]
-
-    # self_occ_color to be gray and ones
-    self_occ_loss = (self_occ_color - self_occ_color.mean(dim=-1, keepdim=True)).pow(2).mean() + (1 - self_occ_color).pow(2).mean()
-
-    # env light to be gray and zero
-    env_light_loss = (env_light_color - env_light_color.mean(dim=-1, keepdim=True)).pow(2).mean() + env_light_color.pow(2).mean()
-
-    return self_occ_loss + env_light_loss
-
-    lights_gray = lights.mean(dim=-1, keepdim=True)
-    return (lights - lights_gray).pow(2).mean() + (1 - lights).pow(2).mean()
-
-    lights = torch.cat([self_occ_color, env_light_color], dim=-1)
-    return lights.pow(2).mean()
-    diffuse_shading = lights[..., 6:]
-
-    return (diffuse_shading - diffuse_shading.mean(dim=-1, keepdim=True)).abs().mean()
-
-def material_regularization_function(values, semantic, mask, specular=False, roughness=False):
-    assert specular or roughness, "At least one of specular or roughness should be True"
-    skin_mask = ((semantic[..., 2] * mask[..., 0]) > 0.0).int().bool()
-    skin_mask = skin_mask.view(-1)
-    values_skin = values[skin_mask]
-    mean = 0.3753 if specular else 0.5
-    std = 0.1655 if specular else 0.1
-
-    z_score = (values_skin - mean) / std
-
-    loss = torch.mean(torch.max(torch.zeros_like(z_score), (torch.abs(z_score) - 2)))
-    return loss
-
-
-def cbuffers_regularization(cbuffers):
-    material = cbuffers["material"]
-    light = cbuffers["light"]
-
-    # diffuse = material[..., :3]
-    bsize = material.shape[0]
-    
-    # roughness to be zero
-    loss = (roughness**2).mean()
-
-    # light to be white
-    loss += ((light[..., :3] - 1.0) ** 2).mean()
-
-    return loss
-
-
 def albedo_regularization(_adaptive, shader, mesh, device, displacements, iteration=0):
     position = mesh.vertices
     
-    pe_input = shader.apply_pe(position=position, normalize=True)
-    kd = shader.diffuse_mlp(pe_input)[..., :3]
+    pe_input = shader.apply_pe(position=position)
+    kd = shader.material_mlp(pe_input)[..., :4]
 
     # add jitter for loss function
     jitter_pos = position + torch.normal(mean=0, std=0.01, size=position.shape, device=device)
     jitter_pe_input = shader.apply_pe(position=jitter_pos)
 
-    kd_jitter = shader.diffuse_mlp(jitter_pe_input)[..., :3]
+    kd_jitter = shader.material_mlp(jitter_pe_input)[..., :4]
     loss_fn = torch.nn.MSELoss(reduction='none')
     kd_grad = loss_fn(kd_jitter, kd)
-    loss = torch.mean(kd_grad.view(-1, 3))
-    return loss
+    loss = torch.mean(_adaptive.lossfun(kd_grad.view(-1, 4)))
+    return loss * min(1.0, iteration / 500)
 
 
 def white_light(cbuffers):
     loss = 0.0
 
-    shading = cbuffers["shading"][..., :3]
+    shading = cbuffers["shading"]
     white = (shading[..., 0:1] + shading[..., 1:2] + shading[..., 2:3]) / 3.0
     masked_pts = (shading - white)
     loss += torch.mean(torch.abs(masked_pts))
@@ -104,7 +69,7 @@ def white_light(cbuffers):
     return loss
 
 def roughness_regularization(roughness, semantic, mask, r_mean):
-    skin_mask = (torch.sum(semantic[..., 2:3], axis=-1)).unsqueeze(-1)
+    skin_mask = (torch.sum(semantic[..., :3], axis=-1)).unsqueeze(-1)
     skin_mask = skin_mask * mask 
 
     loss = 0.0
@@ -119,11 +84,13 @@ def roughness_regularization(roughness, semantic, mask, r_mean):
     return loss
 
 def spec_intensity_regularization(rho, semantic, mask):
-    skin_mask = (torch.sum(semantic[..., 2:3], axis=-1)).unsqueeze(-1)
+    skin_mask = (torch.sum(semantic[..., :3], axis=-1)).unsqueeze(-1)
     skin_mask = skin_mask * mask 
 
     loss = 0.0
     mask = (skin_mask > 0.0).int().bool()
+
+    rho = upsample(rho, high_res)
     rho_skin = rho[mask]
     # pre-computed
     mean_rough = 0.3753

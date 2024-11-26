@@ -17,10 +17,10 @@ lr_deformer = 2e-4
 lr_jacobian = 2e-4
 
 weight_shading = 1.0
-weight_perceptual_loss = 1e-2
+weight_perceptual_loss = 0.1
 weight_mask = 1
-weight_albedo_regularization = 0.001
-weight_white_lgt_regularization = 0.001
+weight_albedo_regularization = 0.01
+weight_white_lgt_regularization = 0.01
 weight_roughness_regularization = 0.01
 weight_fresnel_coeff = 0.01
 weight_normal_regularization = 1e-2
@@ -42,12 +42,11 @@ weight_flame_regularization = 10
 
 
 light_mlp_ch = 3
-light_mlp_dims = [64, 64, 64]
+light_mlp_dims = [64, 64]
 material_mlp_dims = [128, 128, 128, 128]
-material_mlp_ch = 4
-brdf_mlp_dims = [32, 32]
+material_mlp_ch = 5
 
-milestones = [5000, 7000, 10000, 13000, 16000, 19000]
+milestones = [2000, 7000, 10000, 13000, 16000, 19000]
 
 
     

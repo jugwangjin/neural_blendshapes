@@ -165,13 +165,9 @@ def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images
     R = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], device=device, dtype=torch.float32)
     normal_image = (0.5*(debug_gbuffer["normal"] @ debug_view["camera"][0].R.T @ R.T + 1)) * gbuffer_mask 
 
-    normal_temp_pose_image = (0.5*(debug_gbuffer["normal_temp_pose"] @ debug_view["camera"][0].R.T @ R.T + 1)) * gbuffer_mask
-    normal_exp_no_pose_image = (0.5*(debug_gbuffer["normal_exp_no_pose"] @ debug_view["camera"][0].R.T @ R.T + 1)) * gbuffer_mask
-
     shading = add_directionlight(debug_gbuffer["normal"].reshape([1, -1, 3]), device)
     shading = shading.reshape(debug_gbuffer["normal"].shape)
     shading = shading * gbuffer_mask 
-
 
 
     # both landmarks_on_clip_space and detected_landmarks are in clip space -> x, y in range of [-1, 1]
@@ -217,8 +213,6 @@ def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images
     color_list += [list_torchgrid(normal_image, grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
     color_list += [list_torchgrid(shading.to(device), grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
 
-    color_list += [list_torchgrid(normal_temp_pose_image, grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
-    color_list += [list_torchgrid(normal_exp_no_pose_image, grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
 
     if save_name is None:
         save_name = f'grid_{iteration}.png'

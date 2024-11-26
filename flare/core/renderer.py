@@ -153,7 +153,6 @@ class Renderer:
 
 
     def render_batch(self, views, deformed_vertices, deformed_normals, channels, with_antialiasing, canonical_v, canonical_idx, 
-                     deformed_normals_exp_no_pose, deformed_normals_temp_pose, deformed_vertices_exp_no_pose, deformed_vertices_temp_pose,
                      canonical_uv, mesh, deformed_vertices_clip_space=None, target_resolution=None):
         """ Render G-buffers from a set of views.
 
@@ -246,26 +245,6 @@ class Renderer:
             gbuffer["tangent_normals"] = tangent_normals
             # gbuffer["tangent_normals"] = upsample(gbuffer["tangent_normals"], high_res)
 
-            vertex_normals_exp_no_pose, _ = dr.interpolate(deformed_normals_exp_no_pose["vertex_normals"], rast, idx)
-            face_normals_exp_no_pose, _ = dr.interpolate(deformed_normals_exp_no_pose["face_normals"], rast, face_idx) 
-            tangent_normals_exp_no_pose, _ = dr.interpolate(deformed_normals_exp_no_pose["tangent_normals"], rast, idx)
-            gbuffer["vertex_normals_exp_no_pose"] = vertex_normals_exp_no_pose
-            # gbuffer["vertex_normals_exp_no_pose"] = upsample(gbuffer["vertex_normals_exp_no_pose"], high_res)
-            gbuffer["face_normals_exp_no_pose"] = face_normals_exp_no_pose
-            # gbuffer["face_normals_exp_no_pose"] = upsample(gbuffer["face_normals_exp_no_pose"], high_res)
-            gbuffer["tangent_normals_exp_no_pose"] = tangent_normals_exp_no_pose
-            # gbuffer["tangent_normals_exp_no_pose"] = upsample(gbuffer["tangent_normals_exp_no_pose"], high_res)
-
-            vertex_normals_temp_pose, _ = dr.interpolate(deformed_normals_temp_pose["vertex_normals"], rast, idx)
-            face_normals_temp_pose, _ = dr.interpolate(deformed_normals_temp_pose["face_normals"], rast, face_idx)
-            tangent_normals_temp_pose, _ = dr.interpolate(deformed_normals_temp_pose["tangent_normals"], rast, idx)
-            gbuffer["vertex_normals_temp_pose"] = vertex_normals_temp_pose
-            # gbuffer["vertex_normals_temp_pose"] = upsample(gbuffer["vertex_normals_temp_pose"], high_res)
-            gbuffer["face_normals_temp_pose"] = face_normals_temp_pose
-            # gbuffer["face_normals_temp_pose"] = upsample(gbuffer["face_normals_temp_pose"], high_res)
-            gbuffer["tangent_normals_temp_pose"] = tangent_normals_temp_pose
-            # gbuffer["tangent_normals_temp_pose"] = upsample(gbuffer["tangent_normals_temp_pose"], high_res)
-            
 
         # mask of mesh in G-buffer
         if "mask" in channels:

@@ -20,9 +20,9 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     
     facs_reg = ((facs - target_facs).pow(2) * facs_reg_weights)
     facs_reg[:, eyeball_indices] *= 1e2
-    facs_reg = facs_reg.mean() * mult + feature[:, -53:].pow(2).mean()
+    facs_reg = facs_reg.mean() * 1e-1 * mult + feature[:, -53:].pow(2).mean()
  
-    l1_reg = (facs).abs().mean() * 1e-2
+    l1_reg = (facs).abs().mean() * 1e-3
     
     range_reg = (facs.clamp(max=0).pow(2).mean() + (facs-1).clamp(min=0).pow(2).mean()) * 1e2
 

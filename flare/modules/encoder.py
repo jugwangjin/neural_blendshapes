@@ -24,18 +24,27 @@ class DECAEncoder(nn.Module):
             nn.LeakyReLU(),
         )
 
+        self.others_bottleneck = nn.Sequential(
+            nn.Linear(53 + 3 + 3 + 204, 512),  # Compress to 512 dimensions
+            nn.LeakyReLU(),
+            nn.Linear(512, 512),  # Compress to 512 dimensions
+            nn.LeakyReLU(),
+            nn.Linear(512, 512),  # Compress to 512 dimensions
+            nn.LeakyReLU(),
+        )
+
         # Final MLP to fuse all inputs and produce output
         # Concatenate the bottlenecked encoder output (512) + bshapes (53) + rotation (3) + landmarks (204)
-        input_size = 1024 + 53 + 3 + 3 + 204
+        input_size = 1024 + 512
 
         self.layers = nn.Sequential(
             nn.Linear(input_size, 1024),  # Smaller hidden sizes for efficiency
             nn.LeakyReLU(),
             nn.Linear(1024, 512),
             nn.LeakyReLU(),
-            nn.Linear(512, outsize, bias=False)
+            nn.Linear(512, outsize, bias=True)
         )
-
+    
 
         self.last_op = last_op
 
@@ -44,6 +53,12 @@ class DECAEncoder(nn.Module):
 
         # Initialize weights and biases for expression deformer
         for layer in self.encoder_bottleneck:
+            if isinstance(layer, nn.Linear):
+                # Initialize weight and bias based on ForwardDeformer strategy
+                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
+                torch.nn.init.xavier_uniform_(layer.weight)
+
+        for layer in self.others_bottleneck:
             if isinstance(layer, nn.Linear):
                 # Initialize weight and bias based on ForwardDeformer strategy
                 torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
@@ -113,9 +128,11 @@ class DECAEncoder(nn.Module):
 
         # Apply bottleneck to encoder output
         bottlenecked_features = self.encoder_bottleneck(encoder_features)
+        
+        others_features = self.others_bottleneck(torch.cat([bshapes, rotation, translation, landmarks], dim=-1))
 
         # Concatenate bottlenecked encoder features with additional inputs
-        concat_inputs = torch.cat([bottlenecked_features, bshapes, rotation, translation, landmarks], dim=-1)
+        concat_inputs = torch.cat([bottlenecked_features, others_features], dim=-1)
 
         # Pass through the final MLP
         parameters = self.layers(concat_inputs)
@@ -158,8 +175,9 @@ class ResnetEncoder(nn.Module):
         self.flame_cam_t[0].weight.data = torch.eye(3) * 1e-1
         self.flame_cam_t[0].bias.data = torch.zeros(3)
 
-        self.blendshapes_multiplier = torch.nn.Parameter((-torch.ones(53)))
-        self.softplus = torch.nn.Softplus()
+        self.blendshapes_multiplier = torch.nn.Parameter((torch.zeros(53)))
+        self.blendshapes_offset = torch.nn.Parameter(torch.zeros(53))
+        self.softplus = torch.nn.Softplus(beta=4)
         
     def load_deca_encoder(self):
         model_path = './assets/deca_model.tar'
@@ -206,7 +224,7 @@ class ResnetEncoder(nn.Module):
             ts[..., -1] -= 3
   
 
-        features = self.encoder(img, mp_bshapes, mp_rotation, mp_translation, detected_landmarks) * 0.25
+        features = self.encoder(img, mp_bshapes, mp_rotation, mp_translation, detected_landmarks)
         # blendshapes = features[:, :53] + mp_bshapes
         # blendshapes = self.sigmoid(5 * (blendshapes - 0.5))
         blendshapes = (self.softplus(self.blendshapes_multiplier)[None] + 1) * mp_bshapes + features[:, :53]

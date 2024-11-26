@@ -94,13 +94,13 @@ class MLPTemplate(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(inp_dim, 256),
             # nn.LayerNorm(256),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(256, 3, bias=False)
         )
 
@@ -172,16 +172,16 @@ class NeuralBlendshapes(nn.Module):
         self.expression_deformer = nn.Sequential(
             nn.Linear(3, 512),
             # nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(512, 54*3, bias=False)
         )
         self.template_deformer = MLPTemplate(3)
@@ -189,16 +189,24 @@ class NeuralBlendshapes(nn.Module):
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
-                    nn.Softplus(beta=100),
+                    GaussianActivation(),
                     nn.Linear(32, 32),
-                    nn.Softplus(beta=100),
+                    GaussianActivation(),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
         
-        nn.init.xavier_uniform_(self.expression_deformer[-1].weight)
-        nn.init.xavier_uniform_(self.template_deformer.mlp[-1].weight)
-
+        for layer in self.expression_deformer:
+            if isinstance(layer, nn.Linear):
+                # Initialize weight and bias based on ForwardDeformer strategy
+                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
+                torch.nn.init.xavier_uniform_(layer.weight)
+         
+        for layer in self.template_deformer.mlp:
+            if isinstance(layer, nn.Linear):
+                # Initialize weight and bias based on ForwardDeformer strategy
+                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
+                torch.nn.init.xavier_uniform_(layer.weight)
 
         self.gradient_scaling = 128.0
     
@@ -365,20 +373,22 @@ class NeuralBlendshapes(nn.Module):
         if pretrain:
             return return_dict
 
-        expression_input = torch.cat([encoded_points2[None].repeat(bsize, 1, 1), \
-                                        ], \
-                                    dim=2) # B V ? 
+        # expression_input = torch.cat([encoded_points2[None].repeat(bsize, 1, 1), \
+        #                                 ], \
+        #                             dim=2) # B V ? 
         
-        expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 54, 3)
+        
 
-        feat = features[:, None, :53, None].clamp(0, 1)
-        feat = torch.cat([feat, torch.ones_like(feat[:, :, :1])], dim=2)
+        # expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 54, 3)
 
-        expression_mesh_delta_u = expression_mesh_delta_u * feat
-        expression_mesh_delta_u = expression_mesh_delta_u.sum(dim=2)
+        expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 54, 3)
 
-        expression_mesh_delta = self.solve(expression_mesh_delta_u)
-        expression_mesh = ict_mesh_w_temp + expression_mesh_delta
+        feat = features[:, :53].clamp(0, 1)
+        feat = torch.cat([feat, torch.ones_like(feat[:, :1])], dim=1)
+
+        expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
+
+        expression_mesh = template_mesh[None] + expression_mesh_delta
 
         expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
         return_dict['expression_mesh'] = self.remove_teeth(expression_mesh)
@@ -397,10 +407,7 @@ class NeuralBlendshapes(nn.Module):
         encoded_points = template
         # encoded_points = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
-        expression_input = torch.cat([encoded_points[None].repeat(bsize, 1, 1), \
-                                        ], \
-                                    dim=2) # B V ? 
-        expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 54, 3)
+        expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template.shape[0], 54, 3).permute(1, 0, 2)
         return expression_mesh_delta_u
 
 
