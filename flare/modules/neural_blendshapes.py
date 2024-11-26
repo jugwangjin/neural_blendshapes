@@ -94,13 +94,13 @@ class MLPTemplate(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(inp_dim, 256),
             # nn.LayerNorm(256),
-            GaussianActivation(),
+            nn.Softplus(beta=100),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            GaussianActivation(),
+            nn.Softplus(beta=100),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            GaussianActivation(),
+            nn.Softplus(beta=100),
             nn.Linear(256, 3, bias=False)
         )
 
@@ -172,16 +172,16 @@ class NeuralBlendshapes(nn.Module):
         self.expression_deformer = nn.Sequential(
             nn.Linear(3, 512),
             # nn.LayerNorm(512),
-            GaussianActivation(),
+            nn.Softplus(beta=100),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            GaussianActivation(),
+            nn.Softplus(beta=100),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            GaussianActivation(),
+            nn.Softplus(beta=100),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            GaussianActivation(),
+            nn.Softplus(beta=100),
             nn.Linear(512, 54*3, bias=False)
         )
         self.template_deformer = MLPTemplate(3)
@@ -189,9 +189,9 @@ class NeuralBlendshapes(nn.Module):
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
-                    GaussianActivation(),
+                    nn.Softplus(beta=100),
                     nn.Linear(32, 32),
-                    GaussianActivation(),
+                    nn.Softplus(beta=100),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
@@ -350,7 +350,7 @@ class NeuralBlendshapes(nn.Module):
         encoded_points2 = template
         # encoded_points2 = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
-        template_mesh_u_delta = self.template_deformer(template)
+        template_mesh_u_delta = self.template_deformer(encoded_points)
         
         template_mesh_delta = self.solve(template_mesh_u_delta) 
 
@@ -373,14 +373,6 @@ class NeuralBlendshapes(nn.Module):
         if pretrain:
             return return_dict
 
-        # expression_input = torch.cat([encoded_points2[None].repeat(bsize, 1, 1), \
-        #                                 ], \
-        #                             dim=2) # B V ? 
-        
-        
-
-        # expression_mesh_delta_u = self.expression_deformer(expression_input).reshape(bsize, template.shape[0], 54, 3)
-
         expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 54, 3)
 
         feat = features[:, :53].clamp(0, 1)
@@ -388,7 +380,7 @@ class NeuralBlendshapes(nn.Module):
 
         expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
 
-        expression_mesh = template_mesh[None] + expression_mesh_delta
+        expression_mesh = ict_mesh_w_temp + expression_mesh_delta
 
         expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
         return_dict['expression_mesh'] = self.remove_teeth(expression_mesh)

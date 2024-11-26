@@ -111,10 +111,10 @@ def config_parser():
     parser.add_argument('--ghostbone', action='store_true', help="mlp for vertex displacements")
     parser.add_argument('--no-ghostbone', dest='ghostbone', action='store_false')
     parser.set_defaults(ghostbone=True)
-    parser.add_argument('--lambda_', type=int, default=16, help="Total number of iterations")
+    parser.add_argument('--lambda_', type=int, default=0, help="Total number of iterations")
 
     
-    parser.add_argument('--milestones', type=int, nargs='+', default=[2000, 4000, 8000, 12000, 16000, 20000])
+    parser.add_argument('--stage_iterations', type=int, nargs='+', default=[3000, 3000, 3000, 3000, 3000, 3000])
 
 
     parser.add_argument('--compute_mode', action='store_true', help="skip eval")

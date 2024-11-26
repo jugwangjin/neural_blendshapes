@@ -467,7 +467,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                     weight_decay=1e-3
                                                     )
 
-    milestones = args.milestones
+    stage_iterations = args.stage_iterations
+    # stage_iterations contain the number of iterations for each stage
+    milestones = [args.stage_iterations[0]]
+    for i in range(1, len(stage_iterations)):
+        milestones.append(milestones[-1] + stage_iterations[i])
+
+    
     # milestones should be a list of integers, length of 6
     assert len(milestones) == 6
 
@@ -649,12 +655,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 # more regularizations
                 feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1e3 if stage == 0 else 1)
+                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1e3 if stage == 0 else 1, mult=1e3 if stage < 2 else 1)
 
                 random_blendshapes = torch.rand(views_subset['mp_blendshape'].shape[0], 53, device=device)
                 expression_delta_random = neural_blendshapes.get_expression_delta(blendshapes=random_blendshapes)
 
-                l1_regularization = (expression_delta_random[:53] - ict_facekit.expression_shape_modes).pow(2).mean() + expression_delta_random[53:].pow(2).mean()
+                l1_regularization = expression_delta_random[53:].pow(2).mean()
 
                 template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
                 expression_geometric_regularization = (return_dict['ict_mesh_w_temp'] - return_dict['expression_mesh']).pow(2).mean() 
@@ -666,7 +672,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 losses['geometric_regularization'] = template_geometric_regularization + expression_geometric_regularization 
                 losses['linearity_regularization'] = l1_regularization
                 if stage < 3:
-                    losses['linearity_regularization'] *= 1e4  
+                    losses['linearity_regularization'] *= 1e3  
 
                 # adding temporal regula/rization, which have save weight to feature regularization
                 # objective: get items from dataset - for 'idx', randomly add 1 or -1 to the index, of course clamp it to 0 and len(dataset). 
@@ -960,4 +966,4 @@ if __name__ == '__main__':
             print('Error: Unexpected error occurred. Aborting the training.')
             raise e
 
-    
+                                                          

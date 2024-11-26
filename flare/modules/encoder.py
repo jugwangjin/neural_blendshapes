@@ -21,16 +21,16 @@ class DECAEncoder(nn.Module):
 
         self.encoder_bottleneck = nn.Sequential(
             nn.Linear(2048, 1024),  # Compress to 512 dimensions
-            nn.LeakyReLU(),
+            nn.Softplus(beta=100),
         )
 
         self.others_bottleneck = nn.Sequential(
             nn.Linear(53 + 3 + 3 + 204, 512),  # Compress to 512 dimensions
-            nn.LeakyReLU(),
+            nn.Softplus(beta=100),
             nn.Linear(512, 512),  # Compress to 512 dimensions
-            nn.LeakyReLU(),
+            nn.Softplus(beta=100),
             nn.Linear(512, 512),  # Compress to 512 dimensions
-            nn.LeakyReLU(),
+            nn.Softplus(beta=100),
         )
 
         # Final MLP to fuse all inputs and produce output
@@ -39,17 +39,13 @@ class DECAEncoder(nn.Module):
 
         self.layers = nn.Sequential(
             nn.Linear(input_size, 1024),  # Smaller hidden sizes for efficiency
-            nn.LeakyReLU(),
+            nn.Softplus(beta=100),
             nn.Linear(1024, 512),
-            nn.LeakyReLU(),
+            nn.Softplus(beta=100),
             nn.Linear(512, outsize, bias=True)
         )
     
-
         self.last_op = last_op
-
-        # self.gradient_scaling = 10.
-
 
         # Initialize weights and biases for expression deformer
         for layer in self.encoder_bottleneck:
@@ -70,22 +66,8 @@ class DECAEncoder(nn.Module):
                 torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
                 torch.nn.init.xavier_uniform_(layer.weight)
 
-        # nn.init.xavier_uniform_(self.layers[-1].weight)
-
-        # nn.init.zeros_(self.layers[-1].weight)
-    
-        # # If the last layer has a bias, initialize it to zero as well
-        # if hasattr(self.layers[-1], 'bias') and self.layers[-1].bias is not None:
-        #     nn.init.zeros_(self.layers[-1].bias)
-
-
         for param in self.encoder.parameters():
             param.requires_grad = False  # Freeze all encoder parameters initially
-
-        # # Optionally, selectively unfreeze later layers for fine-tuning
-        # for param in self.encoder.layer4.parameters():  # Example: Last block of ResNet50
-        #     param.requires_grad = True
-
 
         def freeze_gradients_hook(module, inputs):
             for param in module.parameters():
@@ -94,26 +76,8 @@ class DECAEncoder(nn.Module):
             for param in module.parameters():
                 param.requires_grad = True
 
-        # # Define a function to replace BatchNorm2d with GroupNorm
-        # def replace_batchnorm_with_groupnorm(model, num_groups=32):
-        #     for name, module in model.named_children():
-        #         if isinstance(module, nn.BatchNorm2d):
-        #             # Replace with GroupNorm (e.g., 32 groups)
-        #             setattr(model, name, nn.GroupNorm(num_groups, module.num_features))
-        #         else:
-        #             # Recursively apply to submodules (e.g., ResNet blocks)
-        #             replace_batchnorm_with_groupnorm(module, num_groups)
-
-        # # Apply this to your encoder
-        # replace_batchnorm_with_groupnorm(self.encoder.layer4)
-
         # Register the hook on the encoder to ensure it stays frozen
         self.encoder.apply(lambda m: m.register_forward_pre_hook(freeze_gradients_hook))
-        # self.encoder.layer4.apply(lambda m: m.register_forward_pre_hook(unfreeze_gradients_hook))
-
-
-        # self.encoder.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
-
     
     def train(self, mode=True):
         super().train(mode)
@@ -124,7 +88,8 @@ class DECAEncoder(nn.Module):
         rotation = rotation * 0
         translation = translation * 0
         # Pass through encoder to get features
-        encoder_features = self.encoder(inputs)
+        with torch.no_grad():
+            encoder_features = self.encoder(inputs)
 
         # Apply bottleneck to encoder output
         bottlenecked_features = self.encoder_bottleneck(encoder_features)
@@ -161,7 +126,6 @@ class ResnetEncoder(nn.Module):
 
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.22, -0.35]))
         self.translation = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
-        # self.register_buffer('transform_origin', torch.tensor([0., -0.05, -0.25]))
 
         self.register_buffer('identity_weights', torch.zeros(self.ict_facekit.num_identity, device='cuda'))
         
@@ -183,11 +147,7 @@ class ResnetEncoder(nn.Module):
         model_path = './assets/deca_model.tar'
         deca_ckpt = torch.load(model_path)
         encoder_state_dict = {k[8:]: v for k, v in deca_ckpt['E_flame'].items() if k.startswith('encoder.')}
-        # print(encoder_state_dict.keys())
         self.encoder.encoder.load_state_dict(encoder_state_dict, strict=True)
-        # layers_state_dict = {k[9:] : v for k, v in deca_ckpt['E_flame'].items() if k.startswith('layers.0.')}
-        # print(layers_state_dict.keys())
-        # self.encoder.layers[0].load_state_dict(layers_state_dict, strict=True)
         
     
 
@@ -225,19 +185,12 @@ class ResnetEncoder(nn.Module):
   
 
         features = self.encoder(img, mp_bshapes, mp_rotation, mp_translation, detected_landmarks)
-        # blendshapes = features[:, :53] + mp_bshapes
-        # blendshapes = self.sigmoid(5 * (blendshapes - 0.5))
         blendshapes = (self.softplus(self.blendshapes_multiplier)[None] + 1) * mp_bshapes + features[:, :53]
-        # blendshapes = self.sigmoid(features[:, :53])
         rotation = features[:, 53:56] 
-        # rotation = features[:, 53:56] + mp_rotation
-        # rotation = self.tanh(features[:, 53:56]) * 1.75
         translation = features[:, 56:59]
 
         flame_cam_t = self.flame_cam_t(ts)
         translation = translation + flame_cam_t
-
-        # translation = self.translation[None].expand(features.shape[0], -1)
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
