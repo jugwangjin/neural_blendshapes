@@ -152,7 +152,7 @@ def FLAME_loss_function(FLAMEServer,flame_expression, flame_pose, deformed_verti
         deformed_vertices = deformed_vertices[:, target_range]
         ict_gt = ict_gt[:, target_range]
 
-    flame_loss = torch.nn.functional.huber_loss(deformed_vertices, ict_gt)
+    flame_loss = torch.nn.functional.huber_loss(deformed_vertices * 10, ict_gt * 10)
 
     # flame_loss = flame_loss.pow(2).mean()
     return flame_loss

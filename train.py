@@ -272,6 +272,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     write_mesh(Path(meshes_save_path / "init_ict_canonical.obj"), ict_canonical_mesh.to('cpu'))
 
 
+    if args.recompute_mode:
+        precomputed_mode = dataset_train.base_dir / 'bshapes_mode.pt'
+        if precomputed_mode.exists():
+            # remove the file
+            os.remove(precomputed_mode)
+            
     mode = dataset_train.get_bshapes_mode(args.compute_mode)[ict_facekit.mediapipe_to_ict]
 
     bshapes = mode.detach().cpu().numpy()
@@ -464,7 +470,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
                                                 {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                     ],
-                                                    weight_decay=1e-3
+                                                    weight_decay=1e-4
                                                     )
 
     stage_iterations = args.stage_iterations
@@ -517,8 +523,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # stage 4 : high resolution, full loss, expression deformer training
             # stage 5 : high resolution, full loss, shader training
             if stage < 2 :
-                target_res = (128, 128)
-            elif stage < 4:
                 target_res = (256, 256)
             else:
                 target_res = None            
@@ -655,7 +659,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 # more regularizations
                 feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1e3 if stage == 0 else 1, mult=1e3 if stage < 2 else 1)
+                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1e1 if stage == 0 else 1, mult=1e2 if stage < 2 else 1e1)
 
                 random_blendshapes = torch.rand(views_subset['mp_blendshape'].shape[0], 53, device=device)
                 expression_delta_random = neural_blendshapes.get_expression_delta(blendshapes=random_blendshapes)
@@ -671,8 +675,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 losses['normal_regularization'] = template_mesh_normal_regularization + expression_mesh_normal_regularization
                 losses['geometric_regularization'] = template_geometric_regularization + expression_geometric_regularization 
                 losses['linearity_regularization'] = l1_regularization
-                if stage < 3:
-                    losses['linearity_regularization'] *= 1e3  
+                # if stage < 3:
+                #     losses['linearity_regularization'] *= 1e3  
 
                 # adding temporal regula/rization, which have save weight to feature regularization
                 # objective: get items from dataset - for 'idx', randomly add 1 or -1 to the index, of course clamp it to 0 and len(dataset). 
@@ -682,12 +686,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 next_idx_views = dataset_train.collate([dataset_train[id_] for id_ in next_idx])
                 next_idx_features = neural_blendshapes.encoder(next_idx_views)
 
-                losses['temporal_regularization'] = (next_idx_features - return_dict['features']).pow(2).mean() 
+                losses['temporal_regularization'] = (next_idx_features - return_dict['features']).pow(2).mean() * 1e-2
 
             '''
             FLAME regularization
             '''
-            if stage < 2:
+            if stage < 4:
                 flame_loss = FLAME_loss_function(FLAMEServer, views_subset['flame_expression'], views_subset['flame_pose'], deformed_vertices, flame_pair_indices, ict_pair_indices, target_range=target_range)
                 
                 zero_pose_w_jaw = torch.zeros_like(views_subset['flame_pose'])
@@ -707,13 +711,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     print(losses)
                     exit()
                     continue
-                # if k != 'mask' and k != 'landmark':
-                #     losses[k] = torch.tensor(0., device=device)
-                #     # print(k)
-                # #     continue
-                # if stage < 2 and k != 'flame_regularization' and k != 'feature_regularization':
-                #     losses[k] = torch.tensor(0., device=device)
-                #     continue
                     
                 loss += v.mean() * loss_weights[k]
                         
@@ -722,7 +719,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             decay_value = 0
             for k in decay_keys:
                 decay_value += losses[k].mean() * loss_weights[k]
-            decay_value *= 3
+            decay_value *= 2
 
             for idx in views_subset['idx']:    
                 importance[idx] = ((1 - weight_decay_rate) * importance[idx] + weight_decay_rate * decay_value).clamp(min=1e-2).item()
@@ -772,10 +769,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             loss.backward()
             torch.cuda.synchronize()
-
-            # print(neural_blendshapes.encoder.encoder.layers[-1].weight.grad[:53])
-            # print(neural_blendshapes.encoder.encoder.layers[-1].weight.grad[:53].amin(dim=1), neural_blendshapes.encoder.encoder.layers[-1].weight.grad[:53].amax(dim=1))
-            # print(return_dict['features'][0, :53])
 
             clip_grad(neural_blendshapes, shader, norm=1.0)
 
@@ -966,4 +959,4 @@ if __name__ == '__main__':
             print('Error: Unexpected error occurred. Aborting the training.')
             raise e
 
-                                                          
+    

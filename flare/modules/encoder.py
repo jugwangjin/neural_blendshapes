@@ -19,48 +19,39 @@ class DECAEncoder(nn.Module):
         self.encoder = resnet.load_ResNet50Model() #out: 2048
         ### regressor
 
-        self.encoder_bottleneck = nn.Sequential(
-            nn.Linear(2048, 1024),  # Compress to 512 dimensions
-            nn.Softplus(beta=100),
+        self.blendshapes_prefix = nn.Sequential(
+            nn.Linear(53, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128)
         )
 
-        self.others_bottleneck = nn.Sequential(
-            nn.Linear(53 + 3 + 3 + 204, 512),  # Compress to 512 dimensions
-            nn.Softplus(beta=100),
-            nn.Linear(512, 512),  # Compress to 512 dimensions
-            nn.Softplus(beta=100),
-            nn.Linear(512, 512),  # Compress to 512 dimensions
-            nn.Softplus(beta=100),
-        )
-
-        # Final MLP to fuse all inputs and produce output
-        # Concatenate the bottlenecked encoder output (512) + bshapes (53) + rotation (3) + landmarks (204)
-        input_size = 1024 + 512
-
-        self.layers = nn.Sequential(
-            nn.Linear(input_size, 1024),  # Smaller hidden sizes for efficiency
-            nn.Softplus(beta=100),
+        self.encoder_tail = nn.Sequential(
+            nn.Linear(feature_size + 128, 1024),
+            nn.ReLU(),
             nn.Linear(1024, 512),
-            nn.Softplus(beta=100),
-            nn.Linear(512, outsize, bias=True)
+            nn.ReLU(),
+            nn.Linear(512, 53 + 3)
         )
+
+        self.translation_tail = nn.Sequential(
+            nn.Linear(53 + 3 + 3 + 204, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 3)
+        )
+            
     
         self.last_op = last_op
 
         # Initialize weights and biases for expression deformer
-        for layer in self.encoder_bottleneck:
+        for layer in self.encoder_tail:
             if isinstance(layer, nn.Linear):
                 # Initialize weight and bias based on ForwardDeformer strategy
                 torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
                 torch.nn.init.xavier_uniform_(layer.weight)
 
-        for layer in self.others_bottleneck:
-            if isinstance(layer, nn.Linear):
-                # Initialize weight and bias based on ForwardDeformer strategy
-                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-                torch.nn.init.xavier_uniform_(layer.weight)
-
-        for layer in self.layers:
+        for layer in self.translation_tail:
             if isinstance(layer, nn.Linear):
                 # Initialize weight and bias based on ForwardDeformer strategy
                 torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
@@ -85,28 +76,21 @@ class DECAEncoder(nn.Module):
 
 
     def forward(self, inputs, bshapes, rotation, translation, landmarks):
-        rotation = rotation * 0
-        translation = translation * 0
-        # Pass through encoder to get features
         with torch.no_grad():
             encoder_features = self.encoder(inputs)
+            estimated_bshapes = bshapes.clamp(0.05, 0.95)
+            estimated_bshapes = torch.log(estimated_bshapes / (1 - estimated_bshapes))
 
-        # Apply bottleneck to encoder output
-        bottlenecked_features = self.encoder_bottleneck(encoder_features)
+        encoder_additional_features = self.blendshapes_prefix(bshapes)
+        encoder_out = self.encoder_tail(torch.cat([encoder_features, encoder_additional_features], dim=-1))
+        encoder_out[:, :53] = encoder_out[:, :53] + estimated_bshapes
+
+        translation_out = self.translation_tail(torch.cat([bshapes, rotation, translation, landmarks], dim=-1))
         
-        others_features = self.others_bottleneck(torch.cat([bshapes, rotation, translation, landmarks], dim=-1))
-
-        # Concatenate bottlenecked encoder features with additional inputs
-        concat_inputs = torch.cat([bottlenecked_features, others_features], dim=-1)
-
-        # Pass through the final MLP
-        parameters = self.layers(concat_inputs)
-
-        # Apply last activation function if specified
+        out = torch.cat([encoder_out, translation_out], dim=-1)
         if self.last_op:
-            parameters = self.last_op(parameters)
-
-        return parameters
+            out = self.last_op(out)
+        return out
 
 
 class ResnetEncoder(nn.Module):
@@ -185,12 +169,13 @@ class ResnetEncoder(nn.Module):
   
 
         features = self.encoder(img, mp_bshapes, mp_rotation, mp_translation, detected_landmarks)
-        blendshapes = (self.softplus(self.blendshapes_multiplier)[None] + 1) * mp_bshapes + features[:, :53]
+        blendshapes = self.sigmoid(features[:, :53])
         rotation = features[:, 53:56] 
         translation = features[:, 56:59]
 
         flame_cam_t = self.flame_cam_t(ts)
-        translation = translation + flame_cam_t
+        translation = flame_cam_t
+        # translation = translation + flame_cam_t
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 

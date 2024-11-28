@@ -118,4 +118,5 @@ def config_parser():
 
 
     parser.add_argument('--compute_mode', action='store_true', help="skip eval")
+    parser.add_argument('--recompute_mode', action='store_true', help="skip eval")
     return parser

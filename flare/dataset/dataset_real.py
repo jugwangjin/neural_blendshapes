@@ -36,6 +36,8 @@ devices = 0
 if torch.cuda.is_available() and devices >= 0:
     device = torch.device(f'cuda:{devices}')
 
+import pickle
+
 class DatasetLoader(Dataset):
     def __init__(self, args, train_dir, sample_ratio, pre_load, train=False, flip=False):
         self.train = train
@@ -151,13 +153,12 @@ class DatasetLoader(Dataset):
             print("loaded {:d} views".format(self.len_img))
         else:
             self.all_flame_expression = []
-            for i in range(len(self.all_img_path)):
+            pbar = tqdm(range(len(self.all_img_path)))
+            for i in pbar:
                 self.all_flame_expression.append(self._parse_expression(i))
-            self.loaded = {}
-            self.loaded[True] = {}
-            self.loaded[False] = {}
+                pbar.set_description(f'parsing expression {i}')
 
-        # self._compute_importance()
+            self.loaded = {}
 
 
     def get_mean_expression_train(self, train_dir):
@@ -217,15 +218,23 @@ class DatasetLoader(Dataset):
 
 
     def get_bshapes_mode(self, compute_mode):
+        precomputed_mode = self.base_dir / 'bshapes_mode.pt'
+
+        if precomputed_mode.exists():
+            self.bshapes_mode = torch.load(precomputed_mode)
+            return self.bshapes_mode
+        
+        
+
         if compute_mode is False:
             self.bshapes_mode = torch.zeros(53, dtype=torch.float32)
             return self.bshapes_mode    
         
         bshapes = []
         for i in tqdm(range(self.len_img)):
-            if i not in self.loaded[False]:
-                self.loaded[False][i] = self._parse_frame_single(i)
-            _, _, _, _, _, _, _, mp_blendshape, _, _, _, _, _, _ = self.loaded[False][i]
+            if i not in self.loaded:
+                self.loaded[i] = self._parse_frame_single(i)
+            _, _, _, _, _, _, _, mp_blendshape, _, _, _, _, _, _ = self.loaded[i]
             bshapes.append(mp_blendshape)
         
         bshapes = torch.cat(bshapes, dim=0).cpu().data.numpy()
@@ -245,15 +254,17 @@ class DatasetLoader(Dataset):
         print('mode of blendshapes:', modes)
         self.bshapes_mode = torch.tensor(modes, dtype=torch.float32)
 
+        torch.save(self.bshapes_mode, precomputed_mode)
+
         return self.bshapes_mode
 
 
     def get_bshapes_lower_bounds(self):
         bshapes = []
         for i in range(self.len_img):
-            if i not in self.loaded[False]:
-                self.loaded[False][i] = self._parse_frame_single(i)
-            _, _, _, _, _, _, _, mp_blendshape, _, _, _, _, _, _ = self.loaded[False][i]
+            if i not in self.loaded:
+                self.loaded[i] = self._parse_frame_single(i)
+            _, _, _, _, _, _, _, mp_blendshape, _, _, _, _, _, _ = self.loaded[i]
             bshapes.append(mp_blendshape)
         
         bshapes = torch.stack(bshapes)
@@ -274,15 +285,13 @@ class DatasetLoader(Dataset):
             img_deca = self.all_img_decas[itr % self.len_img]
         else:
             flip = False
-            if self.flip and torch.rand(1) > 0.5:
-                flip = True
             local_itr = itr % self.len_img
-            if local_itr not in self.loaded[flip]:
-                self.loaded[flip][local_itr] = self._parse_frame_single(local_itr, flip)
+            if local_itr not in self.loaded:
+                self.loaded[local_itr] = self._parse_frame_single(local_itr, flip)
             img, mask, skin_mask, camera, frame_name, landmark,\
             mp_landmark, mp_blendshape, mp_transform_matrix, \
             normal, flame_expression, flame_pose, flame_camera, \
-            img_deca = self.loaded[flip][local_itr]
+            img_deca = self.loaded[local_itr]
 
         # facs = (facs / self.facs_range).clamp(0, 1)
 
