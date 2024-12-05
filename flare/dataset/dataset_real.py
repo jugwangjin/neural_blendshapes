@@ -160,6 +160,7 @@ class DatasetLoader(Dataset):
 
             self.loaded = {}
 
+        self.get_bshapes_mode(compute_mode=True)
 
     def get_mean_expression_train(self, train_dir):
         all_expression = []
@@ -222,12 +223,14 @@ class DatasetLoader(Dataset):
 
         if precomputed_mode.exists():
             self.bshapes_mode = torch.load(precomputed_mode)
+            self.bshapes_mode_np = self.bshapes_mode.cpu().data.numpy()
             return self.bshapes_mode
         
         
 
         if compute_mode is False:
             self.bshapes_mode = torch.zeros(53, dtype=torch.float32)
+            self.bshapes_mode_np = self.bshapes_mode.cpu().data.numpy()
             return self.bshapes_mode    
         
         bshapes = []
@@ -255,6 +258,8 @@ class DatasetLoader(Dataset):
         self.bshapes_mode = torch.tensor(modes, dtype=torch.float32)
 
         torch.save(self.bshapes_mode, precomputed_mode)
+        
+        self.bshapes_mode_np = self.bshapes_mode.cpu().data.numpy()
 
         return self.bshapes_mode
 
@@ -293,7 +298,7 @@ class DatasetLoader(Dataset):
             normal, flame_expression, flame_pose, flame_camera, \
             img_deca = self.loaded[local_itr]
 
-        # facs = (facs / self.facs_range).clamp(0, 1)
+        mp_blendshape = (mp_blendshape - self.bshapes_mode[None]).clamp(0, 1)
 
         return {
             'img' : img,

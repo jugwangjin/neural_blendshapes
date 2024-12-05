@@ -57,15 +57,13 @@ def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, de
     
     d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
     ## ============== Rasterize ==============================
-    gbuffers = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
-                        channels=channels_gbuffer, with_antialiasing=True, 
-                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv = ict_facekit.uv_neutral_mesh,
-                        deformed_normals_exp_no_pose = mesh.fetch_all_normals(return_dict['expression_mesh'], mesh),
-                        deformed_normals_temp_pose = mesh.fetch_all_normals(return_dict['template_mesh_posed'], mesh),
-                        deformed_vertices_exp_no_pose = return_dict['expression_mesh'],
-                        deformed_vertices_temp_pose = return_dict['template_mesh_posed'],
-                        mesh=mesh
-                        )
+    mesh_key_name = 'expression_mesh'
+    gbuffers = renderer.render_batch(views['flame_camera'], return_dict[mesh_key_name+'_posed'].contiguous(), mesh.fetch_all_normals(return_dict[mesh_key_name+'_posed'], mesh),
+                            channels=channels_gbuffer + ['segmentation'], with_antialiasing=True, 
+                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                            mesh=mesh
+                            )
+
     
     ## ============== predict color ==============================
     rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffers, views, mesh, args.finetune_color, lgt)

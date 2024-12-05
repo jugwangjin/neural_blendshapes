@@ -55,7 +55,7 @@ def albedo_regularization(_adaptive, shader, mesh, device, displacements, iterat
     loss_fn = torch.nn.MSELoss(reduction='none')
     kd_grad = loss_fn(kd_jitter, kd)
     loss = torch.mean(_adaptive.lossfun(kd_grad.view(-1, 4)))
-    return loss * min(1.0, iteration / 500)
+    return loss * min(1.0, iteration / 6000)
 
 
 def white_light(cbuffers):
@@ -69,7 +69,7 @@ def white_light(cbuffers):
     return loss
 
 def roughness_regularization(roughness, semantic, mask, r_mean):
-    skin_mask = (torch.sum(semantic[..., :3], axis=-1)).unsqueeze(-1)
+    skin_mask = (torch.sum(semantic[..., 2:3], axis=-1)).unsqueeze(-1)
     skin_mask = skin_mask * mask 
 
     loss = 0.0
@@ -84,7 +84,7 @@ def roughness_regularization(roughness, semantic, mask, r_mean):
     return loss
 
 def spec_intensity_regularization(rho, semantic, mask):
-    skin_mask = (torch.sum(semantic[..., :3], axis=-1)).unsqueeze(-1)
+    skin_mask = (torch.sum(semantic[..., 2:3], axis=-1)).unsqueeze(-1)
     skin_mask = skin_mask * mask 
 
     loss = 0.0

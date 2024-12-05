@@ -195,47 +195,7 @@ class NeuralBlendshapes(nn.Module):
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
-        
-        for layer in self.expression_deformer:
-            if isinstance(layer, nn.Linear):
-                # Initialize weight and bias based on ForwardDeformer strategy
-                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-                torch.nn.init.xavier_uniform_(layer.weight)
-         
-        for layer in self.template_deformer.mlp:
-            if isinstance(layer, nn.Linear):
-                # Initialize weight and bias based on ForwardDeformer strategy
-                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-                torch.nn.init.xavier_uniform_(layer.weight)
-
-        self.gradient_scaling = 128.0
-    
-        # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
-        # self.fourier_feature_transform2.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / self.gradient_scaling if grad_i[0] is not None else None, ))
-        # self.template_deformer.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling if grad_i[0] is not None else None, ))
-        # self.expression_deformer.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * self.gradient_scaling if grad_i[0] is not None else None, ))
-
-        # Initialize weights and biases for expression deformer
-        # for layer in self.expression_deformer:
-        #     if isinstance(layer, nn.Linear):
-        #         # Initialize weight and bias based on ForwardDeformer strategy
-        #         torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-        #         torch.nn.init.normal_(layer.weight, 0.0, 1 / np.sqrt(layer.out_features))
-
-        # for layer in self.template_deformer.mlp:
-        #     if isinstance(layer, nn.Linear):
-        #         # Initialize weight and bias based on ForwardDeformer strategy
-        #         torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-        #         torch.nn.init.normal_(layer.weight, 0.0, 1 / np.sqrt(layer.out_features))
-
-        # apply zero bias and weight for the last layer
-        # torch.nn.init.constant_(self.expression_deformer[-1].weight, 0.0)
-        # if self.expression_deformer[-1].bias is not None:
-            # torch.nn.init.constant_(self.expression_deformer[-1].bias, 0.0)
-
-        # torch.nn.init.constant_(self.template_deformer.mlp[-1].weight, 0.0)
-        # if self.template_deformer.mlp[-1].bias is not None:
-            # torch.nn.init.constant_(self.template_deformer.mlp[-1].bias, 0.0)    
+        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.2, -0.28]))
 
         initialize_weights(self.pose_weight, gain=0.01)
         self.pose_weight[-2].weight.data.zero_()
@@ -407,7 +367,7 @@ class NeuralBlendshapes(nn.Module):
         euler_angle = features[..., 53:56]
         translation = features[..., 56:59]
         scale = features[..., 59:60]
-        transform_origin = self.encoder.transform_origin
+        transform_origin = self.transform_origin
         
         if weights is None:
             weights = torch.ones_like(vertices[..., :1])
@@ -416,8 +376,8 @@ class NeuralBlendshapes(nn.Module):
 
         B, V, _ = vertices.shape
         rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle[:, None].repeat(1, V, 1) * weights, convention = 'XYZ')
-        local_coordinate_vertices = (vertices - transform_origin[None, None,]) * scale[:, None]
-        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :] + transform_origin[None, None] 
+        local_coordinate_vertices = (vertices) * scale[:, None]
+        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :]
         return deformed_mesh
 
     def save(self, path):

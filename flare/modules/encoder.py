@@ -22,30 +22,48 @@ class DECAEncoder(nn.Module):
         self.blendshapes_prefix = nn.Sequential(
             nn.Linear(53, 128),
             nn.ReLU(),
-            nn.Linear(128, 128)
+            nn.Linear(128, 128),
+            nn.ReLU(),
         )
 
-        self.encoder_tail = nn.Sequential(
+        self.bshapes_tail = nn.Sequential(
             nn.Linear(feature_size + 128, 1024),
             nn.ReLU(),
             nn.Linear(1024, 512),
             nn.ReLU(),
-            nn.Linear(512, 53 + 3)
+            nn.Linear(512, 53)
+        )
+
+        self.rotation_prefix = nn.Sequential(
+            nn.Linear(3, 16),
+            nn.ReLU(),
+        )
+
+        self.rotation_tail = nn.Sequential(
+            nn.Linear(feature_size + 16, 128),
+            nn.ReLU(),
+            nn.Linear(128, 3)
         )
 
         self.translation_tail = nn.Sequential(
-            nn.Linear(53 + 3 + 3 + 204, 512),
+            nn.Linear(3 + 3 + 3 + 3, 64),
             nn.ReLU(),
-            nn.Linear(512, 512),
+            nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(512, 3)
+            nn.Linear(64, 3)
         )
             
     
         self.last_op = last_op
 
         # Initialize weights and biases for expression deformer
-        for layer in self.encoder_tail:
+        for layer in self.bshapes_tail:
+            if isinstance(layer, nn.Linear):
+                # Initialize weight and bias based on ForwardDeformer strategy
+                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
+                torch.nn.init.xavier_uniform_(layer.weight)
+
+        for layer in self.rotation_tail:
             if isinstance(layer, nn.Linear):
                 # Initialize weight and bias based on ForwardDeformer strategy
                 torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
@@ -69,25 +87,30 @@ class DECAEncoder(nn.Module):
 
         # Register the hook on the encoder to ensure it stays frozen
         self.encoder.apply(lambda m: m.register_forward_pre_hook(freeze_gradients_hook))
+
+        self.sigmoid = nn.Sigmoid()
     
     def train(self, mode=True):
         super().train(mode)
         self.encoder.eval()
 
 
-    def forward(self, inputs, bshapes, rotation, translation, landmarks):
+    def forward(self, inputs, bshapes, rotation, translation, landmarks, flame_cam_t):
         with torch.no_grad():
             encoder_features = self.encoder(inputs)
-            estimated_bshapes = bshapes.clamp(0.05, 0.95)
-            estimated_bshapes = torch.log(estimated_bshapes / (1 - estimated_bshapes))
 
-        encoder_additional_features = self.blendshapes_prefix(bshapes)
-        encoder_out = self.encoder_tail(torch.cat([encoder_features, encoder_additional_features], dim=-1))
-        encoder_out[:, :53] = encoder_out[:, :53] + estimated_bshapes
-
-        translation_out = self.translation_tail(torch.cat([bshapes, rotation, translation, landmarks], dim=-1))
+        bshapes_additional_features = self.blendshapes_prefix(bshapes)
+        rotation_additional_features = self.rotation_prefix(rotation)
         
-        out = torch.cat([encoder_out, translation_out], dim=-1)
+        bshapes_out = self.bshapes_tail(torch.cat([encoder_features, bshapes_additional_features], dim=-1))
+        rotation_out = self.rotation_tail(torch.cat([encoder_features, rotation_additional_features], dim=-1))
+
+        bshapes_out = torch.pow(bshapes, torch.exp(bshapes_out))
+        rotation_out = rotation_out
+
+        translation_out = self.translation_tail(torch.cat([rotation, rotation_out, translation, flame_cam_t], dim=-1))
+        
+        out = torch.cat([bshapes_out, rotation_out, translation_out], dim=-1)
         if self.last_op:
             out = self.last_op(out)
         return out
@@ -108,9 +131,9 @@ class ResnetEncoder(nn.Module):
         self.tanh = nn.Tanh()
         self.elu = nn.ELU()
 
-        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.22, -0.35]))
         self.translation = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
 
+        # self.identity_weights = torch.zeros(self.ict_facekit.num_identity, device='cuda')
         self.register_buffer('identity_weights', torch.zeros(self.ict_facekit.num_identity, device='cuda'))
         
         self.scale = torch.nn.Parameter(torch.zeros(1))
@@ -168,13 +191,13 @@ class ResnetEncoder(nn.Module):
             ts[..., -1] -= 3
   
 
-        features = self.encoder(img, mp_bshapes, mp_rotation, mp_translation, detected_landmarks)
-        blendshapes = self.sigmoid(features[:, :53])
+        flame_cam_t = self.flame_cam_t(ts)
+        features = self.encoder(img, mp_bshapes, mp_rotation, mp_translation, detected_landmarks, flame_cam_t)
+        blendshapes = features[:, :53]
         rotation = features[:, 53:56] 
         translation = features[:, 56:59]
 
-        flame_cam_t = self.flame_cam_t(ts)
-        translation = flame_cam_t
+        translation = flame_cam_t + translation
         # translation = translation + flame_cam_t
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
