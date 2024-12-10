@@ -113,4 +113,9 @@ def config_parser():
 
     parser.add_argument('--compute_mode', action='store_true', help="skip eval")
     parser.add_argument('--recompute_mode', action='store_true', help="skip eval")
+
+    # str - model_path , shader_path
+    parser.add_argument('--model_path', type=str, default=None, help="Path to the input data")
+    parser.add_argument('--shader_path', type=str, default=None, help="Path to the input data")
+
     return parser
