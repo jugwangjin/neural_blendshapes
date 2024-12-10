@@ -367,46 +367,16 @@ class DatasetLoader(Dataset):
 
         # ignore frames where no face is detected, just re-route to the next frame
         offset = 1
-        while mp_landmark is None:
-            sub_idx = idx - offset
-            if sub_idx >= 0:
-                json_dict_ = self.all_img_path[sub_idx]
-
-                img_path_ = self.base_dir / json_dict_["dir"] / Path(json_dict_["file_path"] + ".png")
-                
-                mp_image = Image.open(img_path_)
-                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.asarray(mp_image))
-                face_landmarker_result = self.mediapipe.detect(mp_image)
-                mp_landmark, mp_blendshape, mp_transform_matrix = parse_mediapipe_output(face_landmarker_result)
-
-                if mp_landmark is not None:
-                    break
-            # sub_idx = idx + offset
-            # if sub_idx < len(self.all_img_path):
-            #     json_dict_ = self.all_img_path[sub_idx]
-
-            #     img_path_ = self.base_dir / json_dict_["dir"] / Path(json_dict_["file_path"] + ".png")
-                
-            #     mp_image = Image.open(img_path_)
-            #     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.asarray(mp_image))
-            #     face_landmarker_result = self.mediapipe.detect(mp_image)
-            #     mp_landmark, mp_blendshape, mp_transform_matrix = parse_mediapipe_output(face_landmarker_result)
-
-            #     if mp_landmark is not None:
-            #         break
+        if mp_landmark is None:
+            if self.all_img_path[idx-1]["dir"] == json_dict["dir"]:
+                return self._parse_frame_single(idx-1)
+            elif self.all_img_path[idx+1]["dir"] == json_dict["dir"]:
+                return self._parse_frame_single((idx+1) % self.len_img)
             
-            offset += 1
+            else:
+                raise ValueError('No face detected')
 
-        
 
-            # print(flip)
-            # # save the mp_image, to debug folder 
-            # mp_image = Image.open(img_path)
-            # mp_image.save(f'./debug/no_face/{json_dict["dir"]}_{img_path.stem}_mp.png')
-            # if flip:
-            #     mp_image = mp_image.transpose(Image.FLIP_LEFT_RIGHT)
-            #     mp_image.save(f'./debug/no_face/{json_dict["dir"]}_{img_path.stem}_mp_flip.png')
-            # raise ValueError('No face detected')
         
         # ================ semantics =======================
         semantic_parent = img_path.parent.parent / "semantic"

@@ -394,7 +394,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         params += list(_adaptive.parameters()) ## need to train it
 
 
-    optimizer_shader = torch.optim.Adam(params, lr=args.lr_shader)
+    optimizer_shader = torch.optim.Adam(params, lr=args.lr_shader, amsgrad=True)
 
     # ==============================================================================================
     # Loss Functions
@@ -471,7 +471,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
-                                                    ],
+                                                    ], amsgrad=True,
                                                     )
 
     stage_iterations = args.stage_iterations
@@ -506,6 +506,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     warmup_scheduler = None
     num_warmup_steps = 0
+    args.finetune_color = False
 
     iteration = 0
     for epoch in progress_bar:
@@ -549,7 +550,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes = torch.optim.Adam([
                                                 {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                 {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
-                                                ],
+                                                ], amsgrad=True,
                                                 )
                 loss_weights["flame_regularization"] = loss_weights["flame_regularization"] * 0.5
                 # Create a warm-up scheduler
@@ -582,10 +583,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     _adaptive = AdaptiveLossFunction(num_dims=4, float_dtype=np.float32, device=device)
                     params += list(_adaptive.parameters()) ## need to train it
 
-                optimizer_shader = torch.optim.Adam(params, lr=args.lr_shader)
+                optimizer_shader = torch.optim.Adam(params, lr=args.lr_shader, amsgrad=True)
 
                 optimizer_neural_blendshapes = None
                 neural_blendshapes.eval()
+
+                args.finetune_color = True
 
             progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}, Stage {stage}')
             losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
@@ -969,3 +972,4 @@ if __name__ == '__main__':
             print('Error: Unexpected error occurred. Aborting the training.')
             raise e
 
+    

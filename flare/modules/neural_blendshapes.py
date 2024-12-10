@@ -117,11 +117,14 @@ class NeuralBlendshapes(nn.Module):
 
         self.ict_facekit = ict_facekit
         self.tight_face_index = 6705
-        self.face_index = 9409     
+        self.face_index = 9409 
+        self.mouth_socket_index = 11248    
         self.head_index = 14062
 
         # self.socket_index = 11248
         self.socket_index = 14062
+
+        
 
         vertices = ict_facekit.neutral_mesh_canonical[0].cpu().data.numpy()
         faces = ict_facekit.faces.cpu().data.numpy()
@@ -313,6 +316,8 @@ class NeuralBlendshapes(nn.Module):
         feat = torch.cat([feat, torch.ones_like(feat[:, :1])], dim=1)
 
         expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
+
+        expression_mesh_delta[:, self.face_index:self.mouth_socket_index, :53] = 0
 
         expression_mesh = ict_mesh_w_temp + expression_mesh_delta
 
