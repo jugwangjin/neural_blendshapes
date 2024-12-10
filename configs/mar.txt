@@ -31,7 +31,7 @@ weight_feature_regularization = 1e-5
 
 weight_geometric_regularization = 1e-6
 weight_normal = 0.25
-weight_normal_laplacian = 1
+weight_normal_laplacian = 1e-2
 weight_landmark = 1
 weight_closure = 1
 

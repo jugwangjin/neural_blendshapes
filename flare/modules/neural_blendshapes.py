@@ -324,8 +324,6 @@ class NeuralBlendshapes(nn.Module):
 
         expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
 
-        expression_mesh_delta[:, self.face_index:self.mouth_socket_index, :53] = 0
-
         expression_mesh = ict_mesh_w_temp + expression_mesh_delta
 
         expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)

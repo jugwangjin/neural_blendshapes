@@ -656,8 +656,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 perceptual_loss = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
 
                 normal_laplacian_loss = normal_loss(gbuffers, views_subset, gbuffers['segmentation'], device) 
-                inverted_normal_loss = inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
-                eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
+                # inverted_normal_loss = inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
+                # eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
 
                 # losses['mask'] += mask_loss_segmentation
                 losses['mask'] += mask_loss_segmentation + segmentation_loss 
@@ -677,7 +677,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 losses['white_lgt_regularization'] = white_light(cbuffers)
                 losses['roughness_regularization'] = roughness_regularization(cbuffers["roughness"], views_subset["skin_mask"], views_subset["mask"], r_mean=args.r_mean)
                 losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
-                losses['normal_laplacian'] = normal_laplacian_loss + inverted_normal_loss + eyeball_normal_loss 
+                losses['normal_laplacian'] = normal_laplacian_loss
+                # losses['normal_laplacian'] = normal_laplacian_loss + inverted_normal_loss + eyeball_normal_loss 
 
             if stage < 3:
                 '''
