@@ -411,7 +411,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "feature_regularization": args.weight_feature_regularization,
         "geometric_regularization": args.weight_geometric_regularization,
         "normal_laplacian": args.weight_normal_laplacian,
-        # "linearity_regularization": args.weight_linearity_regularization,
+        "linearity_regularization": args.weight_linearity_regularization,
         "flame_regularization": args.weight_flame_regularization,
         "white_lgt_regularization": args.weight_white_lgt_regularization,
         "roughness_regularization": args.weight_roughness_regularization,
@@ -542,6 +542,29 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             optimizer updates
             '''
 
+            if iteration == milestones[0]: # on stage 2 -> update the optimizer to only expression 
+                print("\nUpdating the optimizer to only expression\n")
+                # now only update the expression parameters
+                optimizer_neural_blendshapes.zero_grad(set_to_none=True)
+                optimizer_neural_blendshapes = None
+                optimizer_neural_blendshapes = torch.optim.Adam([
+                                                    {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
+                                                    ], amsgrad=True,
+                                                )
+                # Create a warm-up scheduler
+                from torch.optim.lr_scheduler import LinearLR
+                num_warmup_steps = 100  # Adjust this value based on your needs
+                warmup_scheduler = LinearLR(
+                    optimizer_neural_blendshapes,
+                    start_factor=0.01,  # Start with 10% of the base learning rate
+                    end_factor=1.0,    # End with 100% of the base learning rate
+                    total_iters=num_warmup_steps
+                )
+
+
             if iteration == milestones[1]: # on stage 2 -> update the optimizer to only expression 
                 print("\nUpdating the optimizer to only expression\n")
                 # now only update the expression parameters
@@ -552,7 +575,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                 {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                 ], amsgrad=True,
                                                 )
-                loss_weights["flame_regularization"] = loss_weights["flame_regularization"] * 0.5
+                loss_weights["flame_regularization"] = loss_weights["flame_regularization"] * 0.2
                 # Create a warm-up scheduler
                 from torch.optim.lr_scheduler import LinearLR
                 num_warmup_steps = 100  # Adjust this value based on your needs
@@ -616,7 +639,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             '''
             2D signal losses
             '''
-            if stage > 0:
+            if iteration > args.only_flame_iterations:
 
                 landmark_loss, closure_loss = landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
 
@@ -664,40 +687,20 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 template_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, ict_facekit.neutral_mesh_canonical[0], return_dict['template_mesh'], filtered_lap, head_index =ict_canonical_mesh.vertices.shape[0]) 
                 expression_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, return_dict['ict_mesh_w_temp'], return_dict['expression_mesh'], filtered_lap, head_index =ict_canonical_mesh.vertices.shape[0]) 
 
-                # normal regularization
-                # template_mesh_normal_regularization = normal_reg_loss(mesh, ict_canonical_mesh.with_vertices(ict_facekit.neutral_mesh_canonical[0]), ict_canonical_mesh.with_vertices(return_dict['template_mesh']), head_index =ict_canonical_mesh.vertices.shape[0])
-                # expression_mesh_normal_regularization = torch.tensor(0., device=device)
-                # for i in range(return_dict['expression_mesh'].shape[0]):
-                    # expression_mesh_normal_regularization += normal_reg_loss(mesh, ict_canonical_mesh.with_vertices(return_dict['expression_mesh'][i]), ict_canonical_mesh.with_vertices(return_dict['ict_mesh_w_temp'][i]), head_index =ict_canonical_mesh.vertices.shape[0])  
-                # expression_mesh_normal_regularization /= return_dict['expression_mesh'].shape[0] 
-
                 # more regularizations
                 feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
                                                                     neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1, mult=1e-2)
 
-                # random_blendshapes = torch.rand(views_subset['mp_blendshape'].shape[0], 53, device=device)
-                # expression_delta_random = neural_blendshapes.get_expression_delta(blendshapes=random_blendshapes)
+                expression_delta_random = neural_blendshapes.get_expression_delta()
 
-                # l1_regularization = expression_delta_random[53:].pow(2).mean()
+                l1_regularization = expression_delta_random[53:].abs().mean() 
 
                 template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
-                expression_geometric_regularization = (return_dict['ict_mesh_w_temp'] - return_dict['expression_mesh']).pow(2).mean() 
-                
 
                 losses['feature_regularization'] = feature_regularization
                 losses['laplacian_regularization'] = template_mesh_laplacian_regularization + expression_mesh_laplacian_regularization 
-                # losses['normal_regularization'] = template_mesh_normal_regularization + expression_mesh_normal_regularization
-                losses['geometric_regularization'] = template_geometric_regularization + expression_geometric_regularization 
-                # losses['linearity_regularization'] = l1_regularization
-
-                # adding temporal regularization, which have save weight to feature regularization
-                # objective: get items from dataset - for 'idx', randomly add 1 or -1 to the index, clamp it to 0 and len(dataset). 
-                # cur_idx = views_subset['idx']
-                # next_idx = torch.clamp(cur_idx + 1, 0, len(dataset_train) - 1)
-                # next_idx_views = dataset_train.collate([dataset_train[id_] for id_ in next_idx])
-                # next_idx_features = neural_blendshapes.encoder(next_idx_views)
-
-                # losses['temporal_regularization'] = (next_idx_features - return_dict['features']).pow(2).mean() * 1e-2
+                losses['geometric_regularization'] = template_geometric_regularization
+                losses['linearity_regularization'] = l1_regularization
 
             '''
             FLAME regularization
