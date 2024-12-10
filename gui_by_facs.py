@@ -129,6 +129,8 @@ if __name__ == "__main__":
     model.eval()
     shader.eval()
 
+    # get fixed returns for neural_blendshapes
+    precomputed_blendshapes = model.precompute_networks()
     # Create the mesh once
 
     mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
@@ -185,7 +187,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             # Measure time for model forward pass
             start_time = time.time()
-            return_dict = model(features=features)
+            return_dict = model.deform_with_precomputed(features, precomputed_blendshapes)
             deformed_vertices = return_dict['expression_mesh_posed']  # Adjust the key if necessary
             model_time = time.time() - start_time
 
@@ -208,10 +210,6 @@ if __name__ == "__main__":
             start_time = time.time()
             rgb_pred, cbuffers, _ = shader.shade(gbuffers, views_sample, mesh, False, lgt)
             shader_time = time.time() - start_time
-
-            print(deformed_vertices.amin(), deformed_vertices.amax())
-
-            print(rgb_pred.amin(), rgb_pred.amax())
 
             # Convert the rendered image to a numpy array
             rendered_image = rgb_pred.squeeze(0).cpu().numpy()  # Shape: [H, W, 3]
