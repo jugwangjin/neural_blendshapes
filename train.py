@@ -68,7 +68,7 @@ import time
 import gc
 
 import matplotlib.pyplot as plt
-# from flare.modules.optimizer import torch.optim.Adam
+# from flare.modules.optimizer import torch.optim.AdamW
 import sys
 
 
@@ -393,7 +393,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         params += list(_adaptive.parameters()) ## need to train it
 
 
-    optimizer_shader = torch.optim.Adam(params, lr=args.lr_shader, weight_decay=1e-4)
+    optimizer_shader = torch.optim.AdamW(params, lr=args.lr_shader, weight_decay=1e-4)
 
     # ==============================================================================================
     # Loss Functions
@@ -464,7 +464,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     use_jaw=True
 
 
-    optimizer_neural_blendshapes = torch.optim.Adam([
+    optimizer_neural_blendshapes = torch.optim.AdamW([
                                                     {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer},
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
@@ -537,32 +537,32 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             else:
                 deformed_vertices_key = 'expression_mesh'
 
-            if iteration == milestones[2]:
+            if iteration == milestones[3]:
                 loss_weights["flame_regularization"] = loss_weights["flame_regularization"] * 0.1
 
 
             '''
             optimizer updates
             '''
-            if iteration == milestones[1]: # on stage 2 -> update the optimizer to only template 
-                print("\nUpdating the optimizer to only template\n")
-                # now only update the expression parameters
-                optimizer_neural_blendshapes.zero_grad(set_to_none=True)
-                optimizer_neural_blendshapes = None
-                optimizer_neural_blendshapes = torch.optim.Adam([
-                                                {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
-                                                {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
-                                                {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
-                                                {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
-                                                ],
-                                                )
+            # if iteration == milestones[1]: # on stage 2 -> update the optimizer to only template 
+            #     print("\nUpdating the optimizer to only template\n")
+            #     # now only update the expression parameters
+            #     optimizer_neural_blendshapes.zero_grad(set_to_none=True)
+            #     optimizer_neural_blendshapes = None
+            #     optimizer_neural_blendshapes = torch.optim.AdamW([
+            #                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
+            #                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
+            #                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
+            #                                     {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
+            #                                     ],
+            #                                     )
 
             if iteration == milestones[2]: # on stage 3 -> update the optimizer to only expression 
                 print("\nUpdating the optimizer to only expression\n")
                 # now only update the expression parameters
                 optimizer_neural_blendshapes.zero_grad(set_to_none=True)
                 optimizer_neural_blendshapes = None
-                optimizer_neural_blendshapes = torch.optim.Adam([
+                optimizer_neural_blendshapes = torch.optim.AdamW([
                                                 {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                 {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                 # {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
@@ -588,7 +588,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     _adaptive = AdaptiveLossFunction(num_dims=4, float_dtype=np.float32, device=device)
                     params += list(_adaptive.parameters()) ## need to train it
 
-                optimizer_shader = torch.optim.Adam(params, lr=args.lr_shader, weight_decay=1e-4)
+                optimizer_shader = torch.optim.AdamW(params, lr=args.lr_shader, weight_decay=1e-4)
 
                 optimizer_neural_blendshapes = None
                 neural_blendshapes.eval()
@@ -640,7 +640,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 inverted_normal_loss = inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
                 eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
 
-                losses['mask'] += mask_loss_segmentation + segmentation_loss * 1e1
+                losses['mask'] += mask_loss_segmentation + segmentation_loss 
                 losses['landmark'] += landmark_loss 
                 # losses['closure'] += closure_loss
 
@@ -652,7 +652,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
 
                 ## ======= regularization color ========
-                losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration)
+                if args.weight_albedo_regularization > 0:
+                    losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration)
                 losses['white_lgt_regularization'] = white_light(cbuffers)
                 losses['roughness_regularization'] = roughness_regularization(cbuffers["roughness"], views_subset["skin_mask"], views_subset["mask"], r_mean=args.r_mean)
                 losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
@@ -675,7 +676,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 # more regularizations
                 feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1, mult=1e1)
+                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1, mult=1e-3)
 
                 random_blendshapes = torch.rand(views_subset['mp_blendshape'].shape[0], 53, device=device)
                 expression_delta_random = neural_blendshapes.get_expression_delta(blendshapes=random_blendshapes)

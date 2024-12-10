@@ -179,9 +179,6 @@ class NeuralBlendshapes(nn.Module):
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(512, 512),
-            # nn.LayerNorm(512),
-            nn.Softplus(beta=100),
             nn.Linear(512, 54*3, bias=False)
         )
         self.template_deformer = MLPTemplate(3)
@@ -195,7 +192,6 @@ class NeuralBlendshapes(nn.Module):
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
-        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.2, -0.28]))
 
         initialize_weights(self.pose_weight, gain=0.01)
         self.pose_weight[-2].weight.data.zero_()
@@ -367,18 +363,37 @@ class NeuralBlendshapes(nn.Module):
         euler_angle = features[..., 53:56]
         translation = features[..., 56:59]
         scale = features[..., 59:60]
-        transform_origin = self.transform_origin
+        transform_origin = self.encoder.transform_origin
+        # translation = self.encoder.translation
         
-        if weights is None:
-            weights = torch.ones_like(vertices[..., :1])
 
         # transform_origin = torch.cat([torch.zeros(1, device=vertices.device), self.encoder.transform_origin[1:]], dim=0)
 
         B, V, _ = vertices.shape
-        rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle[:, None].repeat(1, V, 1) * weights, convention = 'XYZ')
-        local_coordinate_vertices = (vertices) * scale[:, None]
-        deformed_mesh = torch.einsum('bvd, bvdj -> bvj', local_coordinate_vertices, rotation_matrix) + translation[:, None, :]
-        return deformed_mesh
+                # Convert Euler angles to rotation matrices
+        rotation_matrix = pt3d.euler_angles_to_matrix(euler_angle, convention='XYZ')  # Shape: (B, 3, 3)
+
+        # Apply scale
+        scaled_vertices = vertices * scale[:, None]
+
+        # Translate vertices to the rotation origin
+        centered_vertices = scaled_vertices - transform_origin[None, None, :]
+
+        # Apply rotation
+        rotated_vertices = torch.einsum('bij,bvj->bvi', rotation_matrix, centered_vertices)
+
+        # Translate back from the rotation origin
+        deformed_vertices = rotated_vertices + transform_origin[None, None, :]
+
+        # Apply global translation
+        deformed_vertices = deformed_vertices + translation[:, None, :]
+
+        # Apply pose weights if provided
+        if weights is not None:
+            weights = weights.view(1, V, 1)
+            deformed_vertices = deformed_vertices * weights + scaled_vertices * (1 - weights)
+
+        return deformed_vertices
 
     def save(self, path):
         data = {

@@ -49,23 +49,7 @@ def normal_loss(gbuffers, views_subset, gbuffer_mask, device):
     gt_normal_laplacian = torch.nn.functional.conv2d(gt_normal, laplacian_kernel, padding=1)
     mask = ((torch.sum(views_subset["skin_mask"][..., 1:2], dim=-1) * views_subset["skin_mask"][..., -1]) > 0).float() # shape of B H W
     
-    # import cv2
-    # # save mask to debug
-    # mask_ = mask.cpu().data.numpy()
-    # mask_ = mask_ * 255
-    # mask_ = mask_.astype("uint8")
-    # for i in range(mask_.shape[0]):
-    #     cv2.imwrite(f"debug/normal_laplacian_mask_{i}.png", mask_[i])
-
-
     mask = mask[:, None] * gbuffer_mask.permute(0,3,1,2)
-
-    # # save mask to debug
-    # mask_ = mask.cpu().data.numpy()
-    # mask_ = mask_ * 255
-    # mask_ = mask_.astype("uint8")
-    # for i in range(mask_.shape[0]):
-    #     cv2.imwrite(f"debug/normal_laplacian_mask_gbuffer_{i}.png", mask_[i, 0])
 
     num_valid_pixel = torch.sum(mask)
     if num_valid_pixel < 1:
@@ -81,27 +65,7 @@ def normal_loss(gbuffers, views_subset, gbuffer_mask, device):
     estimated_normal = estimated_normal.permute(0, 3, 1, 2) # shape of B, 3, H, W
     estimated_normal_laplacian = torch.nn.functional.conv2d(estimated_normal, laplacian_kernel, padding=1)
 
-    # # visualize the estimated_normal, gt_normal, save to debug
-    # estimated_normal_ = estimated_normal * 0.5 + 0.5
-    # estimated_normal_ = estimated_normal_.permute(0, 2, 3, 1) # B, H, W, 3
-    # estimated_normal_ = estimated_normal_.cpu().data.numpy()
-    # estimated_normal_ = estimated_normal_ * 255
-    # estimated_normal_ = estimated_normal_.astype("uint8")
-    # for i in range(estimated_normal_.shape[0]):
-    #     cv2.imwrite(f"debug/normal_{i}_rgb.png", estimated_normal_[i])
-
-    # gt_normal_ = gt_normal / 2 + 0.5
-    # gt_normal_ = gt_normal_.permute(0, 2, 3, 1) # B, H, W, 3
-    # gt_normal_ = gt_normal_.cpu().data.numpy()
-    # gt_normal_ = gt_normal_ * 255
-    # gt_normal_ = gt_normal_.astype("uint8")
-    # for i in range(gt_normal_.shape[0]):
-    #     cv2.imwrite(f"debug/gt_normal_{i}_rgb.png", gt_normal_[i])
-
-    # exit()
-
     normal_laplacian_loss = torch.mean(torch.abs(gt_normal_laplacian - estimated_normal_laplacian) * mask)
-    # normal_laplacian_loss = torch.nn.functional.huber_loss(gt_normal_laplacian * mask, estimated_normal_laplacian * mask, reduction='mean', delta=0.1)
 
     return normal_laplacian_loss 
 

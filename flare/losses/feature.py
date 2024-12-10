@@ -14,15 +14,16 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
 
     mode = mode.to(facs.device)
 
-    facs_reg_weights = (gt_facs).clamp(0, 1)  # min 0, max 1.  for 0 -> high weight, for 1 -> low weight. exponential decay
+    # facs_reg_weights = (gt_facs).clamp(0, 1)  # min 0, max 1.  for 0 -> high weight, for 1 -> low weight. exponential decay
     
-    facs_reg_weights = torch.exp(- 5 * facs_reg_weights)
+    # facs_reg_weights = torch.exp(- 5 * facs_reg_weights)
     target_facs = (gt_facs).clamp(min=0, max=1)
     
     
-    facs_reg = ((facs - target_facs).pow(2) * facs_reg_weights)
-    facs_reg[:, eyeball_indices] *= 1e1
-    facs_reg = facs_reg.mean() * mult
+    facs_reg = ((facs - target_facs).abs())
+    # facs_reg = ((facs - target_facs).pow(2) * facs_reg_weights)
+    facs_reg[:, eyeball_indices] *= 1e2
+    facs_reg = facs_reg.mean() * mult 
 
     transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
     scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
@@ -34,7 +35,7 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
 
     rotation_reg = (torch.pow(rotation - mp_rotation, 2).mean()) * rot_mult
 
-    loss =  facs_reg + rotation_reg
+    loss =  facs_reg + rotation_reg + after_translation.pow(2).mean()
     
     return loss
 

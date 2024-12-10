@@ -98,35 +98,27 @@ def mask_loss_function(masks, gbuffers, epsilon=1e-8, loss_function = torch.nn.M
         loss_function (Callable): Function for comparing the masks or generally a set of pixels
     """
     
-    # intersection = (masks * gbuffers).sum(dim=(1, 2, 3))
-    # dice_union = masks.sum(dim=(1, 2, 3)) + gbuffers.sum(dim=(1, 2, 3)) + epsilon
+    intersection = (masks * gbuffers).sum(dim=(1, 2, 3))
+    dice_union = masks.sum(dim=(1, 2, 3)) + gbuffers.sum(dim=(1, 2, 3)) + epsilon
 
     # Compute Dice-based loss (aligned with L_latent)
-    # iou_loss = 1 - (2 * intersection / dice_union).mean() 
+    iou_loss = 1 - (2 * intersection / dice_union).mean() 
         
     mse_loss = (masks - gbuffers).pow(2).mean()
 
-    return mse_loss
-    # return (iou_loss * 0.5 + mse_loss * 0.5)
-
-    return (masks - gbuffers).pow(2).mean()
-    loss = []
-    for gt_mask, gbuffer_mask in zip(masks, gbuffers):
-        loss.append(loss_function(gt_mask, gbuffer_mask))
-    return torch.cat(loss)
+    return mse_loss + iou_loss
 
 
 def segmentation_loss_function(masks, gbuffers, epsilon=1e-8):
-    # intersection = (masks * gbuffers).sum(dim=(1, 2, 3))
-    # dice_union = masks.sum(dim=(1, 2, 3)) + gbuffers.sum(dim=(1, 2, 3)) + epsilon
+    intersection = (masks * gbuffers).sum(dim=(1, 2, 3))
+    dice_union = masks.sum(dim=(1, 2, 3)) + gbuffers.sum(dim=(1, 2, 3)) + epsilon
 
     # Compute Dice-based loss (aligned with L_latent)
-    # iou_loss = 1 - (2 * intersection / dice_union).mean()
+    iou_loss = 1 - (2 * intersection / dice_union).mean() 
         
     mse_loss = (masks - gbuffers).pow(2).mean()
 
-    # return (iou_loss * 0.5 + mse_loss * 0.5)
-    return mse_loss
+    return mse_loss + iou_loss
 
 def shading_loss_batch(pred_color_masked, views, batch_size):
     """ Compute the image loss term as the mean difference between the original images and the rendered images from a shader.
