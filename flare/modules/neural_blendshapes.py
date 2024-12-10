@@ -154,7 +154,6 @@ class NeuralBlendshapes(nn.Module):
         }
 
         self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to('cuda')
-        self.fourier_feature_transform2 = tcnn.Encoding(3, enc_cfg).to('cuda')
         self.inp_size = self.fourier_feature_transform.n_output_dims
 
 
@@ -170,7 +169,7 @@ class NeuralBlendshapes(nn.Module):
 
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(3, 512),
+            nn.Linear(self.inp_size, 512),
             # nn.LayerNorm(512),
             nn.Softplus(beta=100),
             nn.Linear(512, 512),
@@ -219,21 +218,8 @@ class NeuralBlendshapes(nn.Module):
             return res
 
 
-    def encode_position(self, coords, sec=False):
+    def encode_position(self, coords):
         template = self.ict_facekit.canonical[0] # shape of V, 3
-
-        # if len(coords.shape) == 2:
-        #     coords = coords[None]
-
-        # b, v, _ = coords.shape
-        # coords = coords.reshape(b*v, -1)
-        # aabb_coords = (coords - self.aabb[0][None, ...]) / (self.aabb[1][None, ...] - self.aabb[0][None, ...])
-
-        # aabb_coords = aabb_coords.reshape(b, v, -1)
-
-        # if len(coords.shape) == 2:
-        #     aabb_coords = aabb_coords[0]
-        # return aabb_coords
 
         org_coords = coords 
 
@@ -248,22 +234,14 @@ class NeuralBlendshapes(nn.Module):
         if self.aabb is not None:
             coords = (coords - self.aabb[0][None, ...]) / (self.aabb[1][None, ...] - self.aabb[0][None, ...])
             coords = torch.clamp(coords, min=0, max=1)
+            coords = coords * 0.95 + 0.025
         else:
             aabb_min = torch.min(template, dim=0)[0][None] * 1.2
             aabb_max = torch.max(template, dim=0)[0][None] * 1.2
 
             coords = (coords - aabb_min) / (aabb_max - aabb_min)
 
-        # coords = coords.reshape(b, v, -1)
-        # if unsqueezed:
-        #     coords = coords[0]
-        # return coords
-
-
-        if not sec:
-            encoded_coords = self.fourier_feature_transform(coords)
-        else:
-            encoded_coords = self.fourier_feature_transform2(coords)
+        encoded_coords = self.fourier_feature_transform(coords)
 
         encoded_coords = encoded_coords.reshape(b, v, -1)
         if unsqueezed:
@@ -303,7 +281,7 @@ class NeuralBlendshapes(nn.Module):
 
         encoded_points = template
         # encoded_points = torch.cat([self.encode_position(template)], dim=-1)
-        encoded_points2 = template
+        encoded_points2 = self.encode_position(template)
         # encoded_points2 = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
         template_mesh_u_delta = self.template_deformer(encoded_points)
@@ -352,7 +330,7 @@ class NeuralBlendshapes(nn.Module):
 
         template = self.ict_facekit.canonical[0]
         uv_coords = self.ict_facekit.uv_neutral_mesh[0]
-        encoded_points = template
+        encoded_points = self.encode_position(template)
         # encoded_points = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
         expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template.shape[0], 54, 3).permute(1, 0, 2)

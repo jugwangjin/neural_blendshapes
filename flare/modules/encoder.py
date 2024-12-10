@@ -38,19 +38,19 @@ class DECAEncoder(nn.Module):
         )
 
         self.rotation_tail = nn.Sequential(
-            nn.Linear(feature_size + 8, 128),
+            nn.Linear(feature_size, 64),
             nn.ReLU(),
-            nn.Linear(128, 3)
+            nn.Linear(64, 3)
         )
 
         self.translation_tail = nn.Sequential(
-            nn.Linear(3 + 3, 32),
+            nn.Linear(3, 16),
             nn.ReLU(),
-            nn.Linear(32, 32),
+            nn.Linear(16, 16),
             nn.ReLU(),
-            nn.Linear(32, 32),
+            nn.Linear(16, 16),
             nn.ReLU(),
-            nn.Linear(32, 3)
+            nn.Linear(16, 3)
         )
             
     
@@ -103,12 +103,12 @@ class DECAEncoder(nn.Module):
         rotation_additional_features = self.rotation_prefix(rotation)
         
         bshapes_out = self.bshapes_tail(torch.cat([encoder_features, bshapes_additional_features], dim=-1))
-        rotation_out = self.rotation_tail(torch.cat([encoder_features, rotation_additional_features], dim=-1))
+        rotation_out = self.rotation_tail(torch.cat([encoder_features], dim=-1))
 
         bshapes_out = torch.pow(bshapes, torch.exp(bshapes_out))
         rotation_out = rotation_out
 
-        translation_out = self.translation_tail(torch.cat([rotation_out, translation], dim=-1))
+        translation_out = self.translation_tail(torch.cat([rotation_out], dim=-1))
         
         out = torch.cat([bshapes_out, rotation_out, translation_out], dim=-1)
         if self.last_op:

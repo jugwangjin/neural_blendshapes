@@ -35,7 +35,7 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
 
     rotation_reg = (torch.pow(rotation - mp_rotation, 2).mean()) * rot_mult
 
-    loss =  facs_reg + rotation_reg + after_translation.pow(2).mean()
+    loss =  facs_reg + rotation_reg
     
     return loss
 

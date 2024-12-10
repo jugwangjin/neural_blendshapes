@@ -213,6 +213,11 @@ def visualize_training(shaded_image, cbuffers, debug_gbuffer, debug_view, images
     color_list += [list_torchgrid(normal_image, grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
     color_list += [list_torchgrid(shading.to(device), grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
 
+    if 'canonical_position' in debug_gbuffer:
+        canonical_position = debug_gbuffer['canonical_position']
+        canonical_position = (canonical_position + 1) / 2
+        canonical_position = canonical_position * gbuffer_mask
+        color_list += [list_torchgrid(convert_uint(canonical_position), grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
 
     if save_name is None:
         save_name = f'grid_{iteration}.png'
@@ -260,6 +265,10 @@ def visualize_training_no_lm(shaded_image, cbuffers, debug_gbuffer, debug_view, 
     #     add_buffer(cbuffers, gbuffer_mask, color_list, convert_uint) ## visualize roughness and specular intensity
     color_list += [list_torchgrid(normal_image, grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
     color_list += [list_torchgrid(shading.to(device), grid_path, save_name=None, nrow=1, save=False, scale_factor=255).unsqueeze(0)]
+
+    # if there is canonical_position in debug_gbuffer, visualize it
+    # assume that the canonical position is in [-1, 1]
+
     if save_name is None:
         save_name = f'grid_{iteration}.png'
     else:
