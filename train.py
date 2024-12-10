@@ -468,9 +468,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     optimizer_neural_blendshapes = torch.optim.Adam([
                                                     {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer},
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
-                                                {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                     ],
                                                     )
 
@@ -969,4 +969,3 @@ if __name__ == '__main__':
             print('Error: Unexpected error occurred. Aborting the training.')
             raise e
 
-    

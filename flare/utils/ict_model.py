@@ -84,26 +84,6 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.right_eyeball_blendshape_indices = [self.expression_names.tolist().index('eyeLookUp_R'), self.expression_names.tolist().index('eyeLookDown_R'),
                                                 self.expression_names.tolist().index('eyeLookIn_R'), self.expression_names.tolist().index('eyeLookOut_R'), ]
 
-        # get weighted sum of expression shape modes to get the mean position of the expression
-
-
-        # Fit gaussian to the expression shape modes
-        
-
-        # import open3d as o3d
-        # mesh = o3d.geometry.TriangleMesh()
-        # mesh.vertices = o3d.utility.Vector3dVector(neutral_mesh)
-        # mesh.triangles = o3d.utility.Vector3iVector(faces)
-        
-        # for nn in range(expression_shape_modes_norm.shape[0]):
-        #     colors = np.zeros_like(neutral_mesh)
-        #     colors[:, 0] = expression_shape_modes_norm.clamp(1e-2, 1).pow(0.5)[nn]
-        #     colors[:, 2] = 1 - expression_shape_modes_norm.clamp(1e-2, 1).pow(0.5)[nn]
-        #     mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
-        #     o3d.io.write_triangle_mesh(f'./debug/new_norm_{nn}_{self.expression_names[nn]}.obj', mesh)
-        # exit()
-
-
         self.register_buffer('expression_shape_modes_norm', expression_shape_modes_norm.clamp(1e-4, 1).pow(0.5))
 
         jaw_index = self.expression_names.tolist().index('jawOpen')
@@ -115,17 +95,12 @@ class ICTFaceKitTorch(torch.nn.Module):
         
         if canonical is not None:
             canonical = np.load(canonical, allow_pickle=True).item()
-            # self.register_buffer('identity', torch.from_numpy(canonical['identity'])[None])
-            # self.register_buffer('expression', torch.from_numpy(canonical['expression'])[None])
             # B of s, R, T is 1
             self.register_buffer('s', canonical['s'].cpu()) # shape of (B)
             self.register_buffer('R', canonical['R'].cpu()) # shape of (B, 3, 3)
             self.register_buffer('T', canonical['T'].cpu()) # shape of (B, 3)
 
         else:
-            # self.register_buffer('identity', torch.zeros(1, self.num_identity))
-            # self.register_buffer('expression', torch.zeros(1, self.num_expression))
-            # self.expression[0, jaw_index] = 0.75 # jaw open for canonical face
             # B of s, R, T is 1
             self.register_buffer('s', torch.ones(1).cpu()) # shape of (B)
             self.register_buffer('R', torch.eye(3)[None].cpu()) # shape of (B, 3, 3)
@@ -135,35 +110,6 @@ class ICTFaceKitTorch(torch.nn.Module):
         canonical = self.forward(expression_weights=self.expression, identity_weights=self.identity, to_canonical=True)
         self.register_buffer('canonical', canonical)
         self.register_buffer('neutral_mesh_canonical', self.to_canonical_space(self.neutral_mesh).clone().detach())
-
-        # self.debug_indices()
-
-        # test: save each eyeball expression to debug/eyeball directory
-        # import os
-        # os.makedirs('debug/eyeball', exist_ok=True)
-        # for exp_idx in self.left_eyeball_blendshape_indices:
-        #     exp_name = self.expression_names[exp_idx]
-        #     expression_weights = torch.zeros(1, self.num_expression)
-        #     expression_weights[0, exp_idx] = 1
-        #     deformed_mesh = self.forward(expression_weights=expression_weights, identity_weights=self.identity, to_canonical=True)
-        #     mesh = o3d.geometry.TriangleMesh()
-        #     mesh.vertices = o3d.utility.Vector3dVector(deformed_mesh.squeeze().cpu().numpy())
-        #     mesh.triangles = o3d.utility.Vector3iVector(faces)
-        #     # color left eyeball randomly - to check if the eyeball is rotated correctly
-            
-        #     o3d.io.write_triangle_mesh(f'debug/eyeball/{exp_name}.obj', mesh)
-
-        # for exp_idx in self.right_eyeball_blendshape_indices:
-        #     exp_name = self.expression_names[exp_idx]
-        #     expression_weights = torch.zeros(1, self.num_expression)
-        #     expression_weights[0, exp_idx] = 1
-        #     deformed_mesh = self.forward(expression_weights=expression_weights, identity_weights=self.identity, to_canonical=True)
-        #     mesh = o3d.geometry.TriangleMesh()
-        #     mesh.vertices = o3d.utility.Vector3dVector(deformed_mesh.squeeze().cpu().numpy())
-        #     mesh.triangles = o3d.utility.Vector3iVector(faces)
-        #     o3d.io.write_triangle_mesh(f'debug/eyeball/{exp_name}.obj', mesh)
-
-        # exit()
 
     def to_canonical_space(self, mesh):
         """
