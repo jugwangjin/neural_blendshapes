@@ -109,6 +109,7 @@ def config_parser():
 
     
     parser.add_argument('--stage_iterations', type=int, nargs='+', default=[3000, 3000, 3000, 3000, 3000, 3000])
+    parser.add_argument('--only_flame_iterations', type=int, default=1000)
 
 
     parser.add_argument('--compute_mode', action='store_true', help="skip eval")

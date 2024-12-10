@@ -101,6 +101,9 @@ class MLPTemplate(nn.Module):
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
             nn.Softplus(beta=100),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
+            nn.Softplus(beta=100),
             nn.Linear(256, 3, bias=False)
         )
 
@@ -334,8 +337,7 @@ class NeuralBlendshapes(nn.Module):
         return return_dict
 
 
-    def get_expression_delta(self, blendshapes):
-        bsize = blendshapes.shape[0]
+    def get_expression_delta(self):
 
         template = self.ict_facekit.canonical[0]
         uv_coords = self.ict_facekit.uv_neutral_mesh[0]

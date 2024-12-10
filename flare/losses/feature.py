@@ -23,6 +23,7 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     facs_reg = ((facs - target_facs).abs())
     # facs_reg = ((facs - target_facs).pow(2) * facs_reg_weights)
     facs_reg[:, eyeball_indices] *= 1e2
+    facs_reg[:, eyeball_indices] /= mult
     facs_reg = facs_reg.mean() * mult 
 
     transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
