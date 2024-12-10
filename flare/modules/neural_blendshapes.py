@@ -101,6 +101,9 @@ class MLPTemplate(nn.Module):
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
             nn.Softplus(beta=100),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
+            nn.Softplus(beta=100),
             nn.Linear(256, 3, bias=False)
         )
 
@@ -264,6 +267,61 @@ class NeuralBlendshapes(nn.Module):
         face[..., 17039:21451, :] = 0
         return face
 
+    @torch.no_grad()
+    def precompute_networks(self):
+        # precompute the fixed mlps and return. 
+        template = self.ict_facekit.canonical[0]
+        pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
+
+        template_mesh_u_delta = self.template_deformer(template)
+
+        expression_mesh_delta_u = self.expression_deformer(template).reshape(template.shape[0], 54, 3)
+
+        return {'template_mesh_u_delta': template_mesh_u_delta, 'expression_mesh_delta_u': expression_mesh_delta_u, 'pose_weight': pose_weight}
+        
+    @torch.no_grad()
+    def deform_with_precomputed(self, features, precomputed):
+        template = self.ict_facekit.canonical[0]
+        pose_weight = precomputed['pose_weight']
+
+        template_mesh_u_delta = precomputed['template_mesh_u_delta']
+        expression_mesh_delta_u = precomputed['expression_mesh_delta_u']
+
+        template_mesh_delta = self.solve(template_mesh_u_delta) 
+
+        template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + template_mesh_delta
+
+        template_mesh_posed = self.apply_deformation(template_mesh[None], features, pose_weight)
+
+        ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(features.shape[0], 1))
+
+        ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
+
+        ict_mesh_w_temp_posed = self.apply_deformation(ict_mesh_w_temp, features, pose_weight)
+
+        return_dict = {}
+        return_dict['ict_mesh_posed'] = self.remove_teeth(self.apply_deformation(ict_mesh, features, pose_weight))
+        return_dict['template_mesh'] = self.remove_teeth(template_mesh)
+        return_dict['template_mesh_posed'] = self.remove_teeth(template_mesh_posed)
+        return_dict['ict_mesh_w_temp'] = self.remove_teeth(ict_mesh_w_temp)
+        return_dict['ict_mesh_w_temp_posed'] = self.remove_teeth(ict_mesh_w_temp_posed)
+
+        
+        feat = features[:, :53].clamp(0, 1)
+        feat = torch.cat([feat, torch.ones_like(feat[:, :1])], dim=1)
+        
+        expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
+
+        expression_mesh_delta[:, self.face_index:self.mouth_socket_index, :53] = 0
+
+        expression_mesh = ict_mesh_w_temp + expression_mesh_delta
+
+        expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
+        return_dict['expression_mesh'] = self.remove_teeth(expression_mesh)
+        return_dict['expression_mesh_posed'] = self.remove_teeth(expression_mesh_posed)
+
+        return return_dict
+        
 
     def forward(self, image=None, views=None, features=None, image_input=True, pretrain=False):
         if features is None:
@@ -334,8 +392,7 @@ class NeuralBlendshapes(nn.Module):
         return return_dict
 
 
-    def get_expression_delta(self, blendshapes):
-        bsize = blendshapes.shape[0]
+    def get_expression_delta(self):
 
         template = self.ict_facekit.canonical[0]
         uv_coords = self.ict_facekit.uv_neutral_mesh[0]

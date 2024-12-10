@@ -24,12 +24,16 @@ class DECAEncoder(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 128),
             nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
         )
 
         self.bshapes_tail = nn.Sequential(
             nn.Linear(feature_size + 128, 512),
             nn.ReLU(),
-            nn.Linear(512, 53)
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 53)
         )
 
         self.rotation_prefix = nn.Sequential(
@@ -40,7 +44,9 @@ class DECAEncoder(nn.Module):
         self.rotation_tail = nn.Sequential(
             nn.Linear(feature_size, 64),
             nn.ReLU(),
-            nn.Linear(64, 3)
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 3)
         )
 
         self.translation_tail = nn.Sequential(
