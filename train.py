@@ -511,8 +511,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     iteration = 0
     for epoch in progress_bar:
         # importance = importance / (importance.amax() + epsilon)
-        dataset_sampler = torch.utils.data.WeightedRandomSampler(importance, dataset_train.len_img, replacement=True)
-        dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, collate_fn=dataset_train.collate, drop_last=True, sampler=dataset_sampler)
+        # dataset_sampler = torch.utils.data.WeightedRandomSampler(importance, dataset_train.len_img, replacement=True)
+        # dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, collate_fn=dataset_train.collate, drop_last=True, sampler=dataset_sampler)
         for iter_, views_subset in tqdm(enumerate(dataloader_train)):
             iteration += 1
             # Determine the stage based on iteration and milestones
@@ -636,6 +636,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 inverted_normal_loss = inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
                 eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
 
+                # losses['mask'] += mask_loss_segmentation
                 losses['mask'] += mask_loss_segmentation + segmentation_loss 
                 losses['landmark'] += landmark_loss 
                 # losses['closure'] += closure_loss
@@ -672,7 +673,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 # more regularizations
                 feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1, mult=1)
+                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1, mult=1e-2)
 
                 # random_blendshapes = torch.rand(views_subset['mp_blendshape'].shape[0], 53, device=device)
                 # expression_delta_random = neural_blendshapes.get_expression_delta(blendshapes=random_blendshapes)

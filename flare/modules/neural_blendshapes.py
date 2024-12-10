@@ -172,7 +172,10 @@ class NeuralBlendshapes(nn.Module):
 
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(self.inp_size, 512),
+            nn.Linear(3, 512),
+            # nn.LayerNorm(512),
+            nn.Softplus(beta=100),
+            nn.Linear(512, 512),
             # nn.LayerNorm(512),
             nn.Softplus(beta=100),
             nn.Linear(512, 512),
@@ -284,7 +287,8 @@ class NeuralBlendshapes(nn.Module):
 
         encoded_points = template
         # encoded_points = torch.cat([self.encode_position(template)], dim=-1)
-        encoded_points2 = self.encode_position(template)
+        encoded_points2 = template
+        # encoded_points2 = self.encode_position(template)
         # encoded_points2 = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
         template_mesh_u_delta = self.template_deformer(encoded_points)
@@ -335,7 +339,8 @@ class NeuralBlendshapes(nn.Module):
 
         template = self.ict_facekit.canonical[0]
         uv_coords = self.ict_facekit.uv_neutral_mesh[0]
-        encoded_points = self.encode_position(template)
+        encoded_points = template
+        # encoded_points = self.encode_position(template)
         # encoded_points = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
         expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template.shape[0], 54, 3).permute(1, 0, 2)
