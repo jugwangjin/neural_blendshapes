@@ -157,7 +157,7 @@ class ResnetEncoder(nn.Module):
         self.softplus = torch.nn.Softplus(beta=4)
 
         self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.2, -0.28]))
-        self.translation = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
+        self.global_translation = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
 
         
     def load_deca_encoder(self):

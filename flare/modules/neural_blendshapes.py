@@ -101,9 +101,6 @@ class MLPTemplate(nn.Module):
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
             nn.Softplus(beta=100),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
-            nn.Softplus(beta=100),
             nn.Linear(256, 3, bias=False)
         )
 
@@ -112,7 +109,7 @@ class MLPTemplate(nn.Module):
 
 
 class NeuralBlendshapes(nn.Module):
-    def __init__(self, vertex_parts, ict_facekit, exp_dir, aabb  = None, lambda_=32):
+    def __init__(self, vertex_parts, ict_facekit, exp_dir, aabb  = None, lambda_=32, tight_face_normals=None):
         super().__init__()
         self.encoder = ResnetEncoder(53+6, ict_facekit)
 
@@ -184,11 +181,15 @@ class NeuralBlendshapes(nn.Module):
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(512, 512),
-            # nn.LayerNorm(512),
-            nn.Softplus(beta=100),
             nn.Linear(512, 54*3, bias=False)
         )
+
+        self.tight_face_details = torch.nn.Parameter(torch.zeros(self.tight_face_index, 53))
+        if tight_face_normals is None:
+            self.register_buffer('tight_face_normals', torch.zeros(0, 3))
+        else:
+            self.register_buffer('tight_face_normals', tight_face_normals)
+
 
         # init expression deformer with low weights
         for l in self.expression_deformer:
@@ -295,6 +296,11 @@ class NeuralBlendshapes(nn.Module):
         expression_mesh_delta_u = precomputed['expression_mesh_delta_u']
         expression_mesh_delta = torch.einsum('bn, mnd -> bmd', features[..., :53], expression_mesh_delta_u[:, :53])
 
+        tight_face_details = torch.einsum('bn, dn -> bd', features[:, :53], self.tight_face_details) # shape of B, 6705
+        tight_face_details = tight_face_details[..., None] * self.tight_face_normals[None] # shape of B, 6705, 3
+
+        expression_mesh_delta[:, :self.tight_face_index] += tight_face_details
+
         template_mesh_delta = self.solve(template_mesh_u_delta) + expression_mesh_delta_u[:, -1]
 
         ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(features.shape[0], 1))
@@ -364,6 +370,14 @@ class NeuralBlendshapes(nn.Module):
         feat = torch.cat([feat, torch.ones_like(feat[:, :1])], dim=1)
 
         expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
+        
+        # self.tight_face_details have shape of 6705, 53
+        # feat has shape of B, 53
+        # einsum and multiplying it with tight_face_normals will have shape of B, 6705, 3
+        # add to expression_mesh_delta
+        tight_face_details = torch.einsum('bn, dn -> bd', features[:, :53], self.tight_face_details) # shape of B, 6705
+        tight_face_details = tight_face_details[..., None] * self.tight_face_normals[None] # shape of B, 6705, 3
+        expression_mesh_delta[:, :self.tight_face_index] += tight_face_details
 
         expression_mesh = ict_mesh_w_temp + expression_mesh_delta
 
@@ -422,7 +436,7 @@ class NeuralBlendshapes(nn.Module):
             weights = weights.view(1, V, 1)
             deformed_vertices = deformed_vertices * weights + scaled_vertices * (1 - weights)
 
-        return deformed_vertices
+        return deformed_vertices + self.encoder.global_translation[None, None, :]
 
     def save(self, path):
         data = {
@@ -434,8 +448,8 @@ class NeuralBlendshapes(nn.Module):
         super().to(device)
         return self
 
-def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_facekit=None, exp_dir=None, lambda_=16, aabb=None, device='cuda'):
-    neural_blendshapes = NeuralBlendshapes(vertex_parts, ict_facekit, exp_dir, lambda_ = lambda_, aabb=aabb)
+def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_facekit=None, exp_dir=None, lambda_=16, aabb=None, tight_face_normals=None, device='cuda'):
+    neural_blendshapes = NeuralBlendshapes(vertex_parts, ict_facekit, exp_dir, lambda_ = lambda_, aabb=aabb, tight_face_normals=tight_face_normals)
     neural_blendshapes.to(device)
 
     import os

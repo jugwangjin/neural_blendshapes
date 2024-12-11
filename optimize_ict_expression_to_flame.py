@@ -114,7 +114,7 @@ def main(args):
 
     iterations = 3000
 
-    mesh_save_dir = './debug/optimized_ict_and_flame_meshes/'
+    mesh_save_dir = './debug/optimized_ict_and_flame_meshes_with_shapes_FLAME/'
     os.makedirs(mesh_save_dir, exist_ok=True)
     # ================================================
     # optimize ICT-FaceKit identity code
@@ -232,7 +232,7 @@ def main(args):
 
     expressions = torch.nn.Parameter(torch.zeros(ICTmodel.num_expression, FLAMEServer.n_exp).to(device))
     poses = torch.nn.Parameter(torch.zeros(ICTmodel.num_expression, 3).to(device))
-
+    shapes = torch.nn.Parameter(torch.zeros(ICTmodel.num_expression, FLAMEServer.n_shape).to(device))
     
 
     import pytorch3d.transforms as p3dt
@@ -244,7 +244,7 @@ def main(args):
         return p3dt.matrix_to_axis_angle(p3dt.euler_angles_to_matrix(euler, convention='XYZ'))
         # gt_pose = p3dt.matrix_to_euler_angles(p3dt.axis_angle_to_matrix(views_subset['flame_pose'].reshape(b, 5, 3)), convention='XYZ').reshape(b, 15)
 
-    flame_optimizer = torch.optim.AdamW([expressions, poses], lr=1e-2, weight_decay=1e-4)
+    flame_optimizer = torch.optim.Adam([expressions, poses, shapes], lr=1e-2)
 
     lmk_face_idx = np.asarray(lmk_face_idx).astype(np.int32)
     lmk_b_coords = np.asarray(lmk_b_coords).astype(np.float32)
@@ -253,7 +253,7 @@ def main(args):
     for i in pbar:
         pose_batch = torch.zeros(ICTmodel.num_expression, 15).to(device)
         pose_batch[:, 6:9] = poses
-        flame_verts, _, _ = FLAMEServer(expression_params=expressions, full_pose=euler_to_axis_angle(pose_batch))
+        flame_verts, _, _ = FLAMEServer.forward_with_shapes(shape_params=shapes, expression_params=expressions, full_pose=euler_to_axis_angle(pose_batch))
         
         flame_lmks = mesh_points_by_barycentric_coordinates_batch(flame_verts, FLAMEServer.faces_tensor, lmk_face_idx, lmk_b_coords)
         
@@ -264,11 +264,11 @@ def main(args):
         loss, loss_normals = pytorch3d.loss.chamfer_distance(aligned_ict_mesh, flame_verts, single_directional=True)
         loss = torch.mean(loss)
 
-        loss += torch.mean(torch.abs(aligned_ict_lmk - flame_lmks)) * 50
+        loss += torch.mean(torch.abs(aligned_ict_lmk - flame_lmks)) * 10
 
         # add loss for l2 norm on idt_code
-        loss += torch.mean(expressions**2) * 1e-1 + torch.mean(poses**2) * 1e-1
-
+        loss += torch.mean(expressions**2) * 1e-3 + torch.mean(poses**2) * 1e-3 + torch.mean(shapes**2) * 1e-3
+ 
         pbar.set_description(f'loss: {loss.item()}')
 
         flame_optimizer.zero_grad()
@@ -278,6 +278,7 @@ def main(args):
 
     # fetch all optimized variables into a single dict
     optimized_ict_identity = idt_code.data
+    optimized_flame_shapes = shapes.data
     optimized_flame_expressions = expressions.data
     optimized_flame_poses = torch.zeros(poses.shape[0], 15).to(device)
     optimized_flame_poses[:, 6:9] = poses.data
@@ -289,6 +290,7 @@ def main(args):
 
     # print(optimized_ict_identity, optimized_flame_expressions, optimized_flame_poses)
     print(optimized_ict_identity.mean(dim=0), optimized_ict_identity.std(dim=0))
+    print(optimized_flame_shapes.mean(dim=0), optimized_flame_shapes.std(dim=0))
     print(optimized_flame_expressions.mean(dim=0), optimized_flame_expressions.std(dim=0))
     print(optimized_flame_poses.mean(dim=0), optimized_flame_poses.std(dim=0))
     print(optimized_ict_identity.shape, optimized_flame_expressions.shape, optimized_flame_poses.shape)
@@ -305,6 +307,7 @@ def main(args):
     optimized_identity = idt_code.data.cpu().numpy()
     optimized = {}
     optimized['ict_identity'] = optimized_ict_identity
+    optimized['flame_shapes'] = optimized_flame_shapes
     optimized['flame_expression'] = optimized_flame_expressions
     optimized['flame_pose'] = optimized_flame_poses
     optimized['flame_s'] = s.data
@@ -318,6 +321,7 @@ def main(args):
     # print name as well
     for i in range(optimized_flame_expressions.size(0)):
         print(f'ict expression {i}: {ICTmodel.expression_names.tolist()[i]}')
+        print(f'flame shapes for ict expression {i}: {np.round(optimized_flame_shapes[i].cpu().data.numpy(), 3)}')
         print(f'flame expression for ict expression {i}: {np.round(optimized_flame_expressions[i].cpu().data.numpy(), 3)}')
         print(f'flame pose for ict expression {i}: {np.round(optimized_flame_poses[i].cpu().data.numpy(), 3)}')
 
@@ -336,7 +340,7 @@ def main(args):
 
         ict_mesh = ICTmodel(expression_weights=ict_expression, identity_weights=ict_identity, to_canonical=False,)
 
-        flame_verts, _, _ = FLAMEServer(expression_params=optimized_flame_expressions[i][None], full_pose=optimized_flame_poses[i][None])
+        flame_verts, _, _ = FLAMEServer.forward_with_shapes(shape_params=optimized_flame_shapes[i][None], expression_params=optimized_flame_expressions[i][None], full_pose=optimized_flame_poses[i][None])
         
         rotated_ict_mesh = torch.einsum('bni, bji -> bnj', ict_mesh, R)
         aligned_ict_mesh = (s * rotated_ict_mesh + T)

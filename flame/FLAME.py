@@ -54,6 +54,7 @@ class FLAME(nn.Module):
             flame_model = Struct(**ss)
 
         self.n_exp = n_exp
+        self.n_shape = n_shape
         self.dtype = torch.float32
         if use_processed_faces:
             _, faces, _ = load_obj(FLAME_MOUTH_MESH, load_textures=False)
@@ -64,6 +65,7 @@ class FLAME(nn.Module):
             # self.register_buffer('faces_tensor_not_processed', to_tensor(to_np(faces.verts_idx, dtype=np.int64), dtype=torch.long))
 
         self.register_buffer('v_template', to_tensor(to_np(flame_model.v_template) * factor, dtype=self.dtype))   
+        self.register_buffer('v_template_org', to_tensor(to_np(flame_model.v_template) * factor, dtype=self.dtype))   
 
         # The shape components and expression
         shapedirs = to_tensor(to_np(flame_model.shapedirs), dtype=self.dtype)
@@ -90,6 +92,28 @@ class FLAME(nn.Module):
         self.register_buffer('lbs_weights', to_tensor(to_np(flame_model.weights), dtype=self.dtype))
 
         self.n_shape = n_shape
+
+    def forward_with_shapes(self, shape_params, expression_params, full_pose):
+        """
+            Input:
+                shape_params: N X number of shape parameters
+                expression_params: N X number of expression parameters
+                full_pose: N X number of pose parameters (15)
+            return:
+                vertices: N X V X 3
+                landmarks: N X number of landmarks X 3
+        """
+        batch_size = expression_params.shape[0]
+        betas = expression_params
+        template_canonical = (self.v_template_org[None] + torch.einsum('bl,mkl->bmk', [shape_params, self.shapedirs_shape])).to(betas.device)
+        # template_canonical = v_template.unsqueeze(0).expand(batch_size, -1, -1).to(betas.device)
+        vertices, pose_feature, transformations = lbs(betas, full_pose, template_canonical,
+                          self.shapedirs_expression, self.posedirs,
+                          self.J_regressor, self.parents,
+                          self.lbs_weights, dtype=self.dtype)
+
+        return vertices, pose_feature, transformations
+
 
     # FLAME mesh morphing
     def forward(self, expression_params, full_pose):

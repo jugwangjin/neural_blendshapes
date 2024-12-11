@@ -257,12 +257,21 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     tight_face_index = 6705
 
-    full_face_index = 9409
+    full_head_index = 11248
 
-    # print(ict_pair_indices)
+    # flame_except_eyes_conditions : y < 0.03, or y > 0.2 or x < -0.25 or x > 0.25
+    full_head_ict_flame = np.where((ict_pair_indices < full_head_index) &
+                                    ((FLAMEServer.canonical_verts.cpu().data.numpy()[0, flame_pair_indices][:, 1] < 0.02) |
+                                    (FLAMEServer.canonical_verts.cpu().data.numpy()[0, flame_pair_indices][:, 1] > 0.2) |
+                                    (FLAMEServer.canonical_verts.cpu().data.numpy()[0, flame_pair_indices][:, 0] < -0.25) |
+                                    (FLAMEServer.canonical_verts.cpu().data.numpy()[0, flame_pair_indices][:, 0] > 0.25)))[0]
 
-    full_face_ict_flame = np.where(ict_pair_indices < full_face_index)[0]
-    tight_face_ict_flame = np.where(ict_pair_indices < tight_face_index)[0]  
+
+    tight_face_ict_flame = np.where((ict_pair_indices < tight_face_index) &
+                                    ((FLAMEServer.canonical_verts.cpu().data.numpy()[0, flame_pair_indices][:, 1] < 0.02) |
+                                    (FLAMEServer.canonical_verts.cpu().data.numpy()[0, flame_pair_indices][:, 1] > 0.2) |
+                                    (FLAMEServer.canonical_verts.cpu().data.numpy()[0, flame_pair_indices][:, 0] < -0.25) |
+                                    (FLAMEServer.canonical_verts.cpu().data.numpy()[0, flame_pair_indices][:, 0] > 0.25)))[0]
 
     ## ============== load ict facekit ==============================
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
@@ -273,7 +282,24 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     write_mesh(Path(meshes_save_path / "init_ict_canonical.obj"), ict_canonical_mesh.to('cpu'))
 
+    # ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
+    # ict_canonical_mesh.compute_connectivity()
 
+    # print(full_head_ict_flame)
+
+    # ict_canonical_mesh.vertices[ict_pair_indices[full_head_ict_flame]] = 0
+
+    # write_mesh(os.path.join("debug", "non_eye_head_canonical.obj"), ict_canonical_mesh.to('cpu'))
+
+    # ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
+    # ict_canonical_mesh.compute_connectivity()
+
+    # ict_canonical_mesh.vertices[ict_pair_indices[tight_face_ict_flame]] = 0
+
+    # write_mesh(os.path.join("debug", "non_eye_tight_canonical.obj"), ict_canonical_mesh.to('cpu'))
+    # exit()
+
+    
     if args.recompute_mode:
         precomputed_mode = dataset_train.base_dir / 'bshapes_mode.pt'
         if precomputed_mode.exists():
@@ -330,13 +356,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     print("=="*50)
     print("Training Deformer")
 
-    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, exp_dir = experiment_dir, lambda_=args.lambda_, aabb = ict_mesh_aabb, device=device) 
+    tight_face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.neutral_mesh_canonical[0])[0][:tight_face_index]
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, exp_dir = experiment_dir, lambda_=args.lambda_, aabb = ict_mesh_aabb, tight_face_normals=tight_face_normals,device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
 
     neural_blendshapes = neural_blendshapes.to(device)
 
     neural_blendshapes_params = list(neural_blendshapes.parameters())
-    neural_blendshapes_expression_params = list(neural_blendshapes.expression_deformer.parameters())
+    neural_blendshapes_expression_params = list(neural_blendshapes.expression_deformer.parameters()) + [neural_blendshapes.tight_face_details]
     neural_blendshapes_template_params = list(neural_blendshapes.template_deformer.parameters())
     neural_blendshapes_pe = list(neural_blendshapes.fourier_feature_transform.parameters()) 
     neural_blendshapes_pose_weight_params = list(neural_blendshapes.pose_weight.parameters())
@@ -469,10 +496,16 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                     {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer},
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                     ], amsgrad=True,
                                                     )
+    from torch.optim.lr_scheduler import LinearLR
+    num_warmup_steps = 100  # Adjust this value based on your needs
+    warmup_scheduler = LinearLR(
+        optimizer_neural_blendshapes,
+        start_factor=0.01,  # Start with 10% of the base learning rate
+        end_factor=1.0,    # End with 100% of the base learning rate
+        total_iters=num_warmup_steps
+    )
 
     stage_iterations = args.stage_iterations
     # stage_iterations contain the number of iterations for each stage
@@ -504,8 +537,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     epsilon = 1e-5
 
-    warmup_scheduler = None
-    num_warmup_steps = 0
     args.finetune_color = False
 
     iteration = 0
@@ -528,10 +559,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             target_res = None            
 
-            if stage > 0:
+            if iteration > args.only_flame_iterations:
                 target_range = tight_face_ict_flame
             else:
-                target_range = None
+                target_range = full_head_ict_flame
             
             if stage < 2 : 
                 deformed_vertices_key = 'ict_mesh_w_temp'
@@ -550,8 +581,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes = torch.optim.Adam([
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                     ], amsgrad=True,
                                                 )
                 # Create a warm-up scheduler
@@ -564,7 +593,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     total_iters=num_warmup_steps
                 )
 
-
             if iteration == milestones[1]: # on stage 2 -> update the optimizer to only expression 
                 print("\nUpdating the optimizer to only expression\n")
                 # now only update the expression parameters
@@ -575,7 +603,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                 {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                 ], amsgrad=True,
                                                 )
-                loss_weights["flame_regularization"] = loss_weights["flame_regularization"] * 0.2
                 # Create a warm-up scheduler
                 from torch.optim.lr_scheduler import LinearLR
                 num_warmup_steps = 100  # Adjust this value based on your needs
@@ -644,14 +671,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 landmark_loss, closure_loss = landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
 
                 segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., :1], None, (512, 512))
-                eyes_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 3:4], None, (512, 512))
-                mouth_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 4:5], None, (512, 512))
+                # eyes_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 3:4], None, (512, 512))
+                # mouth_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 4:5], None, (512, 512))
 
                 mask_loss_segmentation = mask_loss_function(segmentation_gt, gbuffers['segmentation'])
                 shading_loss, pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
 
-                segmentation_loss = segmentation_loss_function(eyes_segmentation_gt, gbuffers['eyes']) + \
-                                    segmentation_loss_function(mouth_segmentation_gt, gbuffers['mouth'])
+                # segmentation_loss = segmentation_loss_function(eyes_segmentation_gt, gbuffers['eyes']) + \
+                #                     segmentation_loss_function(mouth_segmentation_gt, gbuffers['mouth'])
 
                 perceptual_loss = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
 
@@ -659,8 +686,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 # inverted_normal_loss = inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
                 # eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
 
-                # losses['mask'] += mask_loss_segmentation
-                losses['mask'] += mask_loss_segmentation + segmentation_loss 
+                losses['mask'] += mask_loss_segmentation
+                # losses['mask'] += mask_loss_segmentation + segmentation_loss 
                 losses['landmark'] += landmark_loss 
                 # losses['closure'] += closure_loss
 
@@ -697,10 +724,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 l1_regularization = expression_delta_random[53:].abs().mean() 
 
                 template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
+                detail_geometric_regularization = neural_blendshapes.tight_face_details.abs().mean() * 1e2
 
                 losses['feature_regularization'] = feature_regularization
                 losses['laplacian_regularization'] = template_mesh_laplacian_regularization + expression_mesh_laplacian_regularization 
-                losses['geometric_regularization'] = template_geometric_regularization
+                losses['geometric_regularization'] = template_geometric_regularization + detail_geometric_regularization
                 losses['linearity_regularization'] = l1_regularization
 
             '''
