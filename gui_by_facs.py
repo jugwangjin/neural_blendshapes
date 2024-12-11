@@ -139,9 +139,10 @@ if __name__ == "__main__":
     views_sample = get_flame_camera(args)
 
 
-
+    handle_values_expression = torch.zeros(3, device=device)
     handle_values = torch.zeros(53, device=device)
     handle_values2 = torch.zeros(7, device=device)
+
 
     # Initialize GUI
     app = gui.Application.instance
@@ -174,6 +175,15 @@ if __name__ == "__main__":
     pose_names = ['rot_x', 'rot_y', 'rot_z', 'trans_x', 'trans_y', 'trans_z', 'scale']
 
 
+    preset_facs = {}
+    preset_facs['happiness'] = ['cheekSquint_L', 'cheekSquint_R', 'mouthSmile_L', 'mouthSmile_R']
+    preset_facs['sadness'] = ['browInnerUp_L', 'browInnerUp_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
+    preset_facs['disgust'] = ['noseSneer_L', 'noseSneer_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
+
+    preset_names = list(preset_facs.keys())
+
+    labels_expression = [gui.Label(exp) for exp in preset_facs.keys()]
+    sliders_expression = [gui.Slider(gui.Slider.DOUBLE) for _ in range(3)]
 
     labels = [gui.Label(ict_facekit.expression_names[i]) for i in range(53)]
     labels2 = [gui.Label(pose_names[i]) for i in range(7)]
@@ -239,6 +249,29 @@ if __name__ == "__main__":
             handle_values2[i] = value
             update_image()
         return fun
+    
+    def create_fun3(i):
+        def fun(value):
+            handle_values_expression[i] = value
+            # get related expression names
+            # expression name
+            expression_name = preset_names[i]
+            related_facs = preset_facs[expression_name]
+            related_facs_indices = [ict_facekit.expression_names.tolist().index(fac) for fac in related_facs]
+
+            for n in range(len(sliders_expression)):
+                if n != i:
+                    sliders_expression[n].double_value = 0.0
+
+            for n in range(handle_values.shape[0]):
+                if n in related_facs_indices:
+                    sliders[n].double_value = value
+                    handle_values[n] = value
+                else:
+                    sliders[n].double_value = 0.0
+                    handle_values[n] = 0.0
+            update_image()
+        return fun
 
     fixed_prop_grid = gui.VGrid(2, spacing, gui.Margins(em, em, em, em))
 
@@ -252,10 +285,17 @@ if __name__ == "__main__":
         slider.double_value = 0.0
         slider.set_on_value_changed(create_fun2(i))
 
+    for i, slider in enumerate(sliders_expression):
+        slider.set_limits(0, 1)
+        slider.double_value = 0.0
+        slider.set_on_value_changed(create_fun3(i))
+
     sliders2[-1].set_limits(0.5, 1.5)
     sliders2[-1].double_value = 1.0
 
-
+    for label, slider in zip(labels_expression, sliders_expression):
+        fixed_prop_grid.add_child(label)
+        fixed_prop_grid.add_child(slider)
     for label, slider in zip(labels, sliders):
         fixed_prop_grid.add_child(label)
         fixed_prop_grid.add_child(slider)
