@@ -665,8 +665,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 # losses['closure'] += closure_loss
 
                 if stage < 2:
-                    shading_loss *= 0.1
-                    perceptual_loss *= 0.1
+                    shading_loss *= 1e-1
+                    perceptual_loss *= 1e-1
                 losses['shading'] = shading_loss
                 losses['perceptual_loss'] = perceptual_loss 
 
@@ -690,7 +690,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 # more regularizations
                 feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1, mult=1e-2)
+                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1, mult=1)
 
                 expression_delta_random = neural_blendshapes.get_expression_delta()
 

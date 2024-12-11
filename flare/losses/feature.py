@@ -20,11 +20,10 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     target_facs = (gt_facs).clamp(min=0, max=1)
     
     
-    facs_reg = ((facs - target_facs).abs())
+    facs_reg = ((facs - target_facs))
     # facs_reg = ((facs - target_facs).pow(2) * facs_reg_weights)
-    facs_reg[:, eyeball_indices] *= 1e2
-    facs_reg[:, eyeball_indices] /= mult
-    facs_reg = facs_reg.mean() * mult 
+    facs_reg[:, eyeball_indices] *= 1e1
+    facs_reg = facs_reg.pow(2).mean() * mult
 
     transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
     scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)

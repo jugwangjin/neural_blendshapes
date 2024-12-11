@@ -189,6 +189,13 @@ class NeuralBlendshapes(nn.Module):
             nn.Softplus(beta=100),
             nn.Linear(512, 54*3, bias=False)
         )
+
+        # init expression deformer with low weights
+        for l in self.expression_deformer:
+            if isinstance(l, nn.Linear):
+                torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
+                torch.nn.init.xavier_uniform_(l.weight)
+                
         self.template_deformer = MLPTemplate(3)
         self.template_embedder = Identity()
 

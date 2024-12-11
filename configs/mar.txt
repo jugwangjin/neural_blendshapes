@@ -16,8 +16,8 @@ lr_shader = 1e-3
 lr_deformer = 2e-4
 lr_jacobian = 2e-4
 
-weight_shading = 1
-weight_perceptual_loss = 0.1
+weight_shading = 1e-1
+weight_perceptual_loss = 1e-2
 weight_mask = 1
 weight_albedo_regularization = 0.01
 weight_white_lgt_regularization = 0.01
@@ -40,7 +40,7 @@ weight_semantic_stat = 1e-0
 
 weight_linearity_regularization = 1e-5
 
-weight_flame_regularization = 1
+weight_flame_regularization = 2
 
 
 light_mlp_ch = 3

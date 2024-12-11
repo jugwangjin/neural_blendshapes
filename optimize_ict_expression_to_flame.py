@@ -164,7 +164,7 @@ def main(args):
 
         loss, loss_normals = pytorch3d.loss.chamfer_distance(aligned_ict_mesh, flame_neutral_verts, single_directional=True)
         loss = torch.mean(loss)
-        loss += torch.mean(torch.abs(aligned_ict_lmk - flame_neutral_lmks)) * 10
+        loss += torch.mean(torch.abs(aligned_ict_lmk - flame_neutral_lmks)) * 50
 
         # add loss for l2 norm on idt_code
         loss += torch.mean(idt_code**2) 
@@ -233,6 +233,8 @@ def main(args):
     expressions = torch.nn.Parameter(torch.zeros(ICTmodel.num_expression, FLAMEServer.n_exp).to(device))
     poses = torch.nn.Parameter(torch.zeros(ICTmodel.num_expression, 3).to(device))
 
+    
+
     import pytorch3d.transforms as p3dt
     def euler_to_axis_angle(euler):
         b, _ = euler.shape
@@ -262,7 +264,7 @@ def main(args):
         loss, loss_normals = pytorch3d.loss.chamfer_distance(aligned_ict_mesh, flame_verts, single_directional=True)
         loss = torch.mean(loss)
 
-        loss += torch.mean(torch.abs(aligned_ict_lmk - flame_lmks)) * 10
+        loss += torch.mean(torch.abs(aligned_ict_lmk - flame_lmks)) * 50
 
         # add loss for l2 norm on idt_code
         loss += torch.mean(expressions**2) * 1e-1 + torch.mean(poses**2) * 1e-1
@@ -313,9 +315,11 @@ def main(args):
         pickle.dump(optimized, f)
 
     # print flame expression and flame pose for each ict expression
+    # print name as well
     for i in range(optimized_flame_expressions.size(0)):
-        print(f'flame expression for ict expression {i}: {optimized_flame_expressions[i].cpu().data.numpy()}')
-        print(f'flame pose for ict expression {i}: {optimized_flame_poses[i].cpu().data.numpy()}')
+        print(f'ict expression {i}: {ICTmodel.expression_names.tolist()[i]}')
+        print(f'flame expression for ict expression {i}: {np.round(optimized_flame_expressions[i].cpu().data.numpy(), 3)}')
+        print(f'flame pose for ict expression {i}: {np.round(optimized_flame_poses[i].cpu().data.numpy(), 3)}')
 
     # analysis on sTR - batch-directional statistics
     print(s.shape, T.shape, R.shape)
