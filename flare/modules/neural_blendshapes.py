@@ -188,7 +188,7 @@ class NeuralBlendshapes(nn.Module):
         if tight_face_normals is None:
             self.register_buffer('tight_face_normals', torch.zeros(0, 3))
         else:
-            self.register_buffer('tight_face_normals', tight_face_normals)
+            self.register_buffer('tight_face_normals', tight_face_normals * 1e-2)
 
 
         # init expression deformer with low weights

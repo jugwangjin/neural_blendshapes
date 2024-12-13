@@ -116,7 +116,7 @@ def segmentation_loss_function(masks, gbuffers, epsilon=1e-8):
 
     # Compute Dice-based loss (aligned with L_latent)
     # iou_loss = 1 - (2 * intersection / dice_union).mean() 
-        
+    
     mse_loss = (masks - gbuffers).pow(2).mean()
 
     return mse_loss

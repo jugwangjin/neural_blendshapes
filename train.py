@@ -68,7 +68,7 @@ import time
 import gc
 
 import matplotlib.pyplot as plt
-# from flare.modules.optimizer import torch.optim.Adam
+# from flare.modules.optimizer import torch.optim.AdamW
 import sys
 
 
@@ -421,7 +421,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         params += list(_adaptive.parameters()) ## need to train it
 
 
-    optimizer_shader = torch.optim.Adam(params, lr=args.lr_shader, amsgrad=True)
+    optimizer_shader = torch.optim.AdamW(params, lr=args.lr_shader, amsgrad=True)
 
     # ==============================================================================================
     # Loss Functions
@@ -444,7 +444,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "roughness_regularization": args.weight_roughness_regularization,
         "albedo_regularization": args.weight_albedo_regularization,
         "fresnel_coeff": args.weight_fresnel_coeff,
-        "temporal_regularization": args.weight_feature_regularization,
+        "temporal_regularization": args.weight_temporal_regularization,
     }
 
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
@@ -492,7 +492,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     use_jaw=True
 
 
-    optimizer_neural_blendshapes = torch.optim.Adam([
+    optimizer_neural_blendshapes = torch.optim.AdamW([
                                                     {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer},
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
@@ -578,7 +578,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 # now only update the expression parameters
                 optimizer_neural_blendshapes.zero_grad(set_to_none=True)
                 optimizer_neural_blendshapes = None
-                optimizer_neural_blendshapes = torch.optim.Adam([
+                optimizer_neural_blendshapes = torch.optim.AdamW([
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
                                                     ], amsgrad=True,
@@ -598,7 +598,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 # now only update the expression parameters
                 optimizer_neural_blendshapes.zero_grad(set_to_none=True)
                 optimizer_neural_blendshapes = None
-                optimizer_neural_blendshapes = torch.optim.Adam([
+                optimizer_neural_blendshapes = torch.optim.AdamW([
                                                 {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                 {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                 ], amsgrad=True,
@@ -633,7 +633,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     _adaptive = AdaptiveLossFunction(num_dims=4, float_dtype=np.float32, device=device)
                     params += list(_adaptive.parameters()) ## need to train it
 
-                optimizer_shader = torch.optim.Adam(params, lr=args.lr_shader, amsgrad=True)
+                optimizer_shader = torch.optim.AdamW(params, lr=args.lr_shader, amsgrad=True)
 
                 optimizer_neural_blendshapes = None
                 neural_blendshapes.eval()
@@ -670,30 +670,34 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 landmark_loss, closure_loss = landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
 
-                segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., :1], None, (512, 512))
-                # eyes_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 3:4], None, (512, 512))
+                # skin_mask_w_mouth: views_subset["skin_mask"][..., :1] + views_subset["skin_mask"][..., 4:5]
+                # skin_mask_w_mouth = (views_subset["skin_mask"][..., :1] + views_subset["skin_mask"][..., 4:5] >= 1).float()
+                # segmentation_gt = downsample_upsample(skin_mask_w_mouth, None, (512, 512))
+                eyes_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 3:4], None, (512, 512))
                 # mouth_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 4:5], None, (512, 512))
 
-                mask_loss_segmentation = mask_loss_function(segmentation_gt, gbuffers['segmentation'])
+                mask_loss_segmentation = mask_loss_function(views_subset["mask"], gbuffer_mask)
                 shading_loss, pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
 
-                # segmentation_loss = segmentation_loss_function(eyes_segmentation_gt, gbuffers['eyes']) + \
+
+                segmentation_loss = segmentation_loss_function(eyes_segmentation_gt, gbuffers['eyes']) 
                 #                     segmentation_loss_function(mouth_segmentation_gt, gbuffers['mouth'])
+
+                # save eyes_segmentation_gt (shape of b h w 1) and gbuffers['eyes']
+
 
                 perceptual_loss = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
 
                 normal_laplacian_loss = normal_loss(gbuffers, views_subset, gbuffers['segmentation'], device) 
-                # inverted_normal_loss = inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
-                # eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
+                inverted_normal_loss = inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
+                eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
 
-                losses['mask'] += mask_loss_segmentation
-                # losses['mask'] += mask_loss_segmentation + segmentation_loss 
+                # losses['mask'] += mask_loss_segmentation
+                # losses['mask'] += mask_loss_segmentation
+                losses['mask'] += mask_loss_segmentation + segmentation_loss 
                 losses['landmark'] += landmark_loss 
                 # losses['closure'] += closure_loss
 
-                if stage < 2:
-                    shading_loss *= 1e-1
-                    perceptual_loss *= 1e-1
                 losses['shading'] = shading_loss
                 losses['perceptual_loss'] = perceptual_loss 
 
@@ -704,8 +708,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 losses['white_lgt_regularization'] = white_light(cbuffers)
                 losses['roughness_regularization'] = roughness_regularization(cbuffers["roughness"], views_subset["skin_mask"], views_subset["mask"], r_mean=args.r_mean)
                 losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
-                losses['normal_laplacian'] = normal_laplacian_loss
-                # losses['normal_laplacian'] = normal_laplacian_loss + inverted_normal_loss + eyeball_normal_loss 
+                # losses['normal_laplacian'] = normal_laplacian_loss
+                losses['normal_laplacian'] = normal_laplacian_loss + inverted_normal_loss + eyeball_normal_loss 
 
             if stage < 3:
                 '''
@@ -717,19 +721,26 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 # more regularizations
                 feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1, mult=1)
+                                                                    neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1e-1, mult=1)
 
                 expression_delta_random = neural_blendshapes.get_expression_delta()
 
-                l1_regularization = expression_delta_random[53:].abs().mean() 
+                l1_regularization = expression_delta_random.abs().mean() 
 
                 template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
-                detail_geometric_regularization = neural_blendshapes.tight_face_details.abs().mean() * 1e2
+                detail_geometric_regularization = neural_blendshapes.tight_face_details.abs().mean() * 1e4
 
                 losses['feature_regularization'] = feature_regularization
                 losses['laplacian_regularization'] = template_mesh_laplacian_regularization + expression_mesh_laplacian_regularization 
                 losses['geometric_regularization'] = template_geometric_regularization + detail_geometric_regularization
                 losses['linearity_regularization'] = l1_regularization
+
+            if stage == 0:
+                indices = views_subset['idx']
+                sequential_frames = dataloader_train.collate_fn([dataset_train.get_sequential_frame(idx) for idx in indices])
+                sequential_features = neural_blendshapes.encoder(sequential_frames)
+                temporal_loss = (return_dict['features'][..., :60] - sequential_features[..., :60]).pow(2).mean()
+                losses['temporal_regularization'] = temporal_loss
 
             '''
             FLAME regularization

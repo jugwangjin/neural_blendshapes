@@ -254,7 +254,8 @@ class Renderer:
 
         if 'mask' in channels and 'canonical_position' in channels and 'segmentation' in channels:            
 
-            segmentation = (segmentation_map[..., None] == 0).float() # face W/O eyes and mouth.
+            # segmentation: face W/O mouth
+            segmentation = ((segmentation_map[..., None] == 0) | (segmentation_map[..., None] == 1)).float() # face W/O eyes and mouth.
             segmentation = dr.antialias(segmentation.float(), rast, deformed_vertices_clip_space, idx)
 
             gbuffer['segmentation'] = segmentation

@@ -48,7 +48,7 @@ def normal_loss(gbuffers, views_subset, gbuffer_mask, device):
     gt_normal = gt_normal.permute(0, 3, 1, 2) * 2 - 1 # shape of B, 3, H, W
     gt_normal_laplacian = torch.nn.functional.conv2d(gt_normal, laplacian_kernel, padding=1)
     mask = ((torch.sum(views_subset["skin_mask"][..., 1:2], dim=-1) * views_subset["skin_mask"][..., -1]) > 0).float() # shape of B H W
-    
+
     mask = mask[:, None] * gbuffer_mask.permute(0,3,1,2)
 
     num_valid_pixel = torch.sum(mask)
@@ -120,13 +120,15 @@ def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
 
     eye_loss = torch.mean(torch.pow(position - target_position, 2) * mask) 
 
+    return eye_loss
+
     # for 4:5, mouth.
     gt_mouth_seg = views_subset["skin_mask"][..., 4:5]
     rendered_mouth_seg = gbuffers["mouth"]
 
     mask = ((1 - gt_mouth_seg) * rendered_mouth_seg).float()
     with torch.no_grad():
-        target_position = position - normal * 1e-1
+        target_position = position - normal * 1e-2
     mouth_loss = torch.mean(torch.pow(position - target_position, 2) * mask) 
     return eye_loss + mouth_loss
 

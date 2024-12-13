@@ -104,6 +104,7 @@ class DECAEncoder(nn.Module):
     def forward(self, inputs, bshapes, rotation, translation, landmarks, flame_cam_t):
         with torch.no_grad():
             encoder_features = self.encoder(inputs)
+            encoder_features = encoder_features.data.detach()
 
         bshapes_additional_features = self.blendshapes_prefix(bshapes)
         rotation_additional_features = self.rotation_prefix(rotation)
