@@ -38,12 +38,12 @@ weight_closure = 1
 weight_segmentation = 1e-0
 weight_semantic_stat = 1e-0
 
-weight_linearity_regularization = 1e-4
+weight_linearity_regularization = 1e-3
 
 weight_flame_regularization = 10
 
 
-weight_temporal_regularization = 1e-5
+weight_temporal_regularization = 1e-4
 
 light_mlp_ch = 3
 light_mlp_dims = [64, 64]

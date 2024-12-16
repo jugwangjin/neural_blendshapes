@@ -88,8 +88,8 @@ def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
 
         normal_cam = torch.einsum('bhwc, cj->bhwj', torch.einsum('bhwc, bcj->bhwj', normal, camera), R.T) # shape of B, H, W, 3
 
-        mask_cam   = (normal_cam[..., 2] < -1e-2).float()
-        normal = normal * (1 - mask_cam[..., None]) + normal * mask_cam [..., None] * -1
+        # mask_cam   = (normal_cam[..., 2] < -1e-2).float()
+        # normal = normal * (1 - mask_cam[..., None]) + normal * mask_cam [..., None] * -1
 
         target_position = position - normal * 1e-1
 

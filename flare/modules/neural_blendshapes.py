@@ -101,6 +101,9 @@ class MLPTemplate(nn.Module):
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
             nn.Softplus(beta=100),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
+            nn.Softplus(beta=100),
             nn.Linear(256, 3, bias=False)
         )
 
@@ -186,7 +189,7 @@ class NeuralBlendshapes(nn.Module):
 
         self.tight_face_details = torch.nn.Parameter(torch.zeros(self.tight_face_index, 53))
         if tight_face_normals is None:
-            self.register_buffer('tight_face_normals', torch.zeros(0, 3))
+            self.register_buffer('tight_face_normals', torch.zeros(self.tight_face_index, 3))
         else:
             self.register_buffer('tight_face_normals', tight_face_normals * 1e-2)
 
