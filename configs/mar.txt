@@ -19,7 +19,7 @@ lr_jacobian = 2e-4
 weight_shading = 1
 weight_perceptual_loss = 1e-1
 weight_mask = 1
-weight_albedo_regularization = 0.01
+weight_albedo_regularization = 0.001
 weight_white_lgt_regularization = 0.01
 weight_roughness_regularization = 0.01
 weight_fresnel_coeff = 0.01
@@ -31,7 +31,7 @@ weight_feature_regularization = 1e-4
 
 weight_geometric_regularization = 1e-6
 weight_normal = 0.25
-weight_normal_laplacian = 1e-1
+weight_normal_laplacian = 1
 weight_landmark = 1
 weight_closure = 1
 
@@ -50,5 +50,5 @@ light_mlp_dims = [64, 64]
 material_mlp_dims = [128, 128, 128, 128]
 material_mlp_ch = 5
 
-stage_iterations = [5000, 4000, 4000, 3000]
+stage_iterations = [5000, 2000, 2000, 3000]
 only_flame_iterations = 1000

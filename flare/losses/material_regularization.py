@@ -41,7 +41,7 @@ def safe_normalize(x: torch.Tensor, eps: float =1e-20) -> torch.Tensor:
     return x / length(x, eps)
 
 
-def albedo_regularization(_adaptive, shader, mesh, device, displacements, iteration=0):
+def albedo_regularization(_adaptive, shader, mesh, device, displacements, iteration=0, mult=None):
     position = mesh.vertices
     
     pe_input = shader.apply_pe(position=position)
@@ -55,7 +55,10 @@ def albedo_regularization(_adaptive, shader, mesh, device, displacements, iterat
     loss_fn = torch.nn.MSELoss(reduction='none')
     kd_grad = loss_fn(kd_jitter, kd)
     loss = torch.mean(_adaptive.lossfun(kd_grad.view(-1, 4)))
-    return loss * min(1.0, iteration / 6000)
+    if mult is None:
+        return loss * min(1.0, iteration / 6000)
+    else:
+        return loss * mult
 
 
 def white_light(cbuffers):

@@ -495,7 +495,6 @@ class DatasetLoader(Dataset):
                 img_deca = img_deca / 255.
                 img_deca = warp(img_deca, tform.inverse, output_shape=(224, 224))
 
-
                 img_deca = torch.tensor(img_deca, dtype=torch.float32).permute(2,0,1) # H, W, C -> C, H, W
 
                 landmark = landmark / img.size(1)

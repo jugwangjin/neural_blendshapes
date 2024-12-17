@@ -82,11 +82,17 @@ def landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
     else:
         detected_landmarks[:, :17, -1] *= 0
 
+    cross_confidence = (detected_landmarks[:, starting_index:, None, -1] * detected_landmarks[:, None, starting_index:, -1]) # shape of (bs, 68, 68)
+
     detected_landmarks = detected_landmarks[:, starting_index:, :3]
     landmarks_on_clip_space = landmarks_on_clip_space[:, starting_index:, :3]
     
     landmark_loss = ((detected_landmarks - landmarks_on_clip_space) * detected_landmarks[:, :, -1:]).pow(2).mean()
     # landmark_loss = torch.nn.functional.huber_loss(detected_landmarks, landmarks_on_clip_space)
 
+    detected_cross_landmarks = torch.norm(detected_landmarks[:, :, None, :3] - detected_landmarks[:, None, :, :3], dim=-1) # shape of (bs, 68, 68)
+    clip_space_cross_landmarks = torch.norm(landmarks_on_clip_space[:, :, None, :3] - landmarks_on_clip_space[:, None, :, :3], dim=-1) # shape of (bs, 68, 68)
 
-    return landmark_loss, closure_loss
+    cross_landmark_loss = ((detected_cross_landmarks - clip_space_cross_landmarks).pow(2) * cross_confidence).mean()
+
+    return cross_landmark_loss, closure_loss

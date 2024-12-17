@@ -429,6 +429,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # Initialize the loss weights and losses
     loss_weights = {
         "mask": args.weight_mask,
+        "segmentation": args.weight_mask,
         "laplacian_regularization": args.weight_laplacian_regularization,
         # "normal_regularization": args.weight_normal_regularization,
         "shading": args.weight_shading,
@@ -438,6 +439,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "feature_regularization": args.weight_feature_regularization,
         "geometric_regularization": args.weight_geometric_regularization,
         "normal_laplacian": args.weight_normal_laplacian,
+        "inverted_normal": args.weight_normal_laplacian,
         "linearity_regularization": args.weight_linearity_regularization,
         "flame_regularization": args.weight_flame_regularization,
         "white_lgt_regularization": args.weight_white_lgt_regularization,
@@ -496,6 +498,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                     {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer},
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                     ], amsgrad=True,
                                                     )
     from torch.optim.lr_scheduler import LinearLR
@@ -573,7 +577,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             optimizer updates
             '''
 
-            if iteration == milestones[0]: # on stage 2 -> update the optimizer to only expression 
+            if iteration == milestones[0]: # on stage 1 -> update the optimizer to fix encoder
                 print("\nUpdating the optimizer to only expression\n")
                 # now only update the expression parameters
                 optimizer_neural_blendshapes.zero_grad(set_to_none=True)
@@ -581,6 +585,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes = torch.optim.AdamW([
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                     ], amsgrad=True,
                                                 )
                 # Create a warm-up scheduler
@@ -674,14 +680,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 # skin_mask_w_mouth = (views_subset["skin_mask"][..., :1] + views_subset["skin_mask"][..., 4:5] >= 1).float()
                 # segmentation_gt = downsample_upsample(skin_mask_w_mouth, None, (512, 512))
                 eyes_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 3:4], None, (512, 512))
-                # mouth_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 4:5], None, (512, 512))
+                mouth_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 4:5], None, (512, 512))
 
                 mask_loss_segmentation = mask_loss_function(views_subset["mask"], gbuffer_mask)
                 shading_loss, pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
 
 
-                segmentation_loss = segmentation_loss_function(eyes_segmentation_gt, gbuffers['eyes']) 
-                #                     segmentation_loss_function(mouth_segmentation_gt, gbuffers['mouth'])
+                segmentation_loss = segmentation_loss_function(eyes_segmentation_gt, gbuffers['eyes']) + \
+                                    segmentation_loss_function(mouth_segmentation_gt, gbuffers['mouth']) * 1e-1
 
                 # save eyes_segmentation_gt (shape of b h w 1) and gbuffers['eyes']
 
@@ -694,7 +700,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 # losses['mask'] += mask_loss_segmentation
                 # losses['mask'] += mask_loss_segmentation
-                losses['mask'] += mask_loss_segmentation + segmentation_loss 
+                losses['mask'] += mask_loss_segmentation 
+                losses['segmentation'] += segmentation_loss
                 losses['landmark'] += landmark_loss 
                 # losses['closure'] += closure_loss
 
@@ -703,13 +710,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
 
                 ## ======= regularization color ========
-                if args.weight_albedo_regularization > 0:
-                    losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration)
+                if args.weight_albedo_regularization > 0 and stage == 3:
+                    mult = max(0.0, min(1.0, iteration / ((args.iterations - milestones[2]) // 2)))
+                    losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration, mult=mult)
                 losses['white_lgt_regularization'] = white_light(cbuffers)
                 losses['roughness_regularization'] = roughness_regularization(cbuffers["roughness"], views_subset["skin_mask"], views_subset["mask"], r_mean=args.r_mean)
                 losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
                 # losses['normal_laplacian'] = normal_laplacian_loss
-                losses['normal_laplacian'] = normal_laplacian_loss + inverted_normal_loss + eyeball_normal_loss 
+                losses['normal_laplacian'] = normal_laplacian_loss
+                losses['inverted_normal'] = inverted_normal_loss + eyeball_normal_loss 
 
             if stage < 3:
                 '''
@@ -725,15 +734,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 expression_delta_random = neural_blendshapes.get_expression_delta()
 
-                l1_regularization = expression_delta_random.abs().mean() 
+                expression_linearity_regularization = expression_delta_random.abs().mean() 
+                detail_linearity_regularization = neural_blendshapes.tight_face_details.abs().mean() * 1e1
 
                 template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
-                detail_geometric_regularization = neural_blendshapes.tight_face_details.abs().mean() * 1e4
 
                 losses['feature_regularization'] = feature_regularization
                 losses['laplacian_regularization'] = template_mesh_laplacian_regularization + expression_mesh_laplacian_regularization 
-                losses['geometric_regularization'] = template_geometric_regularization + detail_geometric_regularization
-                losses['linearity_regularization'] = l1_regularization
+                losses['geometric_regularization'] = template_geometric_regularization 
+                losses['linearity_regularization'] = expression_linearity_regularization + detail_linearity_regularization
 
             if stage == 0:
                 indices = views_subset['idx']

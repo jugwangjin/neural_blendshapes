@@ -21,7 +21,7 @@ SCALE_CONSTANT = 0.25
 
 # different activation functions
 class GaussianActivation(nn.Module):
-    def __init__(self, a=1., trainable=True):
+    def __init__(self, a=0.15, trainable=True):
         super().__init__()
         self.register_parameter('a', nn.Parameter(a*torch.ones(1), trainable))
 
@@ -94,16 +94,13 @@ class MLPTemplate(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(inp_dim, 256),
             # nn.LayerNorm(256),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            nn.Softplus(beta=100),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(256, 3, bias=False)
         )
 
@@ -177,13 +174,13 @@ class NeuralBlendshapes(nn.Module):
         self.expression_deformer = nn.Sequential(
             nn.Linear(3, 512),
             # nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            GaussianActivation(),
             nn.Linear(512, 54*3, bias=False)
         )
 
@@ -193,21 +190,27 @@ class NeuralBlendshapes(nn.Module):
         else:
             self.register_buffer('tight_face_normals', tight_face_normals * 1e-2)
 
+        for l in self.template_deformer.mlp:
+            if isinstance(l, nn.Linear):
+                torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
+                torch.nn.init.xavier_uniform_(l.weight)
 
         # init expression deformer with low weights
         for l in self.expression_deformer:
             if isinstance(l, nn.Linear):
                 torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
                 torch.nn.init.xavier_uniform_(l.weight)
+
+
                 
         self.template_deformer = MLPTemplate(3)
         self.template_embedder = Identity()
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
-                    nn.Softplus(beta=100),
+                    GaussianActivation(),
                     nn.Linear(32, 32),
-                    nn.Softplus(beta=100),
+                    GaussianActivation(),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
@@ -459,7 +462,7 @@ def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_f
     if (os.path.exists(str(model_path))):
         print("Loading model from: ", str(model_path))
         params = torch.load(str(model_path))
-        neural_blendshapes.load_state_dict(params["state_dict"], strict=False)
+        neural_blendshapes.load_state_dict(params["state_dict"], strict=True)
     elif model_path is not None:
         print('Model path is provided but the model is not found. Initializing with random weights.')
         raise Exception("Model not found")
