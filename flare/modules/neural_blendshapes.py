@@ -229,18 +229,18 @@ class NeuralBlendshapes(nn.Module):
         self.template_embedder = Identity()
 
 
-        for l in self.template_deformer.mlp:
-            if isinstance(l, nn.Linear):
-                torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
-                n_in = l.weight.size(1)
-                torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
+        # for l in self.template_deformer.mlp:
+        #     if isinstance(l, nn.Linear):
+        #         torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
+        #         n_in = l.weight.size(1)
+        #         torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
 
-        # init expression deformer with low weights
-        for l in self.expression_deformer:
-            if isinstance(l, nn.Linear):
-                torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
-                n_in = l.weight.size(1)
-                torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
+        # # init expression deformer with low weights
+        # for l in self.expression_deformer:
+        #     if isinstance(l, nn.Linear):
+        #         torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
+        #         n_in = l.weight.size(1)
+        #         torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
                 
 
         self.pose_weight = nn.Sequential(

@@ -20,20 +20,20 @@ class DECAEncoder(nn.Module):
         ### regressor
 
         self.blendshapes_prefix = nn.Sequential(
-            nn.Linear(53, 128),
+            nn.Linear(53, 256),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(256, 256),
             nn.ReLU(),
         )
 
         self.bshapes_tail = nn.Sequential(
-            nn.Linear(feature_size + 128, 512),
+            nn.Linear(feature_size + 256, 512),
             nn.ReLU(),
-            nn.Linear(512, 256),
+            nn.Linear(512, 512),
             nn.ReLU(),
-            nn.Linear(256, 53)
+            nn.Linear(512, 53)
         )
 
         self.rotation_prefix = nn.Sequential(
@@ -44,19 +44,19 @@ class DECAEncoder(nn.Module):
         self.rotation_tail = nn.Sequential(
             nn.Linear(feature_size, 64),
             nn.ReLU(),
-            nn.Linear(64, 32),
+            nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(32, 3)
+            nn.Linear(64, 3)
         )
 
         self.translation_tail = nn.Sequential(
-            nn.Linear(3, 16),
+            nn.Linear(3, 32),
             nn.ReLU(),
-            nn.Linear(16, 16),
+            nn.Linear(32, 32),
             nn.ReLU(),
-            nn.Linear(16, 16),
+            nn.Linear(32, 32),
             nn.ReLU(),
-            nn.Linear(16, 3)
+            nn.Linear(32, 3)
         )
             
     
