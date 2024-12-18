@@ -10,7 +10,7 @@ import pytorch3d.ops as pt3o
 
 import os
 
-
+import math
 from .geometry import compute_matrix, laplacian_uniform, laplacian_density
 from .solvers import CholeskySolver, solve
 from .parameterize import to_differential, from_differential
@@ -19,9 +19,42 @@ from scipy.spatial import KDTree
 import tinycudann as tcnn
 SCALE_CONSTANT = 0.25
 
+class GaborWaveletActivation(nn.Module):
+    def __init__(self, omega=1.0, sigma=1.0):
+        """
+        Initialize the Gabor wavelet activation function.
+        Args:
+            in_features: Number of input features.
+            out_features: Number of output features.
+            omega: Frequency parameter for the sinusoidal component.
+            sigma: Standard deviation for the Gaussian envelope.
+        """
+        super(GaborWaveletActivation, self).__init__()
+        self.omega = nn.Parameter(torch.tensor(omega), requires_grad=True)
+        self.sigma = nn.Parameter(torch.tensor(sigma), requires_grad=True)
+    
+    def forward(self, x):
+        """
+        Forward pass for the Gabor wavelet activation.
+        Args:
+            x: Input tensor.
+        Returns:
+            Tensor after applying the Gabor wavelet activation.
+        """
+        # Sinusoidal component
+        sinusoidal = torch.sin(self.omega * x)
+        
+        # Gaussian envelope
+        gaussian = torch.exp(-0.5 * (x / self.sigma) ** 2)
+        
+        # Combine components
+        gabor_wavelet = sinusoidal * gaussian
+        
+        return gabor_wavelet
+
 # different activation functions
 class GaussianActivation(nn.Module):
-    def __init__(self, a=0.15, trainable=True):
+    def __init__(self, a=0.1, trainable=True):
         super().__init__()
         self.register_parameter('a', nn.Parameter(a*torch.ones(1), trainable))
 
@@ -94,13 +127,13 @@ class MLPTemplate(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(inp_dim, 256),
             # nn.LayerNorm(256),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(256, 3, bias=False)
         )
 
@@ -174,43 +207,47 @@ class NeuralBlendshapes(nn.Module):
         self.expression_deformer = nn.Sequential(
             nn.Linear(3, 512),
             # nn.LayerNorm(512),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(512, 54*3, bias=False)
         )
 
-        self.tight_face_details = torch.nn.Parameter(torch.zeros(self.tight_face_index, 53))
+        self.register_buffer('tight_face_details', torch.zeros(self.tight_face_index, 53))
+
+        # self.tight_face_details = torch.nn.Parameter(torch.zeros(self.tight_face_index, 53))
         if tight_face_normals is None:
             self.register_buffer('tight_face_normals', torch.zeros(self.tight_face_index, 3))
         else:
             self.register_buffer('tight_face_normals', tight_face_normals * 1e-2)
 
+        self.template_deformer = MLPTemplate(3)
+        self.template_embedder = Identity()
+
+
         for l in self.template_deformer.mlp:
             if isinstance(l, nn.Linear):
                 torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
-                torch.nn.init.xavier_uniform_(l.weight)
+                n_in = l.weight.size(1)
+                torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
 
         # init expression deformer with low weights
         for l in self.expression_deformer:
             if isinstance(l, nn.Linear):
                 torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
-                torch.nn.init.xavier_uniform_(l.weight)
-
-
+                n_in = l.weight.size(1)
+                torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
                 
-        self.template_deformer = MLPTemplate(3)
-        self.template_embedder = Identity()
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
-                    GaussianActivation(),
+                    nn.Softplus(beta=100),
                     nn.Linear(32, 32),
-                    GaussianActivation(),
+                    nn.Softplus(beta=100),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )

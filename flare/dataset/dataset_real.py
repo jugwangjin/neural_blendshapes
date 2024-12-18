@@ -226,8 +226,6 @@ class DatasetLoader(Dataset):
             self.bshapes_mode_np = self.bshapes_mode.cpu().data.numpy()
             return self.bshapes_mode
         
-        
-
         if compute_mode is False:
             self.bshapes_mode = torch.zeros(53, dtype=torch.float32)
             self.bshapes_mode_np = self.bshapes_mode.cpu().data.numpy()
@@ -242,20 +240,14 @@ class DatasetLoader(Dataset):
         
         bshapes = torch.cat(bshapes, dim=0).cpu().data.numpy()
 
-        from scipy.stats import gaussian_kde
-        modes = []
+        percentiles = []
         for au in tqdm(range(52)):
-            # KDE-based mode estimation
-            kde = gaussian_kde(bshapes[:, au])
-            intensity_range = np.linspace(0, 1, 51)
-            kde_values = kde(intensity_range)
-            mode_index = np.argmax(kde_values)
-            mode_kde = intensity_range[mode_index]
+            # 5th percentile estimation
+            percentile_value = np.percentile(bshapes[:, au], 10)
+            percentiles.append(percentile_value)
 
-            modes.append(mode_kde)
-
-        print('mode of blendshapes:', modes)
-        self.bshapes_mode = torch.tensor(modes, dtype=torch.float32)
+        # print('5th percentile of blendshapes:', percentiles)
+        self.bshapes_mode = torch.tensor(percentiles, dtype=torch.float32)
 
         torch.save(self.bshapes_mode, precomputed_mode)
         

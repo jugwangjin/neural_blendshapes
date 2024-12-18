@@ -440,6 +440,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "geometric_regularization": args.weight_geometric_regularization,
         "normal_laplacian": args.weight_normal_laplacian,
         "inverted_normal": args.weight_normal_laplacian,
+        "eyeball_normal": args.weight_normal_laplacian,
         "linearity_regularization": args.weight_linearity_regularization,
         "flame_regularization": args.weight_flame_regularization,
         "white_lgt_regularization": args.weight_white_lgt_regularization,
@@ -718,7 +719,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
                 # losses['normal_laplacian'] = normal_laplacian_loss
                 losses['normal_laplacian'] = normal_laplacian_loss
-                losses['inverted_normal'] = inverted_normal_loss + eyeball_normal_loss 
+                losses['inverted_normal'] = inverted_normal_loss
+                losses['eyeball_normal']    = eyeball_normal_loss
 
             if stage < 3:
                 '''

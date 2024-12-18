@@ -13,8 +13,8 @@ iterations = 10000
 upsample_iterations = [500]
 
 lr_shader = 1e-3
-lr_deformer = 2e-4
-lr_jacobian = 2e-4
+lr_deformer = 1e-4
+lr_jacobian = 1e-4
 
 weight_shading = 1
 weight_perceptual_loss = 1e-1
@@ -50,5 +50,5 @@ light_mlp_dims = [64, 64]
 material_mlp_dims = [128, 128, 128, 128]
 material_mlp_ch = 5
 
-stage_iterations = [5000, 2000, 2000, 3000]
+stage_iterations = [5000, 1000, 2000, 3000]
 only_flame_iterations = 1000
