@@ -22,18 +22,16 @@ class DECAEncoder(nn.Module):
         self.blendshapes_prefix = nn.Sequential(
             nn.Linear(53, 128),
             nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
         )
 
         self.bshapes_tail = nn.Sequential(
-            nn.Linear(feature_size + 128, 256),
+            nn.Linear(feature_size + 128, 512),
             nn.ReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(512, 256),
             nn.ReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(256, 53, bias=False)
+            nn.Linear(128, 53, bias=False)
         )
 
         self.rotation_prefix = nn.Sequential(

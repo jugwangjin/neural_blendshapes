@@ -20,7 +20,7 @@ import tinycudann as tcnn
 SCALE_CONSTANT = 0.25
 
 class GaborWaveletActivation(nn.Module):
-    def __init__(self, omega=1.0, sigma=0.2):
+    def __init__(self, omega=2.0, sigma=2.):
         """
         Initialize the Gabor wavelet activation function.
         Args:
@@ -54,7 +54,7 @@ class GaborWaveletActivation(nn.Module):
 
 # different activation functions
 class GaussianActivation(nn.Module):
-    def __init__(self, a=0.1, trainable=True):
+    def __init__(self, a=0.15, trainable=True):
         super().__init__()
         self.register_parameter('a', nn.Parameter(a*torch.ones(1), trainable))
 
@@ -127,13 +127,13 @@ class MLPTemplate(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(inp_dim, 256),
             # nn.LayerNorm(256),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(256, 3, bias=False)
         )
 
@@ -207,13 +207,13 @@ class NeuralBlendshapes(nn.Module):
         self.expression_deformer = nn.Sequential(
             nn.Linear(3, 512),
             # nn.LayerNorm(512),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            GaussianActivation(),
+            GaborWaveletActivation(),
             nn.Linear(512, 54*3, bias=False)
         )
 
@@ -228,6 +228,11 @@ class NeuralBlendshapes(nn.Module):
         self.template_deformer = MLPTemplate(3)
         self.template_embedder = Identity()
 
+        # initialize last layer of template deformer with low weights
+        torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 256)
+
+        # initialize last layer of expression deformer with low weights
+        torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 512)
 
         # for l in self.template_deformer.mlp:
         #     if isinstance(l, nn.Linear):
@@ -385,6 +390,11 @@ class NeuralBlendshapes(nn.Module):
         # encoded_points2 = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
         template_mesh_u_delta = self.template_deformer(encoded_points)
+
+        # if nan in template_mesh_u_delta - raise
+        if torch.isnan(template_mesh_u_delta).any():
+            raise Exception("NaN in template_mesh_u_delta")
+
         
         template_mesh_delta = self.solve(template_mesh_u_delta) 
 
@@ -408,6 +418,8 @@ class NeuralBlendshapes(nn.Module):
             return return_dict
 
         expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 54, 3)
+        if torch.isnan(expression_mesh_delta_u).any():
+            raise Exception("NaN in expression_mesh_delta_u")
 
         feat = features[:, :53].clamp(0, 1)
         feat = torch.cat([feat, torch.ones_like(feat[:, :1])], dim=1)

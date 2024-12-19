@@ -186,35 +186,6 @@ class Renderer:
         face_idx = deformed_normals["face_idx"].int()
         rast, rast_out_db = dr.rasterize(self.glctx, deformed_vertices_clip_space, idx, resolution=resolution)
 
-        # import time
-
-        # start = time.time()
-
-        face_ids = rast[..., -1].long()
-        # Flatten the face_ids to easily work with indexing
-        face_ids_flat = face_ids.view(-1)  # Shape: (batch_size * height * width)
-
-        # Create a segmentation map initialized to -1 (indicating background)
-        segmentation_map = torch.full((batch_size, resolution[0], resolution[1]), fill_value=-1, dtype=torch.long, device=face_ids.device)
-
-        # Flatten segmentation_map for easier indexing
-        segmentation_map_flat = segmentation_map.view(-1)
-
-        # Create a mask for valid faces (face_ids >= 0)
-        invalid_mask = torch.all(rast == 0, dim=-1) # B H W mask
-        # negate 
-        valid_mask = ~invalid_mask
-        valid_mask = valid_mask.view(-1)
-
-        # Update segmentation map for valid face pixels using mesh.face_labels
-        valid_face_ids = face_ids_flat[valid_mask]  # Extract valid face indices (1D tensor)
-        segmentation_map_flat[valid_mask] = mesh.face_labels[valid_face_ids]  # Assign labels based on face indices
-
-        # Reshape segmentation_map back to (batch_size, height, width)
-        segmentation_map = segmentation_map_flat.view(batch_size, resolution[0], resolution[1])
-
-        # print(f"Segmentation map computation time: {time.time() - start}")
-
         view_dir = torch.cat([v.center.unsqueeze(0) for v in views], dim=0)
         view_dir = view_dir[:, None, None, :]
         gbuffer = {}
@@ -252,10 +223,46 @@ class Renderer:
             gbuffer["mask_low_res"] = gbuffer["mask"]
             gbuffer["mask"] = upsample(gbuffer["mask"], high_res)
 
-        if 'mask' in channels and 'canonical_position' in channels and 'segmentation' in channels:            
+        if 'mask' in channels and 'canonical_position' in channels and 'segmentation' in channels:           
+            face_ids = rast[..., -1].long()
+            face_ids_flat = face_ids.view(-1)  # Shape: (batch_size * height * width)
 
-            # segmentation: face W/O mouth
-            segmentation = ((segmentation_map[..., None] == 0) | (segmentation_map[..., None] == 1)).float() # face W/O eyes and mouth.
+            segmentation_map = torch.full((batch_size, resolution[0], resolution[1]), fill_value=-1, dtype=torch.long, device=face_ids.device)
+            segmentation_map_flat = segmentation_map.view(-1)
+
+            # Create masks
+            invalid_mask = torch.all(rast == 0, dim=-1)  # B H W mask
+            valid_mask = ~invalid_mask
+            valid_mask = valid_mask.view(-1)
+
+            # Additional mask to ensure face IDs are non-negative
+            valid_face_mask = face_ids_flat >= 0
+
+            # Combine masks
+            combined_valid_mask = valid_mask & valid_face_mask  # Logical AND
+
+            # Convert combined_valid_mask to indices
+            combined_valid_indices = combined_valid_mask.nonzero(as_tuple=False).squeeze(1)
+
+            # Extract valid face IDs
+            valid_face_ids = face_ids_flat[combined_valid_indices]
+
+            # Ensure valid_face_ids are within valid range
+            num_faces = mesh.face_labels.shape[0]
+            valid_range_mask = (valid_face_ids >= 0) & (valid_face_ids < num_faces)
+
+            # Apply valid range mask to face IDs and indices
+            valid_face_ids = valid_face_ids[valid_range_mask]
+            valid_indices = combined_valid_indices[valid_range_mask]
+
+            # Update segmentation map for valid face pixels using mesh.face_labels
+            segmentation_map_flat[valid_indices] = mesh.face_labels[valid_face_ids]
+
+            # Reshape segmentation_map back to (batch_size, height, width)
+            segmentation_map = segmentation_map_flat.view(batch_size, resolution[0], resolution[1])
+
+            # Segmentation: face without eyes and mouth
+            segmentation = (segmentation_map[..., None] == 0).float() # face
             segmentation = dr.antialias(segmentation.float(), rast, deformed_vertices_clip_space, idx)
 
             gbuffer['segmentation'] = segmentation
