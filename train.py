@@ -421,7 +421,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         params += list(_adaptive.parameters()) ## need to train it
 
 
-    optimizer_shader = torch.optim.AdamW(params, lr=args.lr_shader, amsgrad=True)
+    optimizer_shader = torch.optim.AdamW(params, lr=args.lr_shader, amsgrad=True, weight_decay=1e-3)
 
     # ==============================================================================================
     # Loss Functions
@@ -501,7 +501,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
-                                                    ], amsgrad=True,
+                                                    ], amsgrad=True, weight_decay=1e-3,
                                                     )
     from torch.optim.lr_scheduler import LinearLR
     num_warmup_steps = 100  # Adjust this value based on your needs
@@ -588,7 +588,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
-                                                    ], amsgrad=True,
+                                                    ], amsgrad=True, weight_decay=1e-3,
                                                 )
                 # Create a warm-up scheduler
                 from torch.optim.lr_scheduler import LinearLR
@@ -608,7 +608,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes = torch.optim.AdamW([
                                                 {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                 {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
-                                                ], amsgrad=True,
+                                                ], amsgrad=True, weight_decay=1e-3,
                                                 )
                 # Create a warm-up scheduler
                 from torch.optim.lr_scheduler import LinearLR
@@ -640,7 +640,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     _adaptive = AdaptiveLossFunction(num_dims=4, float_dtype=np.float32, device=device)
                     params += list(_adaptive.parameters()) ## need to train it
 
-                optimizer_shader = torch.optim.AdamW(params, lr=args.lr_shader, amsgrad=True)
+                optimizer_shader = torch.optim.AdamW(params, lr=args.lr_shader, amsgrad=True, weight_decay=1e-3)
 
                 optimizer_neural_blendshapes = None
                 neural_blendshapes.eval()

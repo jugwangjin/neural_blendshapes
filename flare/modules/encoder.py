@@ -20,20 +20,20 @@ class DECAEncoder(nn.Module):
         ### regressor
 
         self.blendshapes_prefix = nn.Sequential(
-            nn.Linear(53, 256),
+            nn.Linear(53, 128),
             nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(128, 128),
             nn.ReLU(),
         )
 
         self.bshapes_tail = nn.Sequential(
-            nn.Linear(feature_size + 256, 512),
+            nn.Linear(feature_size + 128, 256),
             nn.ReLU(),
-            nn.Linear(512, 512),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(512, 53)
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 53, bias=False)
         )
 
         self.rotation_prefix = nn.Sequential(
@@ -46,7 +46,7 @@ class DECAEncoder(nn.Module):
             nn.ReLU(),
             nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(64, 3)
+            nn.Linear(64, 3, bias=False)
         )
 
         self.translation_tail = nn.Sequential(
@@ -62,24 +62,24 @@ class DECAEncoder(nn.Module):
     
         self.last_op = last_op
 
-        # Initialize weights and biases for expression deformer
-        for layer in self.bshapes_tail:
-            if isinstance(layer, nn.Linear):
-                # Initialize weight and bias based on ForwardDeformer strategy
-                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-                torch.nn.init.xavier_uniform_(layer.weight)
+        # # Initialize weights and biases for expression deformer
+        # for layer in self.bshapes_tail:
+        #     if isinstance(layer, nn.Linear):
+        #         # Initialize weight and bias based on ForwardDeformer strategy
+        #         torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
+        #         torch.nn.init.xavier_uniform_(layer.weight)
 
-        for layer in self.rotation_tail:
-            if isinstance(layer, nn.Linear):
-                # Initialize weight and bias based on ForwardDeformer strategy
-                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-                torch.nn.init.xavier_uniform_(layer.weight)
+        # for layer in self.rotation_tail:
+        #     if isinstance(layer, nn.Linear):
+        #         # Initialize weight and bias based on ForwardDeformer strategy
+        #         torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
+        #         torch.nn.init.xavier_uniform_(layer.weight)
 
-        for layer in self.translation_tail:
-            if isinstance(layer, nn.Linear):
-                # Initialize weight and bias based on ForwardDeformer strategy
-                torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
-                torch.nn.init.xavier_uniform_(layer.weight)
+        # for layer in self.translation_tail:
+        #     if isinstance(layer, nn.Linear):
+        #         # Initialize weight and bias based on ForwardDeformer strategy
+        #         torch.nn.init.constant_(layer.bias, 0.0) if layer.bias is not None else None
+        #         torch.nn.init.xavier_uniform_(layer.weight)
 
         for param in self.encoder.parameters():
             param.requires_grad = False  # Freeze all encoder parameters initially

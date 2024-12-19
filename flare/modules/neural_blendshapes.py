@@ -20,7 +20,7 @@ import tinycudann as tcnn
 SCALE_CONSTANT = 0.25
 
 class GaborWaveletActivation(nn.Module):
-    def __init__(self, omega=1.0, sigma=1.0):
+    def __init__(self, omega=1.0, sigma=0.2):
         """
         Initialize the Gabor wavelet activation function.
         Args:
@@ -127,13 +127,13 @@ class MLPTemplate(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(inp_dim, 256),
             # nn.LayerNorm(256),
-            GaborWaveletActivation(),
+            GaussianActivation(),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            GaborWaveletActivation(),
+            GaussianActivation(),
             nn.Linear(256, 256),
             # nn.LayerNorm(256),
-            GaborWaveletActivation(),
+            GaussianActivation(),
             nn.Linear(256, 3, bias=False)
         )
 
@@ -207,13 +207,13 @@ class NeuralBlendshapes(nn.Module):
         self.expression_deformer = nn.Sequential(
             nn.Linear(3, 512),
             # nn.LayerNorm(512),
-            GaborWaveletActivation(),
+            GaussianActivation(),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            GaborWaveletActivation(),
+            GaussianActivation(),
             nn.Linear(512, 512),
             # nn.LayerNorm(512),
-            GaborWaveletActivation(),
+            GaussianActivation(),
             nn.Linear(512, 54*3, bias=False)
         )
 
