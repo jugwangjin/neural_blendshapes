@@ -4,6 +4,11 @@
 # landmark detector: uses dlib, from stylegan-encoder (ffhq-alignment source)
 
 import sys
+import os
+# add this file's parent directory into sys path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
+
 import os 
 script_path = os.path.abspath(__file__)
 script_dir = os.path.dirname(script_path)
@@ -23,12 +28,12 @@ import dlib
 
 import tqdm
 
-
-NORMAL_MODEL_PATH = "./assets/face_normals.pth"   
+print(os.getcwd())
+NORMAL_MODEL_PATH = os.path.join(parent_dir, "assets/face_normals.pth")
 # https://github.com/boukhayma/face_normals/
 # https://drive.google.com/file/d/1Qb7CZbM13Zpksa30ywjXEEHHDcVWHju_
 
-LANDMARKS_MODEL_URL = "./assets/shape_predictor_68_face_landmarks.dat.bz2"
+LANDMARKS_MODEL_URL = os.path.join(parent_dir, "assets/shape_predictor_68_face_landmarks.dat.bz2")
 # http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
 
 def unpack_bz2(src_path):

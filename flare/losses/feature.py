@@ -1,6 +1,6 @@
 import torch
 import pytorch3d.transforms as p3dt
-def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_modulation, views, mode, facs_weight=0, mult=1, rot_mult=1):
+def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_modulation, views, mode, facs_weight=0, mult=1, rot_mult=1, random_features_batch_size=8):
     facs = feature[..., :53]
     rotation = feature[..., 53:56]
     translation = feature[..., 56:59]
@@ -20,10 +20,19 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     target_facs = (gt_facs).clamp(min=0, max=1)
     
     
-    facs_reg = ((facs - target_facs))
+    facs_reg = ((facs - target_facs)) 
     # facs_reg = ((facs - target_facs).pow(2) * facs_reg_weights)
     facs_reg[:, eyeball_indices] *= 1e1
-    facs_reg = facs_reg.pow(2).mean() * mult
+    facs_reg = facs_reg.pow(2).mean() * mult + feature[..., -53:].pow(2).mean() 
+
+    random_features = torch.randn(random_features_batch_size, neural_blendshapes.encoder.encoder.feature_size, device=facs.device) * 0.02
+    random_facs = torch.rand(random_features_batch_size, 53, device=facs.device)
+
+    bshapes_additional_features = neural_blendshapes.encoder.encoder.blendshapes_prefix(random_facs)
+    bshapes_out = neural_blendshapes.encoder.encoder.bshapes_tail(torch.cat([random_features, bshapes_additional_features], dim=-1))
+
+    facs_reg += bshapes_out.pow(2).mean() 
+    
 
     transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
     scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)

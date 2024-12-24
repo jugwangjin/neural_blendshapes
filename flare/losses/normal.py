@@ -91,7 +91,7 @@ def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
         # mask_cam   = (normal_cam[..., 2] < -1e-2).float()
         # normal = normal * (1 - mask_cam[..., None]) + normal * mask_cam [..., None] * -1
 
-        target_position = position - normal
+        target_position = position - normal * 1e-1
 
     mask = ((1 - gt_eye_seg) * rendered_eye_seg).float()
 

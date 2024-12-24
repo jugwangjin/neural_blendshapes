@@ -20,7 +20,7 @@ import tinycudann as tcnn
 SCALE_CONSTANT = 0.25
 
 class GaborWaveletActivation(nn.Module):
-    def __init__(self, omega=2.0, sigma=2.):
+    def __init__(self, omega=0.5, sigma=2.):
         """
         Initialize the Gabor wavelet activation function.
         Args:
@@ -125,16 +125,19 @@ class MLPTemplate(nn.Module):
     def __init__(self, inp_dim):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(inp_dim, 256),
-            # nn.LayerNorm(256),
-            GaborWaveletActivation(),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
-            GaborWaveletActivation(),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
-            GaborWaveletActivation(),
-            nn.Linear(256, 3, bias=False)
+            nn.Linear(inp_dim, 128),
+            # nn.LayerNorm(128),
+            nn.Softplus(beta=100),
+            nn.Linear(128, 128),
+            # nn.LayerNorm(128),
+            nn.Softplus(beta=100),
+            nn.Linear(128, 128),
+            # nn.LayerNorm(128),
+            nn.Softplus(beta=100),
+            nn.Linear(128, 128),
+            # nn.LayerNorm(128),
+            nn.Softplus(beta=100),
+            nn.Linear(128, 3, bias=False)
         )
 
     def forward(self, x):
@@ -205,16 +208,19 @@ class NeuralBlendshapes(nn.Module):
 
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(3, 512),
-            # nn.LayerNorm(512),
-            GaborWaveletActivation(),
-            nn.Linear(512, 512),
-            # nn.LayerNorm(512),
-            GaborWaveletActivation(),
-            nn.Linear(512, 512),
-            # nn.LayerNorm(512),
-            GaborWaveletActivation(),
-            nn.Linear(512, 54*3, bias=False)
+            nn.Linear(3, 256),
+            # nn.LayerNorm(256),
+            nn.Softplus(beta=100),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
+            nn.Softplus(beta=100),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
+            nn.Softplus(beta=100),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
+            nn.Softplus(beta=100),
+            nn.Linear(256, 54*3, bias=False)
         )
 
         self.register_buffer('tight_face_details', torch.zeros(self.tight_face_index, 53))
@@ -234,18 +240,18 @@ class NeuralBlendshapes(nn.Module):
         # initialize last layer of expression deformer with low weights
         torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 512)
 
-        # for l in self.template_deformer.mlp:
-        #     if isinstance(l, nn.Linear):
-        #         torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
-        #         n_in = l.weight.size(1)
-        #         torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
+        for l in self.template_deformer.mlp:
+            if isinstance(l, nn.Linear):
+                torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
+                # n_in = l.weight.size(1)
+                # torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
 
-        # # init expression deformer with low weights
-        # for l in self.expression_deformer:
-        #     if isinstance(l, nn.Linear):
-        #         torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
-        #         n_in = l.weight.size(1)
-        #         torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
+        # init expression deformer with low weights
+        for l in self.expression_deformer:
+            if isinstance(l, nn.Linear):
+                torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
+                # n_in = l.weight.size(1)
+                # torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
                 
 
         self.pose_weight = nn.Sequential(
