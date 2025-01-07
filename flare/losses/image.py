@@ -117,6 +117,21 @@ def segmentation_loss_function(masks, gbuffers, epsilon=1e-8):
     # Compute Dice-based loss (aligned with L_latent)
     # iou_loss = 1 - (2 * intersection / dice_union).mean() 
     
+    # if gbuffers is all zeros: return zero 
+
+    mse_losses = 0
+
+    for b in range(masks.shape[0]):
+        # if gbuffers[b].sum() == 0: # if gbuffers is all zeros
+        #     continue
+        if (gbuffers[b] * masks[b]).sum() == 0: # if gbuffers and masks have no intersection
+            mse_losses += gbuffers[b].pow(2).mean() * 1e-1
+        else:
+            mse_losses += (masks[b] - gbuffers[b]).pow(2).mean()
+
+    return mse_losses / masks.shape[0]
+        
+
     mse_loss = (masks - gbuffers).pow(2).mean()
 
     return mse_loss

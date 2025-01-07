@@ -22,50 +22,57 @@ class DECAEncoder(nn.Module):
 
         self.blendshapes_prefix = nn.Sequential(
             nn.Linear(53, 128),
-            nn.Softplus(beta=10),
+            nn.ReLU(),
         )
 
         self.bshapes_tail = nn.Sequential(
             nn.Linear(feature_size + 128, 1024),
             nn.LayerNorm(1024),
-            nn.Softplus(beta=10),
+            nn.ReLU(),
             nn.Linear(1024, 512),
             nn.LayerNorm(512),
-            nn.Softplus(beta=10),
+            nn.ReLU(),
             nn.Linear(512, 256),
             nn.LayerNorm(256),
-            nn.Softplus(beta=10),
+            nn.ReLU(),
             nn.Linear(256, 53)
         )
 
         self.rotation_prefix = nn.Sequential(
             nn.Linear(3, 8),
-            nn.Softplus(beta=10),
+            nn.ReLU(),
         )
 
         self.rotation_tail = nn.Sequential(
-            nn.Linear(feature_size, 64),
-            nn.LayerNorm(64),
-            nn.Softplus(beta=10),
-            nn.Linear(64, 64),
-            nn.LayerNorm(64),
-            nn.Softplus(beta=10),
-            nn.Linear(64, 3, bias=False)
+            nn.Linear(feature_size, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 3, bias=False)
         )
 
         self.translation_tail = nn.Sequential(
-            nn.Linear(3, 32),
-            nn.LayerNorm(32),
-            nn.Softplus(beta=10),
+            nn.Linear(9, 32),
+            nn.ReLU(),
             nn.Linear(32, 32),
-            nn.LayerNorm(32),
-            nn.Softplus(beta=10),
+            nn.ReLU(),
             nn.Linear(32, 32),
-            nn.LayerNorm(32),
-            nn.Softplus(beta=10),
-            nn.Linear(32, 3)
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, 6)
         )
-            
+        
+        # multiply by 0.1 to the last layers of rotation_tail and translation_tail
+        self.bshapes_tail[-1].weight.data *= 0.1
+        self.rotation_tail[-1].weight.data *= 0.1
+        self.translation_tail[-1].weight.data *= 0.1
+
+        # set zero of the translation_tail bias
+        self.translation_tail[-1].bias.data = torch.zeros(6)
+
     
         self.last_op = last_op
 
@@ -89,7 +96,7 @@ class DECAEncoder(nn.Module):
         self.encoder.eval()
 
 
-    def forward(self, inputs, bshapes):
+    def forward(self, inputs, bshapes, mp_translation, flame_cam_t):
         with torch.no_grad():
             encoder_features = self.encoder(inputs)
             encoder_features = encoder_features.data.detach()
@@ -102,9 +109,8 @@ class DECAEncoder(nn.Module):
         bshapes_tail_out = bshapes_out
 
         bshapes_out = torch.pow(bshapes, torch.exp(bshapes_out))
-        rotation_out = rotation_out
-
-        translation_out = self.translation_tail(torch.cat([rotation_out], dim=-1))
+        # print(rotation_out.shape, mp_translation.shape, flame_cam_t.shape, torch.cat([rotation_out, mp_translation, flame_cam_t], dim=-1).shape)
+        translation_out = self.translation_tail(torch.cat([rotation_out, mp_translation, flame_cam_t], dim=-1))
         
         out = torch.cat([bshapes_out, rotation_out, translation_out, bshapes_tail_out], dim=-1)
         if self.last_op:
@@ -139,15 +145,16 @@ class ResnetEncoder(nn.Module):
         self.flame_cam_t = torch.nn.Sequential(
                             nn.Linear(3, 3)
                             )
-        self.flame_cam_t[0].weight.data = torch.eye(3) * 1e-1
+        self.flame_cam_t[0].weight.data = torch.eye(3) * 1e-2
         self.flame_cam_t[0].bias.data = torch.zeros(3)
 
         self.blendshapes_multiplier = torch.nn.Parameter((torch.zeros(53)))
         self.blendshapes_offset = torch.nn.Parameter(torch.zeros(53))
         self.softplus = torch.nn.Softplus(beta=4)
 
-        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.2, -0.28]))
-        self.global_translation = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
+        self.register_buffer('transform_origin', torch.tensor([0., -0.2, -0.28]))
+        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.2, -0.28]))
+        # self.global_translation_param = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
 
         
     def load_deca_encoder(self):
@@ -161,12 +168,12 @@ class ResnetEncoder(nn.Module):
     def forward(self, views):
         with torch.no_grad():
             img = views['img_deca']
-            # transform_matrix = views['mp_transform_matrix'].clone().detach().reshape(-1, 4, 4)
+            transform_matrix = views['mp_transform_matrix'].clone().detach().reshape(-1, 4, 4)
             # scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
 
-            # mp_translation = transform_matrix[:, :3, 3]
-            # mp_translation[..., -1] += 28
-            # mp_translation = mp_translation * 0.2
+            mp_translation = transform_matrix[:, :3, 3]
+            mp_translation[..., -1] += 28
+            mp_translation = mp_translation * 0.2
 
             # rotation_matrix = transform_matrix[:, :3, :3]
             # rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
@@ -186,18 +193,26 @@ class ResnetEncoder(nn.Module):
             ts = torch.stack([cam.t for cam in views['flame_camera']], dim=0)
         flame_cam_t = self.flame_cam_t(ts)
 
+
+        # translation = translation
+        global_translation = flame_cam_t
+        # translation = translation + flame_cam_t
+
         # flame_cam_t = self.flame_cam_t(ts)
-        features = self.encoder(img, mp_bshapes)
+        features = self.encoder(img, mp_bshapes, mp_translation, flame_cam_t)
         blendshapes = features[:, :53]
         rotation = features[:, 53:56] 
         translation = features[:, 56:59]
 
-        translation = translation + flame_cam_t
-        # translation = translation + flame_cam_t
+        global_translation = flame_cam_t + features[:, 59:62]
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
-        out_features = torch.cat([blendshapes, rotation, translation, scale, features[:, 56:59], features[:, -53:]], dim=-1)
+        # rotation *= 0
+        # translation *= 0
+        # self.global_translation *= 0
+
+        out_features = torch.cat([blendshapes, rotation, translation, scale, global_translation], dim=-1)
 
         return out_features
 

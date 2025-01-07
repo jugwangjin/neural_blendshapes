@@ -125,19 +125,16 @@ class MLPTemplate(nn.Module):
     def __init__(self, inp_dim):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(inp_dim, 128),
-            # nn.LayerNorm(128),
+            nn.Linear(inp_dim, 512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            # nn.LayerNorm(128),
+            nn.Linear(512, 512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            # nn.LayerNorm(128),
+            nn.Linear(512, 512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            # nn.LayerNorm(128),
-            nn.Softplus(beta=100),
-            nn.Linear(128, 3, bias=False)
+            nn.Linear(512, 3, bias=False)
         )
 
     def forward(self, x):
@@ -208,24 +205,21 @@ class NeuralBlendshapes(nn.Module):
 
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(3, 256),
-            # nn.LayerNorm(256),
+            nn.Linear(3, 512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
+            nn.Linear(512, 512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
+            nn.Linear(512, 512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(256, 256),
-            # nn.LayerNorm(256),
-            nn.Softplus(beta=100),
-            nn.Linear(256, 54*3, bias=False)
+            nn.Linear(512, 54*3, bias=False)
         )
 
-        self.register_buffer('tight_face_details', torch.zeros(self.tight_face_index, 53))
+        # self.register_buffer('tight_face_details', torch.zeros(self.tight_face_index, 53))
 
-        # self.tight_face_details = torch.nn.Parameter(torch.zeros(self.tight_face_index, 53))
+        self.tight_face_details = torch.nn.Parameter(torch.zeros(self.tight_face_index, 54))
         if tight_face_normals is None:
             self.register_buffer('tight_face_normals', torch.zeros(self.tight_face_index, 3))
         else:
@@ -420,6 +414,8 @@ class NeuralBlendshapes(nn.Module):
         return_dict['ict_mesh_w_temp'] = self.remove_teeth(ict_mesh_w_temp)
         return_dict['ict_mesh_w_temp_posed'] = self.remove_teeth(ict_mesh_w_temp_posed)
 
+        return_dict['expression_mesh_delta'] = torch.zeros_like(template_mesh_delta)
+
         if pretrain:
             return return_dict
 
@@ -436,15 +432,18 @@ class NeuralBlendshapes(nn.Module):
         # feat has shape of B, 53
         # einsum and multiplying it with tight_face_normals will have shape of B, 6705, 3
         # add to expression_mesh_delta
-        tight_face_details = torch.einsum('bn, dn -> bd', features[:, :53], self.tight_face_details) # shape of B, 6705
+        tight_face_details = torch.einsum('bn, dn -> bd', feat, self.tight_face_details) # shape of B, 6705
         tight_face_details = tight_face_details[..., None] * self.tight_face_normals[None] # shape of B, 6705, 3
         expression_mesh_delta[:, :self.tight_face_index] += tight_face_details
 
         expression_mesh = ict_mesh_w_temp + expression_mesh_delta
 
         expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
+    
         return_dict['expression_mesh'] = self.remove_teeth(expression_mesh)
         return_dict['expression_mesh_posed'] = self.remove_teeth(expression_mesh_posed)
+
+        return_dict['expression_mesh_delta'] = expression_mesh_delta
 
         return_dict['pose_weight'] = pose_weight
 
@@ -468,6 +467,7 @@ class NeuralBlendshapes(nn.Module):
         translation = features[..., 56:59]
         scale = features[..., 59:60]
         transform_origin = self.encoder.transform_origin
+        global_translation = features[..., 60:63]
         # translation = self.encoder.translation
         
 
@@ -497,7 +497,7 @@ class NeuralBlendshapes(nn.Module):
             weights = weights.view(1, V, 1)
             deformed_vertices = deformed_vertices * weights + scaled_vertices * (1 - weights)
 
-        return deformed_vertices + self.encoder.global_translation[None, None, :]
+        return deformed_vertices + global_translation[:, None, :]
 
     def save(self, path):
         data = {

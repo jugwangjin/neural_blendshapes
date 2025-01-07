@@ -83,7 +83,7 @@ def _load_img(fn):
 def _load_semantic(fn):
     img = imageio.imread(fn, mode='F')
     h, w = img.shape
-    semantics = np.zeros((h, w, 6))
+    semantics = np.zeros((h, w, 7))
     # Labels that ICT have
     # face, head/neck/, left eye, right eye, mouth interior
     # face + eyebrow + nose + upper lip + lower lip + ears +  == ICT-FaceKit.full_face_area
@@ -128,13 +128,16 @@ def _load_semantic(fn):
     # skin, ear, nose, neck
     semantics[:, :, 2] = ((img == 1) + (img == 7) + (img == 8) + (img == 10) + (img == 14)) >= 1
 
-    # only eyes
-    semantics[:, :, 3] = ((img == 4) + (img == 5)) >= 1
+    # left eyes
+    semantics[:, :, 3] = ((img == 5)) >= 1
+
+    # right eyes
+    semantics[:, :, 4] = ((img == 4)) >= 1
 
     #inside mouth
-    semantics[:, :, 4] = (img == 11) >= 1  # will it include the teeth and 
+    semantics[:, :, 5] = (img == 11) >= 1  # will it include the teeth and 
 
-    semantics[:, :, 5] = 1. - np.sum(semantics[:, :, :-1], 2) # background
+    semantics[:, :, 6] = 1. - np.sum(semantics[:, :, :-1], 2) # background
 
     semantics = torch.tensor(semantics, dtype=torch.float32)
     return semantics

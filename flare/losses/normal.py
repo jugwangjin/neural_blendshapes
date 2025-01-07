@@ -73,8 +73,8 @@ def normal_loss(gbuffers, views_subset, gbuffer_mask, device):
 def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
     # get the mask. 
     # gt eye seg
-    gt_eye_seg = views_subset["skin_mask"][..., 3:4]
-    rendered_eye_seg = gbuffers["eyes"]
+    gt_eye_seg = views_subset["skin_mask"][..., 3:5].sum(dim=-1, keepdim=True)
+    rendered_eye_seg = gbuffers["left_eye"] + gbuffers["right_eye"]
 
 
     position = upsample(gbuffers["position"], high_res)
@@ -86,7 +86,7 @@ def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
         camera = torch.stack([c.R.T for c in camera], dim=0).to(device)
         R = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], device=device, dtype=torch.float32)
 
-        normal_cam = torch.einsum('bhwc, cj->bhwj', torch.einsum('bhwc, bcj->bhwj', normal, camera), R.T) # shape of B, H, W, 3
+        # normal_cam = torch.einsum('bhwc, cj->bhwj', torch.einsum('bhwc, bcj->bhwj', normal, camera), R.T) # shape of B, H, W, 3
 
         # mask_cam   = (normal_cam[..., 2] < -1e-2).float()
         # normal = normal * (1 - mask_cam[..., None]) + normal * mask_cam [..., None] * -1
@@ -123,7 +123,7 @@ def eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
     return eye_loss
 
     # for 4:5, mouth.
-    gt_mouth_seg = views_subset["skin_mask"][..., 4:5]
+    gt_mouth_seg = views_subset["skin_mask"][..., 5:6]
     rendered_mouth_seg = gbuffers["mouth"]
 
     mask = ((1 - gt_mouth_seg) * rendered_mouth_seg).float()
@@ -152,7 +152,7 @@ def inverted_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device):
         mask = (normal[..., 2] < -1e-2).float()
 
         mask = mask[..., None] * gbuffer_mask
-        target_position = position + gbuffers["normal"] 
+        target_position = position + gbuffers["normal"] * 1e-1
 
     loss = torch.mean(torch.pow(position - target_position, 2) * mask) 
     return loss

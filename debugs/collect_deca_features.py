@@ -138,6 +138,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         print(deca_features.std(0))
         print(deca_features.min(0).values)
         print(deca_features.max(0).values)
+        print(deca_features.mean())
+        print(deca_features.std())
+        print(deca_features.min())
+        print(deca_features.max())
 
 if __name__ == '__main__':
     parser = config_parser()

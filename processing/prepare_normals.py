@@ -154,11 +154,20 @@ def main(args):
     for vid in os.listdir(args.input):
         if not os.path.isdir(os.path.join(args.input, vid)):
             continue
+        # if os.path.exists(os.path.join(args.input, vid, 'normal')):
+        #     print(f"Skipping {args.input}, {vid}")
+        #     continue
+
+        if not os.path.exists(os.path.join(args.input, vid, 'image')):
+            print(f"Skipping {args.input}, {vid}")
+            continue
         os.makedirs(os.path.join(args.input, vid, 'normal'), exist_ok=True)
+        
         for img in tqdm.tqdm(os.listdir(os.path.join(args.input, vid, 'image')), desc=vid):
             # check if img is a file with image extensions and call estimate_face_normals
             if img.split('.')[-1] in ['jpg', 'jpeg', 'png', 'bmp']:
-                estimate_face_normals(model_normal, model_landmark, os.path.join(args.input, vid, 'image', img), os.path.join(args.input, vid, 'normal', img))
+                if not os.path.exists(os.path.join(args.input, vid, 'normal', img)):
+                    estimate_face_normals(model_normal, model_landmark, os.path.join(args.input, vid, 'image', img), os.path.join(args.input, vid, 'normal', img))
 
     
 
