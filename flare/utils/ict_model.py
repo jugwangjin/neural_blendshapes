@@ -111,6 +111,11 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.register_buffer('canonical', canonical)
         self.register_buffer('neutral_mesh_canonical', self.to_canonical_space(self.neutral_mesh).clone().detach())
 
+    def update_eyeball_centers(self, template_mesh):
+        self.register_buffer('left_eyeball_center', torch.mean(template_mesh[None, 13294:13678], dim=1).clone().detach())
+        self.register_buffer('right_eyeball_center', torch.mean(template_mesh[None, 13678:14062], dim=1).clone().detach())
+        
+
     def to_canonical_space(self, mesh):
         """
         Transform the deformed mesh to canonical space.

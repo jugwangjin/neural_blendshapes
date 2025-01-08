@@ -217,9 +217,9 @@ class NeuralBlendshapes(nn.Module):
             nn.Linear(512, 54*3, bias=False)
         )
 
-        # self.register_buffer('tight_face_details', torch.zeros(self.tight_face_index, 53))
+        self.register_buffer('tight_face_details', torch.zeros(self.tight_face_index, 54))
 
-        self.tight_face_details = torch.nn.Parameter(torch.zeros(self.tight_face_index, 54))
+        # self.tight_face_details = torch.nn.Parameter(torch.zeros(self.tight_face_index, 54))
         if tight_face_normals is None:
             self.register_buffer('tight_face_normals', torch.zeros(self.tight_face_index, 3))
         else:
@@ -399,6 +399,8 @@ class NeuralBlendshapes(nn.Module):
         template_mesh_delta = self.solve(template_mesh_u_delta) 
 
         template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + template_mesh_delta
+
+        # self.ict_facekit.update_eyeball_centers(template_mesh)
 
         template_mesh_posed = self.apply_deformation(template_mesh[None], features, pose_weight)
 

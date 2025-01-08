@@ -14,11 +14,11 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     
     
     facs_reg = ((facs - target_facs)) 
-    # facs_reg = ((facs - target_facs).pow(2) * facs_reg_weights)
-    facs_reg[:, eyeball_indices] *= 1e1
+    # facs_reg = ((facs - target_facs).pow(2) * facs_reg_weights
+    facs_reg[:, eyeball_indices] *= 5e1
     facs_reg = facs_reg.pow(2).mean() * mult 
 
-    random_features = torch.randn(random_features_batch_size, neural_blendshapes.encoder.encoder.feature_size, device=facs.device) * 0.05
+    random_features = torch.randn(random_features_batch_size, neural_blendshapes.encoder.encoder.feature_size, device=facs.device) * 0.2
     random_facs = torch.rand(random_features_batch_size, 53, device=facs.device)
 
     bshapes_additional_features = neural_blendshapes.encoder.encoder.blendshapes_prefix(random_facs)
@@ -49,4 +49,7 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     loss =  facs_reg
     
     return loss
-
+
+
+
+ 

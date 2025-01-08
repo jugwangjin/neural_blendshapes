@@ -502,7 +502,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 sequential_frames = dataloader_train.collate_fn([dataset_train.get_sequential_frame(idx) for idx in indices])
                 sequential_features = neural_blendshapes.encoder(sequential_frames)
                 temporal_loss = (return_dict['features'][..., :63] - sequential_features[..., :63])
-                temporal_loss[:, 53:] *= 1e1
+                temporal_loss[:, 53:] *= 1e2
                 temporal_loss = temporal_loss.pow(2).mean()
                 losses['temporal_regularization'] = temporal_loss
 
@@ -576,7 +576,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 # losses['normal_laplacian'] = normal_laplacian_loss
                 losses['normal_laplacian'] = normal_laplacian_loss
                 # losses['inverted_normal'] = inverted_normal_loss
+                
+                # if iteration > milestones[0] // 2:
+                #     eyeball_normal_loss *= 1e1
+
                 losses['eyeball_normal']    = eyeball_normal_loss
+
 
             if stage < 3:
                 '''
@@ -612,7 +617,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 losses['feature_regularization'] = feature_regularization
                 losses['laplacian_regularization'] = template_mesh_laplacian_regularization + expression_mesh_laplacian_regularization 
-                # losses['geometric_regularization'] = template_geometric_regularization 
+                losses['geometric_regularization'] = template_geometric_regularization 
                 losses['linearity_regularization'] = expression_linearity_regularization + detail_linearity_regularization + template_geometric_regularization
 
             loss = torch.tensor(0., device=device) 
