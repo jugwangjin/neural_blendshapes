@@ -43,10 +43,8 @@ def config_parser():
     parser.add_argument('--flame_mask', action='store_true', default=False, help="Flame mask")
     # lr
     parser.add_argument('--lr_shader', type=float, default=1e-3, help="Step size/learning rate for the shader parameters")
-    parser.add_argument('--lr_encoder', type=float, default=1e-4, help="Step size/learning rate for the vertex positions")
     parser.add_argument('--lr_deformer', type=float, default=1e-4, help="Step size/learning rate for the deformation parameters")
     parser.add_argument('--lr_jacobian', type=float, default=1e-3, help="Step size/learning rate for the deformation parameters")
-    parser.add_argument('--lr_template', type=float, default=1e-3, help="Step size/learning rate for the deformation parameters")
 
     # loss weights
     parser.add_argument('--weight_mask', type=float, default=2.0, help="Weight of the mask term")
@@ -64,11 +62,7 @@ def config_parser():
     parser.add_argument('--weight_landmark', type=float, default=1, help="Weight of the landmark term")
     parser.add_argument('--weight_closure', type=float, default=1, help="Weight of the landmark term")
     parser.add_argument('--weight_feature_regularization', type=float, default=1e-4, help="Weight of the flame term")
-    parser.add_argument('--weight_head_direction', type=float, default=1, help="Weight of the flame term")
-    parser.add_argument('--weight_direction_estimation', type=float, default=1, help="Weight of the flame term")
     parser.add_argument('--weight_cbuffers_regularization', type=float, default=1e-5, help="Weight of the flame term")
-    parser.add_argument('--weight_segmentation', type=float, default=1, help="Weight of the flame term")
-    parser.add_argument('--weight_semantic_stat', type=float, default=1, help="Weight of the flame term")
     parser.add_argument('--weight_geometric_regularization', type=float, default=1e-3, help="Weight of the flame term")
     parser.add_argument('--weight_linearity_regularization', type=float, default=1e-5, help="Weight of the flame term")
     parser.add_argument('--weight_temporal_regularization', type=float, default=1e-5, help="Weight of the flame term")
@@ -90,26 +84,15 @@ def config_parser():
     parser.add_argument('--train_deformer', action='store_true', help="mlp for vertex displacements")
     parser.add_argument('--no-train_deformer', dest='train_deformer', action='store_false')
     parser.set_defaults(train_deformer=True)
-
-    # deformer
-    parser.add_argument('--feature_dim', type=int, default=64, help="feature dim")
-    parser.add_argument('--head_deformer_layers', type=int, default=5, help="head deformer layers")
-    parser.add_argument('--head_deformer_hidden_dim', type=int, default=256, help="head deformer hidden dim")
-    parser.add_argument('--head_deformer_multires', type=int, default=4, help="head deformer multires")
-    parser.add_argument('--eye_deformer_layers', type=int, default=2, help="eye deformer layers")
-    parser.add_argument('--eye_deformer_hidden_dim', type=int, default=64, help="eye deformer hidden dim")
-    parser.add_argument('--eye_deformer_multires', type=int, default=2, help="eye deformer multires")
-
+    
     parser.add_argument('--skip_eval', action='store_true', help="skip eval")
     parser.add_argument('--skip_wandb', action='store_true', help="skip eval")
 
     parser.add_argument('--ghostbone', action='store_true', help="mlp for vertex displacements")
     parser.add_argument('--no-ghostbone', dest='ghostbone', action='store_false')
     parser.set_defaults(ghostbone=True)
-    parser.add_argument('--lambda_', type=int, default=0, help="Total number of iterations")
-
     
-    parser.add_argument('--stage_iterations', type=int, nargs='+', default=[3000, 3000, 3000, 3000, 3000, 3000])
+    parser.add_argument('--stage_iterations', type=int, nargs='+', default=[3000, 3000, 3000, 3000])
     parser.add_argument('--only_flame_iterations', type=int, default=1000)
 
 

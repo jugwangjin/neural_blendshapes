@@ -8,58 +8,11 @@ from flare.modules.embedder import *
 import pytorch3d.transforms as pt3d
 import pytorch3d.ops as pt3o
 
-import os
-
-import math
 from .geometry import compute_matrix, laplacian_uniform, laplacian_density
-from .solvers import CholeskySolver, solve
-from .parameterize import to_differential, from_differential
-from scipy.spatial import KDTree
 
 import tinycudann as tcnn
 SCALE_CONSTANT = 0.25
 
-class GaborWaveletActivation(nn.Module):
-    def __init__(self, omega=0.5, sigma=2.):
-        """
-        Initialize the Gabor wavelet activation function.
-        Args:
-            in_features: Number of input features.
-            out_features: Number of output features.
-            omega: Frequency parameter for the sinusoidal component.
-            sigma: Standard deviation for the Gaussian envelope.
-        """
-        super(GaborWaveletActivation, self).__init__()
-        self.omega = nn.Parameter(torch.tensor(omega), requires_grad=True)
-        self.sigma = nn.Parameter(torch.tensor(sigma), requires_grad=True)
-    
-    def forward(self, x):
-        """
-        Forward pass for the Gabor wavelet activation.
-        Args:
-            x: Input tensor.
-        Returns:
-            Tensor after applying the Gabor wavelet activation.
-        """
-        # Sinusoidal component
-        sinusoidal = torch.sin(self.omega * x)
-        
-        # Gaussian envelope
-        gaussian = torch.exp(-0.5 * (x / self.sigma) ** 2)
-        
-        # Combine components
-        gabor_wavelet = sinusoidal * gaussian
-        
-        return gabor_wavelet
-
-# different activation functions
-class GaussianActivation(nn.Module):
-    def __init__(self, a=0.15, trainable=True):
-        super().__init__()
-        self.register_parameter('a', nn.Parameter(a*torch.ones(1), trainable))
-
-    def forward(self, x):
-        return torch.exp(-x**2/(2*self.a**2))
 
 def initialize_weights(m, gain=0.1):
 
@@ -73,37 +26,6 @@ def initialize_weights(m, gain=0.1):
             except:
                 pass
 
-class mylayernorm(nn.Module):
-    def __init__(self, num_features):
-        super().__init__()
-        self.layernorm = nn.LayerNorm(num_features)
-    def forward(self, x):
-        if len(x.shape) == 3:
-            b, v, c = x.shape
-            x = x.reshape(b*v, c)
-            x = self.layernorm(x)
-            x = x.reshape(b, v, c)
-            return x
-        else:
-            return self.layernorm(x)
-
-
-class mygroupnorm(nn.Module):
-    def __init__(self, num_groups, num_channels):
-        super().__init__()
-        self.num_groups = num_groups
-        self.num_channels = num_channels
-        self.groupnorm = nn.GroupNorm(num_groups, num_channels)
-    def forward(self, x):
-        if len(x.shape) == 3:
-            b, v, c = x.shape
-            x = x.reshape(b*v, c)
-            x = self.groupnorm(x)
-            x = x.reshape(b, v, c)
-            return x
-        else:
-            return self.groupnorm(x)
-            
 class Identity(nn.Module):
     def __init__(self):
         super().__init__()
@@ -142,7 +64,7 @@ class MLPTemplate(nn.Module):
 
 
 class NeuralBlendshapes(nn.Module):
-    def __init__(self, vertex_parts, ict_facekit, exp_dir, aabb  = None, lambda_=32, tight_face_normals=None):
+    def __init__(self, ict_facekit, aabb  = None, tight_face_normals=None):
         super().__init__()
         self.encoder = ResnetEncoder(53+6, ict_facekit)
 
@@ -150,31 +72,6 @@ class NeuralBlendshapes(nn.Module):
 
         self.ict_facekit = ict_facekit
         self.tight_face_index = 6705
-        self.face_index = 9409 
-        self.mouth_socket_index = 11248    
-        self.head_index = 14062
-
-        # self.socket_index = 11248
-        self.socket_index = 14062
-
-        
-
-        vertices = ict_facekit.neutral_mesh_canonical[0].cpu().data.numpy()
-        faces = ict_facekit.faces.cpu().data.numpy()
-
-        faces = faces
-        faces = faces
-        faces = faces
-
-        self.register_buffer('L', laplacian_uniform(torch.from_numpy(vertices).to('cuda'), torch.from_numpy(faces).to('cuda')))
-
-        self.lambda_ = lambda_
-        if self.lambda_ > 0:
-
-            alpha = 1 - 1 / float(lambda_) if lambda_ > 1 else None
-            alpha = None
-
-            self.register_buffer('M', compute_matrix(torch.from_numpy(vertices).to('cuda'), torch.from_numpy(faces).to('cuda'), lambda_, alpha=alpha, density=False))
 
         desired_resolution = 2048
         base_grid_resolution = 16
@@ -262,27 +159,6 @@ class NeuralBlendshapes(nn.Module):
         self.pose_weight[-2].bias.data[0] = 3.
 
 
-    def solve(self, x):
-        if self.lambda_ == 0:
-            return x
-        if len(x.shape) == 2:
-            return from_differential(self.M, x, 'Cholesky')
-        else:
-            res = torch.zeros_like(x)
-            for i in range(x.shape[0]):
-                res[i] = from_differential(self.M, x[i], 'Cholesky')
-            return res
-
-    def invert(self, u):
-        if len(u.shape) == 2:
-            return to_differential(self.M, u)
-        else:
-            res = torch.zeros_like(u)
-            for i in range(u.shape[0]):
-                res[i] = to_differential(self.M, u[i])
-            return res
-
-
     def encode_position(self, coords):
         template = self.ict_facekit.canonical[0] # shape of V, 3
 
@@ -340,7 +216,7 @@ class NeuralBlendshapes(nn.Module):
         template = self.ict_facekit.canonical[0]
         pose_weight = precomputed['pose_weight']
 
-        template_mesh_u_delta = precomputed['template_mesh_u_delta']
+        template_mesh_delta = precomputed['template_mesh_u_delta']
         expression_mesh_delta_u = precomputed['expression_mesh_delta_u']
         expression_mesh_delta = torch.einsum('bn, mnd -> bmd', features[..., :53], expression_mesh_delta_u[:, :53])
 
@@ -349,7 +225,7 @@ class NeuralBlendshapes(nn.Module):
 
         expression_mesh_delta[:, :self.tight_face_index] += tight_face_details
 
-        template_mesh_delta = self.solve(template_mesh_u_delta) + expression_mesh_delta_u[:, -1]
+        template_mesh_delta = template_mesh_delta + expression_mesh_delta_u[:, -1]
 
         ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(features.shape[0], 1))
 
@@ -389,14 +265,7 @@ class NeuralBlendshapes(nn.Module):
         # encoded_points2 = self.encode_position(template)
         # encoded_points2 = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
-        template_mesh_u_delta = self.template_deformer(encoded_points)
-
-        # if nan in template_mesh_u_delta - raise
-        if torch.isnan(template_mesh_u_delta).any():
-            raise Exception("NaN in template_mesh_u_delta")
-
-        
-        template_mesh_delta = self.solve(template_mesh_u_delta) 
+        template_mesh_delta = self.template_deformer(encoded_points)
 
         template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + template_mesh_delta
 
@@ -422,8 +291,6 @@ class NeuralBlendshapes(nn.Module):
             return return_dict
 
         expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 54, 3)
-        if torch.isnan(expression_mesh_delta_u).any():
-            raise Exception("NaN in expression_mesh_delta_u")
 
         feat = features[:, :53].clamp(0, 1)
         feat = torch.cat([feat, torch.ones_like(feat[:, :1])], dim=1)
@@ -511,8 +378,8 @@ class NeuralBlendshapes(nn.Module):
         super().to(device)
         return self
 
-def get_neural_blendshapes(model_path=None, train=True, vertex_parts=None, ict_facekit=None, exp_dir=None, lambda_=16, aabb=None, tight_face_normals=None, device='cuda'):
-    neural_blendshapes = NeuralBlendshapes(vertex_parts, ict_facekit, exp_dir, lambda_ = lambda_, aabb=aabb, tight_face_normals=tight_face_normals)
+def get_neural_blendshapes(model_path=None, train=True, ict_facekit=None, aabb=None, tight_face_normals=None, device='cuda'):
+    neural_blendshapes = NeuralBlendshapes(ict_facekit, aabb=aabb, tight_face_normals=tight_face_normals)
     neural_blendshapes.to(device)
 
     import os

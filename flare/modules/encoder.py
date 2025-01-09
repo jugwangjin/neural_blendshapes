@@ -45,22 +45,29 @@ class DECAEncoder(nn.Module):
 
         self.rotation_tail = nn.Sequential(
             nn.Linear(feature_size, 128),
+            nn.LayerNorm(128),
             nn.ReLU(),
             nn.Linear(128, 64),
+            nn.LayerNorm(64),
             nn.ReLU(),
             nn.Linear(64, 32),
+            nn.LayerNorm(32),
             nn.ReLU(),
             nn.Linear(32, 3, bias=False)
         )
 
         self.translation_tail = nn.Sequential(
             nn.Linear(9, 32),
+            nn.LayerNorm(32),
             nn.ReLU(),
             nn.Linear(32, 32),
+            nn.LayerNorm(32),
             nn.ReLU(),
             nn.Linear(32, 32),
+            nn.LayerNorm(32),
             nn.ReLU(),
             nn.Linear(32, 32),
+            nn.LayerNorm(32),
             nn.ReLU(),
             nn.Linear(32, 6)
         )
@@ -208,11 +215,13 @@ class ResnetEncoder(nn.Module):
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
+        bshapes_tail_out = features[:, 62:]
+
         # rotation *= 0
         # translation *= 0
         # self.global_translation *= 0
 
-        out_features = torch.cat([blendshapes, rotation, translation, scale, global_translation], dim=-1)
+        out_features = torch.cat([blendshapes, rotation, translation, scale, global_translation, bshapes_tail_out], dim=-1)
 
         return out_features
 
