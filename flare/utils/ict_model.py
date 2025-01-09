@@ -162,14 +162,14 @@ class ICTFaceKitTorch(torch.nn.Module):
         # for left eyeball: get xy rotation from eyeLookIn_L, eyeLookOut_L, eyeLookUp_L, eyeLookDown_L
         # for right eyeball: get xy rotation from eyeLookIn_R, eyeLookOut_R, eyeLookUp_R, eyeLookDown_R
         left_eyeball_rotation = torch.zeros(bsize, 3).to(expression_weights.device)
-        left_eyeball_rotation[:, 0] = (expression_weights[:, self.left_eyeball_blendshape_indices[1]] - expression_weights[:, self.left_eyeball_blendshape_indices[0]]) * np.pi * 0.15
-        left_eyeball_rotation[:, 1] = (expression_weights[:, self.left_eyeball_blendshape_indices[3]] - expression_weights[:, self.left_eyeball_blendshape_indices[2]]) * np.pi * 0.15
+        left_eyeball_rotation[:, 0] = (expression_weights[:, self.left_eyeball_blendshape_indices[1]] - expression_weights[:, self.left_eyeball_blendshape_indices[0]]) * np.pi * 0.075
+        left_eyeball_rotation[:, 1] = (expression_weights[:, self.left_eyeball_blendshape_indices[3]] - expression_weights[:, self.left_eyeball_blendshape_indices[2]]) * np.pi * 0.075
 
         left_eyeball_matrix = pt3d.euler_angles_to_matrix(left_eyeball_rotation, convention='XYZ')
         
         right_eyeball_rotation = torch.zeros(bsize, 3).to(expression_weights.device)
-        right_eyeball_rotation[:, 0] = (expression_weights[:, self.right_eyeball_blendshape_indices[1]] - expression_weights[:, self.right_eyeball_blendshape_indices[0]]) * np.pi * 0.15
-        right_eyeball_rotation[:, 1] = (expression_weights[:, self.right_eyeball_blendshape_indices[2]] - expression_weights[:, self.right_eyeball_blendshape_indices[3]]) * np.pi * 0.15
+        right_eyeball_rotation[:, 0] = (expression_weights[:, self.right_eyeball_blendshape_indices[1]] - expression_weights[:, self.right_eyeball_blendshape_indices[0]]) * np.pi * 0.075
+        right_eyeball_rotation[:, 1] = (expression_weights[:, self.right_eyeball_blendshape_indices[2]] - expression_weights[:, self.right_eyeball_blendshape_indices[3]]) * np.pi * 0.075
 
         right_eyeball_matrix = pt3d.euler_angles_to_matrix(right_eyeball_rotation, convention='XYZ')
 

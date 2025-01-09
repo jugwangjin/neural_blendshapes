@@ -501,7 +501,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 indices = views_subset['idx']
                 sequential_frames = dataloader_train.collate_fn([dataset_train.get_sequential_frame(idx) for idx in indices])
                 sequential_features = neural_blendshapes.encoder(sequential_frames)
-                temporal_loss = (return_dict['features'][..., :63] - sequential_features[..., :63])
+                temporal_loss = (return_dict['features'] - sequential_features)
                 temporal_loss[:, 53:] *= 1e2
                 temporal_loss = temporal_loss.pow(2).mean()
                 losses['temporal_regularization'] = temporal_loss
