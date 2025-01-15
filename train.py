@@ -219,15 +219,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     print("=="*50)
     print("Training Deformer")
 
-    tight_face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.neutral_mesh_canonical[0])[0][:full_head_index]
-    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, tight_face_normals=tight_face_normals,device=device) 
+    face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.neutral_mesh_canonical[0])[0]
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, face_normals=face_normals,device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
 
     neural_blendshapes = neural_blendshapes.to(device)
 
     neural_blendshapes_params = list(neural_blendshapes.parameters())
-    neural_blendshapes_expression_params = list(neural_blendshapes.expression_deformer.parameters()) + [neural_blendshapes.tight_face_details]
-    neural_blendshapes_template_params = list(neural_blendshapes.template_deformer.parameters())
+    neural_blendshapes_expression_params = list(neural_blendshapes.expression_deformer.parameters())
+    neural_blendshapes_template_params = list(neural_blendshapes.template_deformer.parameters()) + [neural_blendshapes.face_details]
     neural_blendshapes_pe = list(neural_blendshapes.fourier_feature_transform.parameters()) 
     neural_blendshapes_pose_weight_params = list(neural_blendshapes.pose_weight.parameters())
     neural_blendshapes_encoder_params = list(neural_blendshapes.encoder.parameters())
@@ -626,8 +626,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 # random_bshapes = torch.rand_like(return_dict['features'][:, :53]) 
                 expression_delta_random = neural_blendshapes.get_expression_delta()
 
-                expression_linearity_regularization = expression_delta_random.abs().mean() * 1e2
-                detail_linearity_regularization = neural_blendshapes.tight_face_details.abs().mean() * 1e2
+                expression_linearity_regularization = expression_delta_random.abs().mean() * 1e1
+                detail_linearity_regularization = neural_blendshapes.face_details.abs().mean() * 1e1
 
                 template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean() 
                 expression_geometric_regularization = (return_dict['ict_mesh_w_temp'] - return_dict['expression_mesh']).pow(2).mean() * 1e1

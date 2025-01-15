@@ -62,7 +62,7 @@ class MLPTemplate(nn.Module):
 
 
 class NeuralBlendshapes(nn.Module):
-    def __init__(self, ict_facekit, aabb  = None, tight_face_normals=None):
+    def __init__(self, ict_facekit, aabb  = None, face_normals=None):
         super().__init__()
         self.encoder = ResnetEncoder(ict_facekit)
 
@@ -110,16 +110,16 @@ class NeuralBlendshapes(nn.Module):
             nn.Linear(512, 512),
             nn.LayerNorm(512),
             nn.Softplus(beta=100),
-            nn.Linear(512, 54*3, bias=False)
+            nn.Linear(512, 53*3, bias=False)
         )
 
         # self.register_buffer('tight_face_details', torch.zeros(self.tight_face_index, 1))
 
-        self.tight_face_details = torch.nn.Parameter(torch.randn(self.full_head_index)*1e-1)
-        if tight_face_normals is None:
-            self.register_buffer('tight_face_normals', torch.zeros(self.full_head_index, 3))
+        self.face_details = torch.nn.Parameter(torch.randn(face_normals.shape[0])*1e-1)
+        if face_normals is None:
+            self.register_buffer('face_normals', torch.zeros(face_normals.shape[0], 3))
         else:
-            self.register_buffer('tight_face_normals', tight_face_normals * 1e-2)
+            self.register_buffer('face_normals', face_normals * 1e-2)
 
         self.template_deformer = MLPTemplate(3)
         self.template_embedder = Identity()
@@ -206,7 +206,7 @@ class NeuralBlendshapes(nn.Module):
 
         template_mesh_u_delta = self.template_deformer(template)
 
-        expression_mesh_delta_u = self.expression_deformer(template).reshape(template.shape[0], 54, 3)
+        expression_mesh_delta_u = self.expression_deformer(template).reshape(template.shape[0], 53, 3)
 
         return {'template_mesh_u_delta': template_mesh_u_delta, 'expression_mesh_delta_u': expression_mesh_delta_u, 'pose_weight': pose_weight}
         
@@ -216,14 +216,15 @@ class NeuralBlendshapes(nn.Module):
         pose_weight = precomputed['pose_weight']
 
         template_mesh_delta = precomputed['template_mesh_u_delta']
+
+        face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
+
+        template_mesh_delta += face_details
+
         expression_mesh_delta_u = precomputed['expression_mesh_delta_u']
-        expression_mesh_delta_u[9409:11248, :53] = 0
+        expression_mesh_delta_u[9409:11248] = 0
         expression_mesh_delta = torch.einsum('bn, mnd -> bmd', features[..., :53], expression_mesh_delta_u[:, :53])
 
-        tight_face_details = torch.einsum('bn, dn -> bd', features[:, :53], self.tight_face_details) # shape of B, 6705
-        tight_face_details = tight_face_details[..., None] * self.tight_face_normals[None] # shape of B, 6705, 3
-
-        expression_mesh_delta[:, :self.tight_face_index] += tight_face_details
 
         template_mesh_delta = template_mesh_delta + expression_mesh_delta_u[:, -1]
 
@@ -268,9 +269,9 @@ class NeuralBlendshapes(nn.Module):
         template_mesh_delta = self.template_deformer(encoded_points)
 
         
-        tight_face_details = self.tight_face_details[..., None] * self.tight_face_normals # shape of 11248, 3
+        face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
         
-        template_mesh_delta[:self.full_head_index] += tight_face_details
+        template_mesh_delta += face_details
 
         template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + template_mesh_delta
 
@@ -295,11 +296,10 @@ class NeuralBlendshapes(nn.Module):
         if pretrain:
             return return_dict
 
-        expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 54, 3)
-        expression_mesh_delta_u[9409:11248, :53] = 0
+        expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
+        expression_mesh_delta_u[9409:11248] = 0
 
         feat = features[:, :53].clamp(0, 1)
-        feat = torch.cat([feat, torch.ones_like(feat[:, :1])], dim=1)
 
         expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
         
@@ -332,6 +332,10 @@ class NeuralBlendshapes(nn.Module):
 
         template_mesh_delta = self.template_deformer(self.ict_facekit.canonical[0])
 
+        face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
+        
+        template_mesh_delta += face_details
+
         template_mesh = self.ict_facekit.neutral_mesh_canonical[0]
 
         ict_mesh_w_temp = self.ict_facekit(expression_weights = random_features, identity_weights = self.encoder.identity_weights[None].repeat(bsize, 1)) + template_mesh_delta[None]
@@ -340,17 +344,12 @@ class NeuralBlendshapes(nn.Module):
             return self.remove_teeth(ict_mesh_w_temp)
 
         elif deformed_vertices_key == 'expression_mesh':
-            expression_mesh_delta_u = self.expression_deformer(self.ict_facekit.canonical[0]).reshape(template_mesh.shape[0], 54, 3)
+            expression_mesh_delta_u = self.expression_deformer(self.ict_facekit.canonical[0]).reshape(template_mesh.shape[0], 53, 3)
             expression_mesh_delta_u[9409:11248, :53] = 0
 
             feat = random_features
-            feat = torch.cat([feat, torch.ones_like(feat[:, :1])], dim=1)
 
             expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
-
-            tight_face_details = torch.einsum('bn, dn -> bd', feat, self.tight_face_details) # shape of B, 6705
-            tight_face_details = tight_face_details[..., None] * self.tight_face_normals[None] # shape of B, 6705, 3
-            expression_mesh_delta[:, :self.tight_face_index] += tight_face_details
 
             expression_mesh = ict_mesh_w_temp + expression_mesh_delta
 
@@ -369,7 +368,7 @@ class NeuralBlendshapes(nn.Module):
         # encoded_points = self.encode_position(template)
         # encoded_points = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
-        expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template.shape[0], 54, 3)
+        expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template.shape[0], 53, 3)
         expression_mesh_delta_u[9409:11248, :53] = 0
         return expression_mesh_delta_u
 
@@ -421,8 +420,8 @@ class NeuralBlendshapes(nn.Module):
         super().to(device)
         return self
 
-def get_neural_blendshapes(model_path=None, train=True, ict_facekit=None, aabb=None, tight_face_normals=None, device='cuda'):
-    neural_blendshapes = NeuralBlendshapes(ict_facekit, aabb=aabb, tight_face_normals=tight_face_normals)
+def get_neural_blendshapes(model_path=None, train=True, ict_facekit=None, aabb=None, face_normals=None, device='cuda'):
+    neural_blendshapes = NeuralBlendshapes(ict_facekit, aabb=aabb, face_normals=face_normals)
     neural_blendshapes.to(device)
 
     import os
