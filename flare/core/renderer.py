@@ -223,7 +223,7 @@ class Renderer:
             gbuffer["mask_low_res"] = gbuffer["mask"]
             gbuffer["mask"] = upsample(gbuffer["mask"], high_res)
 
-        if 'mask' in channels and 'canonical_position' in channels and 'segmentation' in channels:           
+        if 'segmentation' in channels:           
             # 1. Build face-level attributes
             # print(mesh.vertex_labels.shape, canonical_verts_batch.shape)
             vertex_labels = mesh.vertex_labels.unsqueeze(0).repeat(batch_size, 1, 1)
@@ -233,22 +233,6 @@ class Renderer:
             left_eye_seg = seg_map[..., 1:2].contiguous()
             right_eye_seg = seg_map[..., 2:3].contiguous()
             mouth_seg = seg_map[..., 3:4].contiguous()
-            # face_attr_face  = (mesh.vertex_labels == 0).float()
-            # face_attr_mouth = (mesh.vertex_labels == 1).float()
-            # face_attr_left_eye  = (mesh.vertex_labels == 2).float()
-            # face_attr_right_eye = (mesh.vertex_labels == 3).float()
-
-            # # 2. Expand for batch
-            # face_attr_face  = face_attr_face.unsqueeze(-1)
-            # face_attr_mouth = face_attr_mouth.unsqueeze(-1)
-            # face_attr_left_eye  = face_attr_left_eye.unsqueeze(-1)
-            # face_attr_right_eye = face_attr_right_eye.unsqueeze(-1)
-
-            # # 3. Interpolate
-            # face_seg,  _ = dr.interpolate(face_attr_face,  rast, idx, rast_out_db)
-            # mouth_seg, _ = dr.interpolate(face_attr_mouth, rast, idx, rast_out_db)
-            # left_eye_seg,  _ = dr.interpolate(face_attr_left_eye,  rast, idx, rast_out_db)
-            # right_eye_seg, _ = dr.interpolate(face_attr_right_eye, rast, idx, rast_out_db)
 
             # 4. (Optional) Antialias
             if with_antialiasing:
@@ -269,63 +253,6 @@ class Renderer:
             gbuffer['left_eye']     = left_eye_seg    # 2 = left eye
             gbuffer['right_eye']    = right_eye_seg   # 3 = right eye
 
-
-            # face_ids = rast[..., -1].long()
-            # face_ids_flat = face_ids.view(-1)  # Shape: (batch_size * height * width)
-
-            # segmentation_map = torch.full((batch_size, resolution[0], resolution[1]), fill_value=-1, dtype=torch.long, device=face_ids.device)
-            # segmentation_map_flat = segmentation_map.view(-1)
-
-            # # Create masks
-            # invalid_mask = torch.all(rast == 0, dim=-1)  # B H W mask
-            # valid_mask = ~invalid_mask
-            # valid_mask = valid_mask.view(-1)
-
-            # # Additional mask to ensure face IDs are non-negative
-            # valid_face_mask = face_ids_flat >= 0
-
-            # # Combine masks
-            # combined_valid_mask = valid_mask & valid_face_mask  # Logical AND
-
-            # # Convert combined_valid_mask to indices
-            # combined_valid_indices = combined_valid_mask.nonzero(as_tuple=False).squeeze(1)
-
-            # # Extract valid face IDs
-            # valid_face_ids = face_ids_flat[combined_valid_indices]
-
-            # # Ensure valid_face_ids are within valid range
-            # num_faces = mesh.face_labels.shape[0]
-            # valid_range_mask = (valid_face_ids >= 0) & (valid_face_ids < num_faces)
-
-            # # Apply valid range mask to face IDs and indices
-            # valid_face_ids = valid_face_ids[valid_range_mask]
-            # valid_indices = combined_valid_indices[valid_range_mask]
-
-            # # Update segmentation map for valid face pixels using mesh.face_labels
-            # segmentation_map_flat[valid_indices] = mesh.face_labels[valid_face_ids]
-
-            # # Reshape segmentation_map back to (batch_size, height, width)
-            # segmentation_map = segmentation_map_flat.view(batch_size, resolution[0], resolution[1])
-
-            # # Segmentation: face without eyes and mouth
-            # segmentation = (segmentation_map[..., None] == 0).float() # face
-            # segmentation = dr.antialias(segmentation.float(), rast, deformed_vertices_clip_space, idx)
-
-            # gbuffer['segmentation'] = segmentation
-            # gbuffer['segmentation'] = upsample(gbuffer['segmentation'], high_res)
-
-            # mouth_segmentation = (segmentation_map[..., None] == 1).float() # mouth
-            # mouth_segmentation = dr.antialias(mouth_segmentation.float(), rast, deformed_vertices_clip_space, idx)
-
-            # gbuffer['mouth'] = mouth_segmentation
-            # gbuffer['mouth'] = upsample(gbuffer['mouth'], high_res)
-
-
-            # eyes_segmentation = (segmentation_map[..., None] == 2).float() # eyes
-            # eyes_segmentation = dr.antialias(eyes_segmentation.float(), rast, deformed_vertices_clip_space, idx)
-
-            # gbuffer['eyes'] = eyes_segmentation
-            # gbuffer['eyes'] = upsample(gbuffer['eyes'], high_res)
 
         try:
             uv_coordinates, _ = dr.interpolate(canonical_uv, rast, idx, rast_db=rast_out_db, diff_attrs='all')

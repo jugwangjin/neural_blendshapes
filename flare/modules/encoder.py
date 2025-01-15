@@ -13,7 +13,7 @@ import pytorch3d.ops as p3do
 from . import resnet
 
 class DECAEncoder(nn.Module):
-    def __init__(self, outsize, last_op=None):
+    def __init__(self, last_op=None):
         super(DECAEncoder, self).__init__()
         feature_size = 2048
         self.feature_size = feature_size
@@ -66,19 +66,16 @@ class DECAEncoder(nn.Module):
             nn.Linear(32, 32),
             nn.LayerNorm(32),
             nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.LayerNorm(32),
-            nn.ReLU(),
             nn.Linear(32, 6)
         )
         
         # multiply by 0.1 to the last layers of rotation_tail and translation_tail
-        self.bshapes_tail[-1].weight.data *= 0.1
-        self.rotation_tail[-1].weight.data *= 0.1
-        self.translation_tail[-1].weight.data *= 0.1
+        # self.bshapes_tail[-1].weight.data *= 0.1
+        # self.rotation_tail[-1].weight.data *= 0.1
+        # self.translation_tail[-1].weight.data *= 0.1
 
         # set zero of the translation_tail bias
-        self.translation_tail[-1].bias.data = torch.zeros(6)
+        # self.translation_tail[-1].bias.data = torch.zeros(6)
 
     
         self.last_op = last_op
@@ -126,12 +123,12 @@ class DECAEncoder(nn.Module):
 
 
 class ResnetEncoder(nn.Module):
-    def __init__(self, outsize, ict_facekit):
+    def __init__(self, ict_facekit):
         super(ResnetEncoder, self).__init__()
 
         self.ict_facekit = ict_facekit
         
-        self.encoder = DECAEncoder(outsize = 6 + 53, last_op = None)
+        self.encoder = DECAEncoder(last_op = None)
         self.load_deca_encoder()
         
         # set zero bias)
@@ -142,7 +139,6 @@ class ResnetEncoder(nn.Module):
 
         self.translation = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
 
-        # self.identity_weights = torch.zeros(self.ict_facekit.num_identity, device='cuda')
         self.register_buffer('identity_weights', torch.zeros(self.ict_facekit.num_identity, device='cuda'))
         
         self.scale = torch.nn.Parameter(torch.zeros(1))
@@ -160,9 +156,6 @@ class ResnetEncoder(nn.Module):
         self.softplus = torch.nn.Softplus(beta=4)
 
         self.register_buffer('transform_origin', torch.tensor([0., -0.2, -0.28]))
-        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0.2, -0.28]))
-        # self.global_translation_param = torch.nn.Parameter(torch.tensor([0., 0., 0.]))
-
         
     def load_deca_encoder(self):
         model_path = './assets/deca_model.tar'
@@ -176,36 +169,19 @@ class ResnetEncoder(nn.Module):
         with torch.no_grad():
             img = views['img_deca']
             transform_matrix = views['mp_transform_matrix'].clone().detach().reshape(-1, 4, 4)
-            # scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
 
             mp_translation = transform_matrix[:, :3, 3]
             mp_translation[..., -1] += 28
             mp_translation = mp_translation * 0.2
 
-            # rotation_matrix = transform_matrix[:, :3, :3]
-            # rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
-
-            # rotation_matrix = rotation_matrix.permute(0, 2, 1)
-            # mp_rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
-
             mp_bshapes = views['mp_blendshape'].clone().detach()
             mp_bshapes = mp_bshapes[:, self.ict_facekit.mediapipe_to_ict]
-            
-            # detected_landmarks = views['landmark'].clone().detach()[:, :, :3]
-            # detected_landmarks[..., :-1] = detected_landmarks[..., :-1] # center
-            # detected_landmarks[..., -1] *= -1 
-            # detected_landmarks = detected_landmarks.reshape(-1, 68*3)
 
-            
             ts = torch.stack([cam.t for cam in views['flame_camera']], dim=0)
         flame_cam_t = self.flame_cam_t(ts)
 
-
-        # translation = translation
         global_translation = flame_cam_t
-        # translation = translation + flame_cam_t
-
-        # flame_cam_t = self.flame_cam_t(ts)
+        
         features = self.encoder(img, mp_bshapes, mp_translation, flame_cam_t)
         blendshapes = features[:, :53]
         rotation = features[:, 53:56] 
@@ -216,10 +192,6 @@ class ResnetEncoder(nn.Module):
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
         bshapes_tail_out = features[:, 62:]
-
-        # rotation *= 0
-        # translation *= 0
-        # self.global_translation *= 0
 
         out_features = torch.cat([blendshapes, rotation, translation, scale, global_translation, bshapes_tail_out], dim=-1)
 

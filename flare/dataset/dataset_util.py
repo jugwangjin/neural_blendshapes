@@ -115,17 +115,17 @@ def _load_semantic(fn):
     # }
 
 
-    # tight face area : skin + nose + left eyebwow + right eyebrow + upper lip + lower lip 
+    # skin, eyebrows, nose, lips, neck, ear, hair, cloth, hat, glasses
     semantics[:, :, 0] = ((img == 1) + (img == 2) + (img == 3) + (img == 10) + (img == 12) + (img == 13)\
                         + (img == 17) + (img == 16) + (img == 15) + (img == 14) + (img==7) + (img==8) + (img==9)\
-                            ) >= 1 # skin, nose, ears, neck, lips
+                            ) >= 1 
 
-    # except hair, neck, ....
+    # skin, eyebrows, nose, lips
     semantics[:, :, 1] = ((img == 1) + (img == 2) + (img == 3) + (img == 10) + (img == 12) + (img == 13)
-                        ) >= 1 # skin, brows, nose, lips
+                        ) >= 1 
 
 
-    # skin, ear, nose, neck
+    # skin, ears, nose, neck
     semantics[:, :, 2] = ((img == 1) + (img == 7) + (img == 8) + (img == 10) + (img == 14)) >= 1
 
     # left eyes
@@ -134,7 +134,7 @@ def _load_semantic(fn):
     # right eyes
     semantics[:, :, 4] = ((img == 4)) >= 1
 
-    #inside mouth
+    # inside mouth
     semantics[:, :, 5] = (img == 11) >= 1  # will it include the teeth and 
 
     semantics[:, :, 6] = 1. - np.sum(semantics[:, :, :-1], 2) # background
