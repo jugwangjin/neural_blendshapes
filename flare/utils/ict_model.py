@@ -93,18 +93,14 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.register_buffer('expression', torch.zeros(1, self.num_expression))
         self.expression[0, jaw_index] = 0.75 # jaw open for canonical face
         
-        if canonical is not None:
+        try:
             canonical = np.load(canonical, allow_pickle=True).item()
+        except:
+            canonical = np.load('./assets/ict_identity.npy', allow_pickle=True).item()
             # B of s, R, T is 1
-            self.register_buffer('s', canonical['s'].cpu()) # shape of (B)
-            self.register_buffer('R', canonical['R'].cpu()) # shape of (B, 3, 3)
-            self.register_buffer('T', canonical['T'].cpu()) # shape of (B, 3)
-
-        else:
-            # B of s, R, T is 1
-            self.register_buffer('s', torch.ones(1).cpu()) # shape of (B)
-            self.register_buffer('R', torch.eye(3)[None].cpu()) # shape of (B, 3, 3)
-            self.register_buffer('T', torch.zeros(1, 3).cpu()) # shape of (B, 3)
+        self.register_buffer('s', canonical['s'].cpu()) # shape of (B)
+        self.register_buffer('R', canonical['R'].cpu()) # shape of (B, 3, 3)
+        self.register_buffer('T', canonical['T'].cpu()) # shape of (B, 3)
 
         # with torch.no_grad():
         canonical = self.forward(expression_weights=self.expression, identity_weights=self.identity, to_canonical=True)

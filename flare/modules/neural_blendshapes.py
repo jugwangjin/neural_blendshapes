@@ -47,13 +47,13 @@ class MLPTemplate(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(inp_dim, 512),
             nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            nn.Softplus(beta=5),
             nn.Linear(512, 512),
             nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            nn.Softplus(beta=5),
             nn.Linear(512, 512),
             nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            nn.Softplus(beta=5),
             nn.Linear(512, 3, bias=False)
         )
 
@@ -99,56 +99,55 @@ class NeuralBlendshapes(nn.Module):
         # multires=9
         # self.embed_fn, input_ch = get_embedder(multires)
 
-
         self.expression_deformer = nn.Sequential(
             nn.Linear(3, 512),
             nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            nn.Softplus(beta=5),
             nn.Linear(512, 512),
             nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            nn.Softplus(beta=5),
             nn.Linear(512, 512),
             nn.LayerNorm(512),
-            nn.Softplus(beta=100),
+            nn.Softplus(beta=5),
             nn.Linear(512, 53*3, bias=False)
         )
 
         # self.register_buffer('tight_face_details', torch.zeros(self.tight_face_index, 1))
 
-        self.face_details = torch.nn.Parameter(torch.randn(face_normals.shape[0])*1e-1)
+        self.face_details = torch.nn.Parameter(torch.zeros(self.full_head_index))
         if face_normals is None:
-            self.register_buffer('face_normals', torch.zeros(face_normals.shape[0], 3))
+            self.register_buffer('face_normals', torch.zeros(self.full_head_index, 3))
         else:
-            self.register_buffer('face_normals', face_normals * 1e-2)
+            self.register_buffer('face_normals', face_normals[:self.full_head_index] * 1e-2)
 
         self.template_deformer = MLPTemplate(3)
         self.template_embedder = Identity()
 
         # initialize last layer of template deformer with low weights
-        # torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 256)
-
+        torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 1024)
+# 
         # initialize last layer of expression deformer with low weights
-        # torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 256)
+        torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 1024)
 
-        # for l in self.template_deformer.mlp:
-            # if isinstance(l, nn.Linear):
-                # torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
+        for l in self.template_deformer.mlp:
+            if isinstance(l, nn.Linear):
+                torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
                 # n_in = l.weight.size(1)
                 # torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
 
         # init expression deformer with low weights
-        # for l in self.expression_deformer:
-            # if isinstance(l, nn.Linear):
-                # torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
+        for l in self.expression_deformer:
+            if isinstance(l, nn.Linear):
+                torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
                 # n_in = l.weight.size(1)
                 # torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
                 
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3, 32),
-                    nn.Softplus(beta=100),
+                    nn.Softplus(beta=5),
                     nn.Linear(32, 32),
-                    nn.Softplus(beta=100),
+                    nn.Softplus(beta=5),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
@@ -219,10 +218,10 @@ class NeuralBlendshapes(nn.Module):
 
         face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
 
-        template_mesh_delta += face_details
+        template_mesh_delta[:self.full_head_index] += face_details
 
         expression_mesh_delta_u = precomputed['expression_mesh_delta_u']
-        expression_mesh_delta_u[9409:11248] = 0
+        # expression_mesh_delta_u[9409:11248] = 0
         expression_mesh_delta = torch.einsum('bn, mnd -> bmd', features[..., :53], expression_mesh_delta_u[:, :53])
 
 
@@ -271,7 +270,7 @@ class NeuralBlendshapes(nn.Module):
         
         face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
         
-        template_mesh_delta += face_details
+        template_mesh_delta[:self.full_head_index] += face_details
 
         template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + template_mesh_delta
 
@@ -297,7 +296,7 @@ class NeuralBlendshapes(nn.Module):
             return return_dict
 
         expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
-        expression_mesh_delta_u[9409:11248] = 0
+        # expression_mesh_delta_u[9409:11248] = 0
 
         feat = features[:, :53].clamp(0, 1)
 
@@ -334,7 +333,7 @@ class NeuralBlendshapes(nn.Module):
 
         face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
         
-        template_mesh_delta += face_details
+        template_mesh_delta[:self.full_head_index] += face_details
 
         template_mesh = self.ict_facekit.neutral_mesh_canonical[0]
 
@@ -345,7 +344,7 @@ class NeuralBlendshapes(nn.Module):
 
         elif deformed_vertices_key == 'expression_mesh':
             expression_mesh_delta_u = self.expression_deformer(self.ict_facekit.canonical[0]).reshape(template_mesh.shape[0], 53, 3)
-            expression_mesh_delta_u[9409:11248, :53] = 0
+            # expression_mesh_delta_u[9409:11248] = 0
 
             feat = random_features
 
@@ -369,7 +368,7 @@ class NeuralBlendshapes(nn.Module):
         # encoded_points = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
         expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template.shape[0], 53, 3)
-        expression_mesh_delta_u[9409:11248, :53] = 0
+        # expression_mesh_delta_u[9409:11248] = 0
         return expression_mesh_delta_u
 
 

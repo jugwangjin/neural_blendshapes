@@ -31,7 +31,7 @@ import os
 os.environ["GLOG_minloglevel"] ="2"
 import numpy as np
 from pathlib import Path
-from gpytoolbox import remesh_botsch
+
 import torch
 from tqdm import tqdm
 from flame.FLAME import FLAME

@@ -1,20 +1,20 @@
-run_name = mar_debug
+run_name = subject_3
 
-input_dir = /data1/gwangjin/flare/marcel2
-train_dir = ["MVI_1797", "MVI_1801"]
-eval_dir = ["MVI_1802"]
+input_dir = /Bean/data/gwangjin/2024/nbshapes/flare/subject_3/subject_3
+train_dir = ["train"]
+eval_dir = ["test"]
 working_dir = .
-output_dir = /Bean/log/gwangjin/2024/neural_blendshapes
+output_dir = /Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v2/
 
 batch_size = 2
-sample_idx_ratio = 50
+sample_idx_ratio = 1
 
 iterations = 10000
 upsample_iterations = [500]
 
 lr_shader = 1e-3
-lr_deformer = 1e-4
-lr_jacobian = 2e-4
+lr_deformer = 4e-4
+lr_jacobian = 5e-4
 
 weight_shading = 1
 weight_perceptual_loss = 1e-1
@@ -46,5 +46,5 @@ light_mlp_dims = [64, 64]
 material_mlp_dims = [128, 128, 128, 128]
 material_mlp_ch = 5
 
-stage_iterations = [6000, 1000, 4000, 3000]
-only_flame_iterations = 1500
+stage_iterations = [4000, 0000, 4000, 2000]
+only_flame_iterations = 1000

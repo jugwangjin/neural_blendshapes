@@ -164,7 +164,7 @@ class NeuralShader(torch.nn.Module):
         view_direction = torch.cat([v.center.unsqueeze(0) for v in views['camera']], dim=0)
         if finetune_color:
             ### skin mask for fresnel coefficient
-            skin_mask = (torch.sum(views["skin_mask"][..., 1:4], axis=-1)).unsqueeze(-1)
+            skin_mask = (torch.sum(views["skin_mask"][..., 1:5], axis=-1)).unsqueeze(-1)
             skin_mask = skin_mask * views["mask"] 
             skin_mask_bool = (skin_mask > 0.0).int().bool()
         else:
@@ -213,7 +213,7 @@ class NeuralShader(torch.nn.Module):
 
         if finetune_color:
             ### skin mask for fresnel coefficient
-            skin_mask = (torch.sum(views["skin_mask"][..., 1:4], axis=-1)).unsqueeze(-1)
+            skin_mask = (torch.sum(views["skin_mask"][..., 1:5], axis=-1)).unsqueeze(-1)
             skin_mask = skin_mask * views["mask"] 
             skin_mask_ = (skin_mask > 0.0).int().bool()
             fresnel_constant = torch.ones((bz, h, w, 1)).to(self.device) * 0.047

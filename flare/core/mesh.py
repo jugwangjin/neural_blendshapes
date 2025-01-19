@@ -57,27 +57,30 @@ class Mesh:
             self._uv_idx = ict_facekit.uv_faces.to(device, dtype=torch.int64) if torch.is_tensor(ict_facekit.uv_faces) else torch.tensor(ict_facekit.uv_faces, dtype=torch.int64, device=device)
 
             if face_labels is None:
-                self.face_labels = torch.zeros(indices.shape[0], 4, device=device, dtype=torch.float32) # 0: face, 1: mouth, 2: eyeball
+                self.face_labels = torch.zeros(indices.shape[0], 5, device=device, dtype=torch.float32) # 0: face, 1: mouth, 2: eyeball
                 
 
                 if vertex_labels is None:
-                    vertex_labels = torch.zeros(self.vertices.shape[0], 4, device=device, dtype=torch.float32)  # Create labels for each vertex
-                    head = torch.zeros(4, device=device, dtype=torch.float32)
+                    vertex_labels = torch.zeros(self.vertices.shape[0], 5, device=device, dtype=torch.float32)  # Create labels for each vertex
+                    head = torch.zeros(5, device=device, dtype=torch.float32)
                     head[0] = 1
-                    left_eye = torch.zeros(4, device=device, dtype=torch.float32)
+                    left_eye = torch.zeros(5, device=device, dtype=torch.float32)
                     left_eye[1] = 1
-                    right_eye = torch.zeros(4, device=device, dtype=torch.float32)
+                    right_eye = torch.zeros(5, device=device, dtype=torch.float32)
                     right_eye[2] = 1
-                    mouth = torch.zeros(4, device=device, dtype=torch.float32)
+                    mouth = torch.zeros(5, device=device, dtype=torch.float32)
                     mouth[3] = 1
+                    face = torch.zeros(5, device=device, dtype=torch.float32)
+                    face[4] = 1
                     # Assign labels to vertices based on the given segmentation
-                    vertex_labels[0:11248] = head  # Head
-                    vertex_labels[11248:13294] = mouth
-                    vertex_labels[13294:13678] = left_eye
-                    vertex_labels[13678:14062] = right_eye
-                    vertex_labels[14062:21451] = mouth
-                    vertex_labels[21451:23021] = left_eye
-                    vertex_labels[23021:24591] = right_eye
+                    vertex_labels[0:11248] += head  # Head
+                    vertex_labels[11248:13294] += mouth
+                    vertex_labels[13294:13678] += left_eye
+                    vertex_labels[13678:14062] += right_eye
+                    vertex_labels[14062:21451] += mouth
+                    vertex_labels[21451:23021] += left_eye
+                    vertex_labels[23021:24591] += right_eye
+                    vertex_labels[0:6706] += face
                     # vertex_labels[0:11248] = 0  # Head
                     # vertex_labels[11248:13294] = 1  # Mouth
                     # vertex_labels[13294:13678] = 2  # left Eyes

@@ -229,29 +229,33 @@ class Renderer:
             vertex_labels = mesh.vertex_labels.unsqueeze(0).repeat(batch_size, 1, 1)
             seg_map, _ = dr.interpolate(vertex_labels, rast, idx, rast_db=rast_out_db, diff_attrs='all')
 
-            face_seg = seg_map[..., :1].contiguous()
+            head_seg = seg_map[..., :1].contiguous()
             left_eye_seg = seg_map[..., 1:2].contiguous()
             right_eye_seg = seg_map[..., 2:3].contiguous()
             mouth_seg = seg_map[..., 3:4].contiguous()
+            face_seg = seg_map[..., 4:5].contiguous()
 
             # 4. (Optional) Antialias
             if with_antialiasing:
-                face_seg  = dr.antialias(face_seg,  rast, deformed_vertices_clip_space, idx)
+                head_seg  = dr.antialias(head_seg,  rast, deformed_vertices_clip_space, idx)
                 mouth_seg = dr.antialias(mouth_seg, rast, deformed_vertices_clip_space, idx)
                 left_eye_seg  = dr.antialias(left_eye_seg,  rast, deformed_vertices_clip_space, idx)
                 right_eye_seg = dr.antialias(right_eye_seg, rast, deformed_vertices_clip_space, idx)
+                face_seg = dr.antialias(face_seg, rast, deformed_vertices_clip_space, idx)
 
             # 5. Upsample
-            face_seg  = upsample(face_seg,  high_res)
+            head_seg  = upsample(head_seg,  high_res)
             mouth_seg = upsample(mouth_seg, high_res)
             left_eye_seg  = upsample(left_eye_seg,  high_res)
             right_eye_seg = upsample(right_eye_seg, high_res)
+            face_seg = upsample(face_seg, high_res)
 
             # 6. Store
-            gbuffer['segmentation'] = face_seg    # 0 = face
+            gbuffer['segmentation'] = head_seg    # 0 = face
             gbuffer['mouth']        = mouth_seg   # 1 = mouth
             gbuffer['left_eye']     = left_eye_seg    # 2 = left eye
             gbuffer['right_eye']    = right_eye_seg   # 3 = right eye
+            gbuffer['face']         = face_seg  # 4 = face
 
 
         try:

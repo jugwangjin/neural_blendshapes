@@ -160,7 +160,7 @@ class DatasetLoader(Dataset):
 
             self.loaded = {}
 
-        self.get_bshapes_mode(compute_mode=True)
+        self.get_bshapes_mode()
 
     def get_mean_expression_train(self, train_dir):
         all_expression = []
@@ -218,7 +218,7 @@ class DatasetLoader(Dataset):
         return self.len_img
 
 
-    def get_bshapes_mode(self, compute_mode):
+    def get_bshapes_mode(self):
         precomputed_mode = self.base_dir / 'bshapes_mode.pt'
 
         if precomputed_mode.exists():
@@ -226,10 +226,10 @@ class DatasetLoader(Dataset):
             self.bshapes_mode_np = self.bshapes_mode.cpu().data.numpy()
             return self.bshapes_mode
         
-        if compute_mode is False:
-            self.bshapes_mode = torch.zeros(53, dtype=torch.float32)
-            self.bshapes_mode_np = self.bshapes_mode.cpu().data.numpy()
-            return self.bshapes_mode    
+        # if compute_mode is False:
+        #     self.bshapes_mode = torch.zeros(53, dtype=torch.float32)
+        #     self.bshapes_mode_np = self.bshapes_mode.cpu().data.numpy()
+        #     return self.bshapes_mode    
         
         bshapes = []
         for i in tqdm(range(self.len_img)):

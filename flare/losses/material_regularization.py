@@ -72,7 +72,7 @@ def white_light(cbuffers):
     return loss
 
 def roughness_regularization(roughness, semantic, mask, r_mean):
-    skin_mask = (torch.sum(semantic[..., 1:2], axis=-1)).unsqueeze(-1)
+    skin_mask = (torch.sum(semantic[..., 6:7], axis=-1)).unsqueeze(-1)
     skin_mask = skin_mask * mask 
 
     loss = 0.0
@@ -87,7 +87,7 @@ def roughness_regularization(roughness, semantic, mask, r_mean):
     return loss
 
 def spec_intensity_regularization(rho, semantic, mask):
-    skin_mask = (torch.sum(semantic[..., 1:2], axis=-1)).unsqueeze(-1)
+    skin_mask = (torch.sum(semantic[..., 6:7], axis=-1)).unsqueeze(-1)
     skin_mask = skin_mask * mask 
 
     loss = 0.0

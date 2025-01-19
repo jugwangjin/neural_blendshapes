@@ -43,7 +43,7 @@ class DatasetLoader(Dataset):
         self.json_dict = {"frames": []}
         for dir in self.train_dir: 
             json_file = self.base_dir / dir / "merged_params.json"
-
+  
             with open(json_file, 'r') as f:
                 json_data = json.load(f)
                 for item in json_data["frames"]:
