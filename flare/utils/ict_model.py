@@ -7,6 +7,8 @@ import pytorch3d.ops as pt3o
 
 import open3d as o3d
 
+
+
 class ICTFaceKitTorch(torch.nn.Module):
     def __init__(self, npy_dir = './assets/ict_facekit_torch.npy', canonical = None, mediapipe_name_to_ict = './assets/mediapipe_name_to_indices.pkl'):
         super().__init__()
@@ -21,6 +23,9 @@ class ICTFaceKitTorch(torch.nn.Module):
         uv_faces = model_dict['uv_faces']
         uvs = model_dict['uvs']
 
+        # print('\n\n\n\n\n\n')
+        # print(neutral_mesh.shape, uv_neutral_mesh.shape, faces.shape, uv_faces.shape, uvs.shape)
+        
         expression_shape_modes = model_dict['expression_shape_modes']
         identity_shape_modes = model_dict['identity_shape_modes']
 

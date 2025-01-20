@@ -435,12 +435,15 @@ class DatasetLoader(Dataset):
 
 
         flame_pose = torch.tensor(json_dict["pose"], dtype=torch.float32)
+        # print(flame_pose)
+        # print(flame_pose.shape)
+        # exit()
         flame_expression = torch.tensor(json_dict["expression"], dtype=torch.float32)
             
 
         # ================ flame and camera params =======================
         # flame params
-        camera = Camera(self.K, self.fixed_cam['R'], self.fixed_cam['t'], device=device)
+        # camera = Camera(self.K, self.fixed_cam['R'], self.fixed_cam['t'], device=device)
 
 
         world_mat = torch.tensor(_load_K_Rt_from_P(None, np.array(json_dict['world_mat']).astype(np.float32))[1], dtype=torch.float32)

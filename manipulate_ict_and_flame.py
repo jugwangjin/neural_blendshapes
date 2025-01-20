@@ -123,7 +123,7 @@ def main(args):
 
 
     # target json
-    json_file = '/Bean/log/gwangjin/2024/nbshapes_comparisons/flare/marcel/MVI_1802/flame_params.json'
+    json_file = '/Bean/data/gwangjin/2024/nbshapes/flare/marcel/marcel/MVI_1802/flame_params.json'
     import json
     with open(json_file, 'r') as f:
         target = json.load(f)

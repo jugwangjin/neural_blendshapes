@@ -29,7 +29,7 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     # similar_bshapes_out = neural_blendshapes.encoder.encoder.bshapes_tail(torch.cat([similar_features, bshapes_additional_features], dim=-1))
     # similar_rotation_out = neural_blendshapes.encoder.encoder.rotation_tail(similar_features)
 
-    facs_reg += bshapes_out.pow(2).mean() 
+    facs_reg += bshapes_out.pow(2).mean()  +  feature[:, 60:63].pow(2).mean() * 1e-1
     
 
     # facs_reg += (bshapes_out - similar_bshapes_out).pow(2).mean()

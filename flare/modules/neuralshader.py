@@ -118,6 +118,22 @@ class NeuralShader(torch.nn.Module):
             "aabb":aabb,
         }
 
+    def custom_forward(self, position):
+        bz, h, w, ch = position.shape
+        pe_input = self.apply_pe(position=position)
+
+        # ==============================================================================================
+        # Albedo ; roughness; specular intensity 
+        # ==============================================================================================   
+        all_tex = self.material_mlp(pe_input.view(-1, self.inp_size).to(torch.float32)) 
+        kd = all_tex[..., :3].view(bz, h, w, ch) 
+        kr = all_tex[..., 3:4] 
+        kr = kr.view(bz, h, w, 1).to(self.device)
+        ko = all_tex[..., 4:5]
+        ko = ko.view(bz, h, w, 1)
+
+        return kd, kr, ko
+
     def forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None):
         bz, h, w, ch = position.shape
         pe_input = self.apply_pe(position=position)

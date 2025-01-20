@@ -329,7 +329,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                                     {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer, },
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian * 2e-1},
                                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                     ]
                                                     )
@@ -371,6 +371,27 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     args.finetune_color = False
 
+    with torch.no_grad():
+        verts = FLAMEServer.canonical_verts.squeeze(0)
+        faces = FLAMEServer.faces_tensor
+
+        flame_canonical_mesh: Mesh = None
+        flame_canonical_mesh = Mesh(verts, faces, device=device)
+        flame_canonical_mesh.compute_connectivity()
+
+        channels_gbuffer = ['mask', 'position', 'normal', "canonical_position",]
+        return_dict = neural_blendshapes(debug_views['img'], debug_views)
+
+        vertices, _, _  = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
+        
+        debug_gbuffer = renderer.render_batch(debug_views['flame_camera'], vertices.contiguous(), flame_canonical_mesh.fetch_all_normals(vertices, flame_canonical_mesh),
+                                channels=channels_gbuffer, with_antialiasing=True, 
+                                canonical_v=flame_canonical_mesh.vertices, canonical_idx=flame_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                mesh=flame_canonical_mesh
+                                )
+        debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, debug_views, flame_canonical_mesh, args.finetune_color, lgt)
+        visualize_training_no_lm(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, 0, ict_facekit=ict_facekit, save_name='flame_init')
+
     iteration = 0
     for epoch in progress_bar:
         for iter_, views_subset in tqdm(enumerate(dataloader_train)):
@@ -408,9 +429,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes.zero_grad(set_to_none=True)
                 optimizer_neural_blendshapes = None
                 optimizer_neural_blendshapes = torch.optim.Adam([
-                                                    {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
-                                                    # {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e-1},
+                                                    {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian * 1e-1},
+                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian * 2e-1},
                                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                     ],
                                                 )
@@ -488,8 +509,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes = None
                 optimizer_neural_blendshapes = torch.optim.Adam([
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e-2},
-                                                    # {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian * 1e-2},
+                                                    {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian * 1e-2},
+                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian * 2e-1 * 1e-2},
                                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian * 1e-2},
                                                     ],
                                                 )
@@ -514,8 +535,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             input_image = views_subset["img"].permute(0, 3, 1, 2).to(device)
 
             # if stage is 3, with no grad. else, with grad
-            with torch.set_grad_enabled(stage != 3):
-                return_dict = neural_blendshapes(input_image, views_subset)
+            # with torch.set_grad_enabled(stage != 3):
+            return_dict = neural_blendshapes(input_image, views_subset)
                 
             mesh = ict_canonical_mesh
 
@@ -649,8 +670,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 losses['flame_regularization'] = flame_loss + flame_loss_no_pose
 
-                if stage == 2:
-                    losses['flame_regularization'] *= 1e-1
+                if stage > 0:
+                    losses['flame_regularization'] *= 5e-1
                 
                 '''
                 Regularizations
@@ -667,7 +688,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 expression_delta_random = neural_blendshapes.get_expression_delta()
 
                 expression_linearity_regularization = expression_delta_random.abs().mean() * 1e1  if stage == 2 else 0
-                detail_linearity_regularization = neural_blendshapes.face_details.abs().mean() 
+                detail_linearity_regularization = neural_blendshapes.face_details.abs().mean() * 1e1
 
                 template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean() 
                 expression_geometric_regularization = (return_dict['ict_mesh_w_temp'] - return_dict['expression_mesh']).pow(2).mean() if stage == 2 else 0
@@ -766,7 +787,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                     return_dict_ = neural_blendshapes(views_subset['img'], views_subset)
 
-                    visualize_specific_traininig('expression_mesh', return_dict_, renderer, shader, ict_facekit, views_subset, mesh, 'training', images_save_path, iteration, lgt)
+                    visualize_specific_traininig(deformed_vertices_key, return_dict_, renderer, shader, ict_facekit, views_subset, mesh, 'training', images_save_path, iteration, lgt)
                     
 
                     return_dict_ = neural_blendshapes(debug_views['img'], debug_views)
@@ -876,10 +897,11 @@ if __name__ == '__main__':
     # ==============================================================================================
     print("loading train views...")
     dataset_train    = DatasetLoader(args, train_dir=args.train_dir, sample_ratio=args.sample_idx_ratio, pre_load=False, train=True)
-    dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=24, pre_load=False)
+    dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=50, pre_load=False)
     
     dataloader_train = None
-    view_indices = np.array(args.visualization_views).astype(int)
+    # view_indices = np.array(args.visualization_views).astype(int)
+    view_indices = np.array([0, 1, 2, 3, 4])
     d_l = [dataset_val.__getitem__(idx) for idx in view_indices[2:]]
     d_l.append(dataset_train.__getitem__(view_indices[0]))
     d_l.append(dataset_train.__getitem__(view_indices[1]))

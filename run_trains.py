@@ -8,22 +8,22 @@ import shutil
 def worker(gpu_id, command_queue):
     while not command_queue.empty():
         command, directory = command_queue.get()
-        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours/'
+        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v4/'
         # print(f"Running on GPU {gpu_id}: {command}")
-        # print(os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')), os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')))
-        # if not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')) and not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')):
+        print(os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')), os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')))
+        if not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')) and not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')):
 
-        # write a dummy txt file, that will be used to check if the training is ongoing
-        os.makedirs(os.path.join(OUTPUT_DIR_ROOT, directory), exist_ok=True)
-        with open(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'), 'w') as f:
-            f.write('')
-        
+            # write a dummy txt file, that will be used to check if the training is ongoing
+            os.makedirs(os.path.join(OUTPUT_DIR_ROOT, directory), exist_ok=True)
+            with open(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'), 'w') as f:
+                f.write('')
+            
 
-        command = command.format(gpu_id)
-        print(f"Running on GPU {gpu_id}: {command}")
-        subprocess.run(command, shell=True)
+            command = command.format(gpu_id)
+            print(f"Running on GPU {gpu_id}: {command}")
+            subprocess.run(command, shell=True)
 
-        os.remove(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'))
+            os.remove(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'))
         command_queue.task_done()
 
 def run_trackings(gpu_ids):
@@ -47,7 +47,7 @@ def run_trackings(gpu_ids):
     
         
     INPUT_DIR_ROOT = '/Bean/data/gwangjin/2024/nbshapes/flare/'
-    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v2/'
+    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v4/'
     
     directories = os.listdir(INPUT_DIR_ROOT)
     # reverse the order

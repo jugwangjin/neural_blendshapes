@@ -10,7 +10,7 @@ import pytorch3d.ops as pt3o
 
 import tinycudann as tcnn
 SCALE_CONSTANT = 0.25
-
+import math
 
 def initialize_weights(m, gain=0.1):
 
@@ -46,13 +46,13 @@ class MLPTemplate(nn.Module):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(inp_dim, 512),
-            nn.LayerNorm(512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 512),
-            nn.LayerNorm(512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 512),
-            nn.LayerNorm(512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 3, bias=False)
         )
@@ -101,13 +101,13 @@ class NeuralBlendshapes(nn.Module):
 
         self.expression_deformer = nn.Sequential(
             nn.Linear(3, 512),
-            nn.LayerNorm(512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 512),
-            nn.LayerNorm(512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 512),
-            nn.LayerNorm(512),
+            # nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 53*3, bias=False)
         )
@@ -124,23 +124,24 @@ class NeuralBlendshapes(nn.Module):
         self.template_embedder = Identity()
 
         # initialize last layer of template deformer with low weights
-        torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 1024)
+        # torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 1024)
 # 
-        # initialize last layer of expression deformer with low weights
-        torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 1024)
+        # initialize last layer of expression deformer with zero
+        # torch.nn.init.constant_(self.expression_deformer[-1].weight, 0.0)
+        # torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 1024)
 
         for l in self.template_deformer.mlp:
             if isinstance(l, nn.Linear):
                 torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
-                # n_in = l.weight.size(1)
-                # torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
+                n_in = l.weight.size(1)
+                torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / n_in)
 
         # init expression deformer with low weights
         for l in self.expression_deformer:
             if isinstance(l, nn.Linear):
                 torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
-                # n_in = l.weight.size(1)
-                # torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / math.sqrt(n_in))
+                n_in = l.weight.size(1)
+                torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / n_in)
                 
 
         self.pose_weight = nn.Sequential(

@@ -3,6 +3,7 @@
 import numpy as np
 import torch
 from typing import Tuple
+import tqdm
 
 def find_edges(indices, remove_duplicates=True):
     # Extract the three edges (in terms of vertex indices) for each face 
@@ -43,7 +44,8 @@ def find_connected_faces(indices):
     face_correspondences_indices = torch.zeros(counts.shape[0], dtype=torch.int64)
 
     # ei = edge index
-    for ei, ei_unique in enumerate(list(inverse_indices.cpu().numpy())):
+    print('Finding connected faces')
+    for ei, ei_unique in tqdm.tqdm(enumerate(list(inverse_indices.cpu().numpy()))):
         face_correspondences[ei_unique, face_correspondences_indices[ei_unique]] = face_ids[ei] 
         face_correspondences_indices[ei_unique] += 1
 

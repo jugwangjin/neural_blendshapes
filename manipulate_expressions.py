@@ -12,6 +12,7 @@
 #
 # For commercial licensing contact, please contact ps-license@tuebingen.mpg.de
 import os
+import sys
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ["GLOG_minloglevel"] ="2"
 
@@ -33,24 +34,35 @@ set_seed(20241224)
 
 from pathlib import Path
 
-from flare.dataset import *
-
-from flare.utils.ict_model import ICTFaceKitTorch
-import nvdiffrec.render.light as light
-from flare.core import (
-    Mesh, Renderer
-)
-from flare.modules import (
-    NeuralShader, get_neural_blendshapes
-)
-from flare.utils import (
-    AABB, 
-    save_manipulation_image
-)
 
 
+
+
+@torch.no_grad()
 def main(args, device):
 
+    original_dir = os.getcwd()
+    # Add the path to the 'flare' directory
+    flare_path = os.path.join(args.model_dir, args.model_name, 'sources')
+    
+    sys.path.insert(0, flare_path)
+
+    from flare.dataset import DatasetLoader
+
+    from flare.utils.ict_model import ICTFaceKitTorch
+    import nvdiffrec.render.light as light
+    from flare.core import (
+        Mesh, Renderer
+    )
+    from flare.modules import (
+        NeuralShader, get_neural_blendshapes
+    )
+    from flare.utils import (
+        AABB, 
+        save_manipulation_image
+    )
+
+    
     '''
     dataset
     '''
@@ -68,6 +80,7 @@ def main(args, device):
     '''
     models
     '''
+
     # ict facekit
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
@@ -101,22 +114,6 @@ def main(args, device):
 
     # shader
     lgt = light.create_env_rnd()    
-    # disentangle_network_params = {
-    #     "material_mlp_ch": args.material_mlp_ch,
-    #     "light_mlp_ch":args.light_mlp_ch,
-    #     "material_mlp_dims":args.material_mlp_dims,
-    #     "light_mlp_dims":args.light_mlp_dims,
-    #     "brdf_mlp_dims": args.brdf_mlp_dims,
-
-    # }
-
-    # shader = NeuralShader(fourier_features='hashgrid',
-    #                       activation=args.activation,
-    #                       last_activation=torch.nn.Sigmoid(), 
-    #                       disentangle_network_params=disentangle_network_params,
-    #                       bsdf=args.bsdf,
-    #                       aabb=ict_mesh_aabb,
-    #                       device=device)
     shader = NeuralShader.load(os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'shader.pt'), device=device)
 
 
@@ -280,7 +277,7 @@ def parse_index(input_list):
 if __name__ == '__main__':
     import configargparse
     parser = configargparse.ArgumentParser()
-    parser.add_argument('--model_dir', type=str, default='/Bean/log/gwangjin/2024/nbshapes_comparisons/ours', help='Path to the trained model')
+    parser.add_argument('--model_dir', type=str, default='/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v2', help='Path to the trained model')
     parser.add_argument('--model_name', type=str, default='marcel', help='Name of the run in model_dir')
     parser.add_argument('--video_name', type=str, default='MVI_1802', help='Name of the video in dataset')
     parser.add_argument('--index', nargs='+', type=str, default='0', help='List of indices (e.g., 1 3-6 8-11)')
@@ -298,6 +295,8 @@ if __name__ == '__main__':
     args2.run_name = args.model_name
     args2.output_dir = args.model_dir
     args2.output_dir_name = args.output_dir_name
+    args2.model_dir = args.model_dir
+    args2.model_name = args.model_name
     
     print(args2.input_dir, args2.video_name)
     print(args2.output_dir, args2.run_name)
