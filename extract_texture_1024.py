@@ -98,7 +98,7 @@ def point_in_triangle_batch(p, a, b, c):
     return (u >= 0) & (v >= 0) & (w >= 0)
 
 
-def create_position_map(mesh, uv_coords, uv_idx, canonical_v, output_path, size=512):
+def create_position_map(mesh, uv_coords, uv_idx, canonical_v, output_path, size=1024):
 
     # Sample points from UV space
     uv_points = sample_uv_grid(size) # shape of (size * size, 2)
@@ -233,10 +233,10 @@ def main(args, device):
     lgt = light.create_env_rnd()   
     shader = neuralshader.NeuralShader.load(os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'shader.pt'), device=device)
     shader.eval()
-    output_dir = './debug/texture_map/v6'
+    output_dir = './debug/texture_map/1024'
     os.makedirs(output_dir, exist_ok=True)
 
-    position_map = create_position_map(ict_canonical_mesh, ict_facekit.uvs, ict_facekit.uv_faces, ict_facekit.canonical[0], f'debug/texture_map/v6/{args.model_name}.png')
+    position_map = create_position_map(ict_canonical_mesh, ict_facekit.uvs, ict_facekit.uv_faces, ict_facekit.canonical[0], os.path.join(output_dir, f'{args.model_name}.png'))
     # position map shape of (size, size, 3) 
     # with neuralshader.forward, extract kd, kr, ko, all value range [0, 1]
     # kd: diffuse (albedo)

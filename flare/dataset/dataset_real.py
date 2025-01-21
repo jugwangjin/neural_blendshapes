@@ -292,8 +292,14 @@ class DatasetLoader(Dataset):
 
         mp_blendshape = (mp_blendshape - self.bshapes_mode[None]).clamp(0, 1)
 
+        json_dict = self.all_img_path[itr % self.len_img]
+
+        img_path = self.base_dir / json_dict["dir"] / Path(json_dict["file_path"] + ".png")
+
+
         return {
             'img' : img,
+            'img_path' : img_path,
             'mask' : mask,
             'skin_mask' : skin_mask,
             'camera' : camera,

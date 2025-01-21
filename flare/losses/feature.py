@@ -2,6 +2,8 @@ import torch
 import pytorch3d.transforms as p3dt
 def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_modulation, views, mode, facs_weight=0, mult=1, rot_mult=1, random_features_batch_size=64):
     facs = feature[..., :53]
+    rotation = feature[..., 53:56]
+    translation = feature[..., 56:59]
 
     eyeball_indices = neural_blendshapes.ict_facekit.left_eyeball_blendshape_indices + neural_blendshapes.ict_facekit.right_eyeball_blendshape_indices
 
@@ -30,7 +32,12 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     # similar_rotation_out = neural_blendshapes.encoder.encoder.rotation_tail(similar_features)
 
     facs_reg += bshapes_out.pow(2).mean()  +  feature[:, 60:63].pow(2).mean() * 1e-1
-    
+
+
+    rotation_reg_features = torch.randn(random_features_batch_size, 6, device=facs.device) * 0.5
+
+    rotation_out = neural_blendshapes.encoder.encoder.rotation_tail(rotation_reg_features)
+    rotation_reg = rotation_out.pow(2).mean() * 1e-1
 
     # facs_reg += (bshapes_out - similar_bshapes_out).pow(2).mean()
 
@@ -44,9 +51,11 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     # rotation_matrix = rotation_matrix.permute(0, 2, 1)
     # mp_rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
 
-    # rotation_reg = (torch.pow(rotation - mp_rotation, 2).mean()) * 1e-1
+    # rotation_reg += (torch.pow(rotation - mp_rotation, 2).mean()) * 1e-1
 
-    loss =  facs_reg
+    translation_reg = (torch.pow(translation, 2).mean()) * 1e-1
+
+    loss =  facs_reg + rotation_reg + translation_reg
     
     return loss
 

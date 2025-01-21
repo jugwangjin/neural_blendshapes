@@ -46,13 +46,13 @@ class MLPTemplate(nn.Module):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(inp_dim, 512),
-            # nn.LayerNorm(512),
+            nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 512),
-            # nn.LayerNorm(512),
+            nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 512),
-            # nn.LayerNorm(512),
+            nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 3, bias=False)
         )
@@ -62,9 +62,9 @@ class MLPTemplate(nn.Module):
 
 
 class NeuralBlendshapes(nn.Module):
-    def __init__(self, ict_facekit, aabb  = None, face_normals=None):
+    def __init__(self, ict_facekit, aabb  = None, face_normals=None, zero_init=False, fix_bshapes=False):
         super().__init__()
-        self.encoder = ResnetEncoder(ict_facekit)
+        self.encoder = ResnetEncoder(ict_facekit, fix_bshapes=fix_bshapes)
 
         self.aabb = aabb
 
@@ -101,13 +101,13 @@ class NeuralBlendshapes(nn.Module):
 
         self.expression_deformer = nn.Sequential(
             nn.Linear(3, 512),
-            # nn.LayerNorm(512),
+            nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 512),
-            # nn.LayerNorm(512),
+            nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 512),
-            # nn.LayerNorm(512),
+            nn.LayerNorm(512),
             nn.Softplus(beta=5),
             nn.Linear(512, 53*3, bias=False)
         )
@@ -123,6 +123,10 @@ class NeuralBlendshapes(nn.Module):
         self.template_deformer = MLPTemplate(3)
         self.template_embedder = Identity()
 
+        if zero_init:
+            self.expression_deformer[-1].weight.data.zero_()
+            self.template_deformer.mlp[-1].weight.data.zero_()
+
         # initialize last layer of template deformer with low weights
         # torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 1024)
 # 
@@ -130,28 +134,31 @@ class NeuralBlendshapes(nn.Module):
         # torch.nn.init.constant_(self.expression_deformer[-1].weight, 0.0)
         # torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 1024)
 
-        for l in self.template_deformer.mlp:
-            if isinstance(l, nn.Linear):
-                torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
-                n_in = l.weight.size(1)
-                torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / n_in)
+        # for l in self.template_deformer.mlp:
+        #     if isinstance(l, nn.Linear):
+        #         torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
+        #         n_in = l.weight.size(1)
+        #         torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / n_in)
 
         # init expression deformer with low weights
-        for l in self.expression_deformer:
-            if isinstance(l, nn.Linear):
-                torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
-                n_in = l.weight.size(1)
-                torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / n_in)
+        # for l in self.expression_deformer:
+        #     if isinstance(l, nn.Linear):
+        #         torch.nn.init.constant_(l.bias, 0.0) if l.bias is not None else None
+        #         n_in = l.weight.size(1)
+        #         torch.nn.init.normal_(l.weight, mean=0.0, std=1.0 / n_in)
+        # torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 1024)
+        # torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 1024)
                 
 
         self.pose_weight = nn.Sequential(
-                    nn.Linear(3, 32),
+                    nn.Linear(3 + 6, 32),
                     nn.Softplus(beta=5),
                     nn.Linear(32, 32),
                     nn.Softplus(beta=5),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
+        
 
         initialize_weights(self.pose_weight, gain=0.01)
         self.pose_weight[-2].weight.data.zero_()
@@ -258,7 +265,8 @@ class NeuralBlendshapes(nn.Module):
         
         bsize = features.shape[0]
         template = self.ict_facekit.canonical[0]
-        pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
+        pose_weight_input = torch.cat([self.ict_facekit.canonical.repeat(bsize, 1, 1), features[:, None, 53:59].repeat(1, template.shape[0], 1)], dim=-1)
+        pose_weight = self.pose_weight(pose_weight_input)  # shape of B, V, 2
 
         encoded_points = template
         # encoded_points = torch.cat([self.encode_position(template)], dim=-1)
@@ -400,12 +408,15 @@ class NeuralBlendshapes(nn.Module):
         # Translate back from the rotation origin
         deformed_vertices = rotated_vertices + transform_origin[None, None, :]
 
+        # if weights is not None:
+        #     rotation_weights = weights[..., 0:1]
+        #     deformed_vertices = deformed_vertices * rotation_weights + scaled_vertices * (1 - rotation_weights)
+        
         # Apply global translation
         deformed_vertices = deformed_vertices + translation[:, None, :]
 
         # Apply pose weights if provided
         if weights is not None:
-            weights = weights.view(1, V, 1)
             deformed_vertices = deformed_vertices * weights + scaled_vertices * (1 - weights)
 
         return deformed_vertices + global_translation[:, None, :]
@@ -420,8 +431,8 @@ class NeuralBlendshapes(nn.Module):
         super().to(device)
         return self
 
-def get_neural_blendshapes(model_path=None, train=True, ict_facekit=None, aabb=None, face_normals=None, device='cuda'):
-    neural_blendshapes = NeuralBlendshapes(ict_facekit, aabb=aabb, face_normals=face_normals)
+def get_neural_blendshapes(model_path=None, train=True, ict_facekit=None, aabb=None, face_normals=None, zero_init=False, fix_bshapes=False, device='cuda'):
+    neural_blendshapes = NeuralBlendshapes(ict_facekit, aabb=aabb, face_normals=face_normals, zero_init=zero_init, fix_bshapes=fix_bshapes)
     neural_blendshapes.to(device)
 
     import os

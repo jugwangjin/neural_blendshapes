@@ -115,7 +115,7 @@ def diffuse_specular(cbuffers, gbuffer_mask, color_list, convert_uint):
     H, W = 512, 512
 
 
-def save_shading(shaded_image, cbuffers, debug_gbuffer, debug_view, images_save_path, iteration, save_name=None, ict_facekit=None):
+def save_shading(shaded_image, cbuffers, debug_gbuffer, debug_view, images_save_path, iteration, save_name=None, ict_facekit=None, transparency=False):
     device = shaded_image.device
     convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
 
@@ -129,19 +129,21 @@ def save_shading(shaded_image, cbuffers, debug_gbuffer, debug_view, images_save_
     shading = shading.reshape(debug_gbuffer["normal"].shape)
     shading = shading * gbuffer_mask 
 
-    shading = shading.permute(0,3,1,2)
+    shading = shading.permute(0, 3, 1, 2)
     shading = shading * 255
 
-    # if shading.shape[0] == 1:
     if len(shading.shape) == 3:
         shading = shading.unsqueeze(0)
-    img = Image.fromarray(shading[0].detach().cpu().numpy().astype(np.uint8).transpose(1, 2, 0))
+
+    shading = shading[0].detach().cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
+
+    if transparency:
+        alpha_channel = (gbuffer_mask[0, :, :, 0] * 255).detach().cpu().numpy().astype(np.uint8)
+        shading = np.dstack((shading, alpha_channel))
+
+    img = Image.fromarray(shading)
     img.save(images_save_path / save_name)
     return
-    
-    # for i in range(shading.shape[0]):
-    #     img = Image.fromarray(shading[i].detach().cpu().numpy().astype(np.uint8).transpose(1, 2, 0))
-    #     img.save(images_save_path / save_name.replace(".png", f"_{i}.png").replace(".jpg", f"_{i}.jpg"))
 
 
 

@@ -4,7 +4,7 @@ input_dir = /Bean/data/gwangjin/2024/nbshapes/flare/nha_person_0000/nha_person_0
 train_dir = ["train"]
 eval_dir = ["test"]
 working_dir = .
-output_dir = /Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v4/
+output_dir = /Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v9/
 
 batch_size = 2
 sample_idx_ratio = 1
@@ -13,7 +13,7 @@ iterations = 10000
 upsample_iterations = [500]
 
 lr_shader = 1e-3
-lr_deformer = 4e-4
+lr_deformer = 5e-4
 lr_jacobian = 5e-4
 
 weight_shading = 1
@@ -28,7 +28,7 @@ weight_laplacian_regularization = 1e-1
 
 weight_feature_regularization = 1e-4
 
-weight_geometric_regularization = 1e-5
+weight_geometric_regularization = 1e-4
 weight_normal = 0.25
 weight_normal_laplacian = 1e-1
 weight_landmark = 1
@@ -46,5 +46,5 @@ light_mlp_dims = [64, 64]
 material_mlp_dims = [128, 128, 128, 128]
 material_mlp_ch = 5
 
-stage_iterations = [5000, 0000, 3000, 2000]
+stage_iterations = [6000, 0000, 2000, 3000]
 only_flame_iterations = 1000

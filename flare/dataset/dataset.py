@@ -34,6 +34,7 @@ class Dataset(torch.utils.data.Dataset):
     def collate(self, batch):
         return {
             'img' : torch.cat(list([item['img'] for item in batch]), dim=0).to(device),
+            'img_path' : list([item['img_path'] for item in batch]),
             'mask' : torch.cat(list([item['mask'] for item in batch]), dim=0).to(device),
             'skin_mask' : torch.cat(list([item['skin_mask'] for item in batch]), dim=0).to(device),
             'camera': list([item['camera'] for item in batch]),

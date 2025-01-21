@@ -8,7 +8,7 @@ import shutil
 def worker(gpu_id, command_queue):
     while not command_queue.empty():
         command, directory = command_queue.get()
-        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v4/'
+        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v9/'
         # print(f"Running on GPU {gpu_id}: {command}")
         print(os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')), os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')))
         if not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')) and not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')):
@@ -47,15 +47,15 @@ def run_trackings(gpu_ids):
     
         
     INPUT_DIR_ROOT = '/Bean/data/gwangjin/2024/nbshapes/flare/'
-    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v4/'
+    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v9/'
     
     directories = os.listdir(INPUT_DIR_ROOT)
     # reverse the order
     directories = sorted(directories, reverse=True)
 
     # shuffle the directories
-    import random
-    random.shuffle(directories)
+    # import random
+    # random.shuffle(directories)/
     
     for directory in directories:
             # if not directory.startswith('imavatar_'):
@@ -101,7 +101,7 @@ def run_trackings(gpu_ids):
         # os.makedirs(out_path, exist_ok=True)
 
         
-        command = (f"CUDA_VISIBLE_DEVICES={{}} python train.py --config {conf_file} --compute_mode", directory)
+        command = (f"CUDA_VISIBLE_DEVICES={{}} python train.py --config {conf_file} --compute_mode --skip_wandb", directory)
         commands.append(command)
 
 

@@ -119,6 +119,8 @@ class NeuralShader(torch.nn.Module):
         }
 
     def custom_forward(self, position):
+        position = np.expand_dims(position, axis=0)
+        position = torch.from_numpy(position).to(self.device)
         bz, h, w, ch = position.shape
         pe_input = self.apply_pe(position=position)
 

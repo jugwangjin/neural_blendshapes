@@ -114,7 +114,7 @@ def main(args):
 
     iterations = 3000
 
-    mesh_save_dir = './debug/optimized_ict_and_flame_meshes_with_shapes_FLAME/'
+    mesh_save_dir = './debug/optimized_ict_and_flame_meshes_with_shapes_FLAME_exaggerated_less_lr/'
     os.makedirs(mesh_save_dir, exist_ok=True)
     # ================================================
     # optimize ICT-FaceKit identity code
@@ -243,8 +243,12 @@ def main(args):
         return axis_angle.reshape(b, 15)
         return p3dt.matrix_to_axis_angle(p3dt.euler_angles_to_matrix(euler, convention='XYZ'))
         # gt_pose = p3dt.matrix_to_euler_angles(p3dt.axis_angle_to_matrix(views_subset['flame_pose'].reshape(b, 5, 3)), convention='XYZ').reshape(b, 15)
-
-    flame_optimizer = torch.optim.Adam([expressions, poses, shapes], lr=1e-2)
+    
+    flame_optimizer = torch.optim.Adam([
+            {'params': expressions, 'lr': 1e-3},
+            {'params': poses, 'lr': 1e-3},
+            {'params': shapes, 'lr': 1e-4}
+        ])
 
     lmk_face_idx = np.asarray(lmk_face_idx).astype(np.int32)
     lmk_b_coords = np.asarray(lmk_b_coords).astype(np.float32)
@@ -335,7 +339,7 @@ def main(args):
     # Render each optimized mesh
     for i in range(optimized_flame_expressions.size(0)):
         ict_expression = torch.zeros(1, ICTmodel.num_expression).to(device)
-        ict_expression[:, i] = 1.0
+        ict_expression[:, i] = 1.5
         ict_identity = optimized_ict_identity[None].to(device)
 
         ict_mesh = ICTmodel(expression_weights=ict_expression, identity_weights=ict_identity, to_canonical=False,)

@@ -137,7 +137,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     ## ============== Dir ==============================
     run_name = args.run_name if args.run_name is not None else args.input_dir.parent.name
     images_save_path, images_eval_save_path, meshes_save_path, shaders_save_path, experiment_dir = make_dirs(args, run_name, args.finetune_color)
-    copy_sources(args, run_name)
+
 
     ## ============== load ict facekit ==============================
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')

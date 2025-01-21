@@ -133,7 +133,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     ## ============== Dir ==============================
     run_name = args.run_name if args.run_name is not None else args.input_dir.parent.name
     images_save_path, images_eval_save_path, meshes_save_path, shaders_save_path, experiment_dir = make_dirs(args, run_name, args.finetune_color)
-    copy_sources(args, run_name)
+
 
     ## =================== Load FLAME ==============================
     flame_path = args.working_dir / 'flame/FLAME2020/generic_model.pkl'

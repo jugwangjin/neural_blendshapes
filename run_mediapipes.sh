@@ -1,0 +1,11 @@
+CUDA_VISIBLE_DEVICES=7 python draw_mediapipe.py --config configs_tmp/bala.txt --output figures/mediapipe_tracking
+CUDA_VISIBLE_DEVICES=7 python draw_mediapipe.py --config configs_tmp/justin.txt --output figures/mediapipe_tracking
+CUDA_VISIBLE_DEVICES=7 python draw_mediapipe.py --config configs_tmp/malte_1.txt --output figures/mediapipe_tracking
+CUDA_VISIBLE_DEVICES=7 python draw_mediapipe.py --config configs_tmp/marcel.txt --output figures/mediapipe_tracking
+CUDA_VISIBLE_DEVICES=7 python draw_mediapipe.py --config configs_tmp/nf_01.txt --output figures/mediapipe_tracking
+CUDA_VISIBLE_DEVICES=7 python draw_mediapipe.py --config configs_tmp/nf_03.txt --output figures/mediapipe_tracking
+CUDA_VISIBLE_DEVICES=7 python draw_mediapipe.py --config configs_tmp/nha_person_0000.txt --output figures/mediapipe_tracking
+CUDA_VISIBLE_DEVICES=7 python draw_mediapipe.py --config configs_tmp/nha_person_0004.txt --output figures/mediapipe_tracking
+CUDA_VISIBLE_DEVICES=7 python draw_mediapipe.py --config configs_tmp/subject_3.txt --output figures/mediapipe_tracking
+CUDA_VISIBLE_DEVICES=7 python draw_mediapipe.py --config configs_tmp/wojtek_1.txt --output figures/mediapipe_tracking
+CUDA_VISIBLE_DEVICES=7 python draw_mediapipe.py --config configs_tmp/yufeng.txt --output figures/mediapipe_tracking

@@ -1,0 +1,11 @@
+CUDA_VISIBLE_DEVICES=7 python render_meshes_w_manipulation.py --model_name bala --input figures/ours_meshes --output figures/ours_meshes_render
+CUDA_VISIBLE_DEVICES=7 python render_meshes_w_manipulation.py --model_name justin --input figures/ours_meshes --output figures/ours_meshes_render
+CUDA_VISIBLE_DEVICES=7 python render_meshes_w_manipulation.py --model_name malte_2 --input figures/ours_meshes --output figures/ours_meshes_render
+CUDA_VISIBLE_DEVICES=7 python render_meshes_w_manipulation.py --model_name marcel --input figures/ours_meshes --output figures/ours_meshes_render
+CUDA_VISIBLE_DEVICES=7 python render_meshes_w_manipulation.py --model_name nf_01 --input figures/ours_meshes --output figures/ours_meshes_render
+CUDA_VISIBLE_DEVICES=7 python render_meshes_w_manipulation.py --model_name nf_03 --input figures/ours_meshes --output figures/ours_meshes_render
+CUDA_VISIBLE_DEVICES=7 python render_meshes_w_manipulation.py --model_name nha_person_0000 --input figures/ours_meshes --output figures/ours_meshes_render
+CUDA_VISIBLE_DEVICES=7 python render_meshes_w_manipulation.py --model_name nha_person_0004 --input figures/ours_meshes --output figures/ours_meshes_render
+CUDA_VISIBLE_DEVICES=7 python render_meshes_w_manipulation.py --model_name subject_3 --input figures/ours_meshes --output figures/ours_meshes_render
+CUDA_VISIBLE_DEVICES=7 python render_meshes_w_manipulation.py --model_name wojtek_1 --input figures/ours_meshes --output figures/ours_meshes_render
+CUDA_VISIBLE_DEVICES=7 python render_meshes_w_manipulation.py --model_name yufeng --input figures/ours_meshes --output figures/ours_meshes_render

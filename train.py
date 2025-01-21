@@ -220,14 +220,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     print("Training Deformer")
 
     face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.neutral_mesh_canonical[0])[0]
-    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, face_normals=face_normals,device=device) 
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, face_normals=face_normals, fix_bshapes=args.fix_bshapes, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
 
     neural_blendshapes = neural_blendshapes.to(device)
 
     neural_blendshapes_params = list(neural_blendshapes.parameters())
     neural_blendshapes_expression_params = list(neural_blendshapes.expression_deformer.parameters())
-    neural_blendshapes_template_params = list(neural_blendshapes.template_deformer.parameters()) + [neural_blendshapes.face_details]
+    neural_blendshapes_template_params = list(neural_blendshapes.template_deformer.parameters()) 
+    neural_blendshapes_detail_params = [neural_blendshapes.face_details]
     neural_blendshapes_pe = list(neural_blendshapes.fourier_feature_transform.parameters()) 
     neural_blendshapes_pose_weight_params = list(neural_blendshapes.pose_weight.parameters())
     neural_blendshapes_encoder_params = list(neural_blendshapes.encoder.parameters())
@@ -328,8 +329,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     optimizer_neural_blendshapes = torch.optim.Adam([
                                                     {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer, },
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_detail_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian * 2e-1},
+                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                     ]
                                                     )
@@ -393,8 +395,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         visualize_training_no_lm(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, 0, ict_facekit=ict_facekit, save_name='flame_init')
 
     iteration = 0
-    for epoch in progress_bar:
-        for iter_, views_subset in tqdm(enumerate(dataloader_train)):
+    for epoch in range(epochs):
+        progress_bar = tqdm(enumerate(dataloader_train))
+        for iter_, views_subset in progress_bar:
             iteration += 1
             # Determine the stage based on iteration and milestones
             stage = next((i for i, milestone in enumerate(milestones) if iteration < milestone), len(milestones))
@@ -430,8 +433,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes = None
                 optimizer_neural_blendshapes = torch.optim.Adam([
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e-1},
+                                                    {'params': neural_blendshapes_detail_params, 'lr': args.lr_jacobian * 1e-1},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian * 1e-1},
-                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian * 2e-1},
+                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
                                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
                                                     ],
                                                 )
@@ -509,8 +513,9 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes = None
                 optimizer_neural_blendshapes = torch.optim.Adam([
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e-2},
+                                                    {'params': neural_blendshapes_detail_params, 'lr': args.lr_jacobian * 1e-2},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian * 1e-2},
-                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian * 2e-1 * 1e-2},
+                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian * 1e-2},
                                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian * 1e-2},
                                                     ],
                                                 )
@@ -527,7 +532,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 neural_blendshapes.train()
 
 
-            progress_bar.set_description(desc=f'Epoch {epoch}, Iter {iteration}, Stage {stage}')
+            progress_bar.set_description(desc=f'Epoch {epoch}/{epochs}, Iter {iteration}/{len(dataloader_train)}, Stage {stage}')
             losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
                         
             use_jaw = True
@@ -554,14 +559,14 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, mesh, args.finetune_color, lgt)
 
 
-            # if stage == 0:
-            #     indices = views_subset['idx']
-            #     sequential_frames = dataloader_train.collate_fn([dataset_train.get_sequential_frame(idx) for idx in indices])
-            #     sequential_features = neural_blendshapes.encoder(sequential_frames)
-            #     temporal_loss = (return_dict['features'] - sequential_features)
-            #     temporal_loss[:, 53:] *= 5e1
-            #     temporal_loss = temporal_loss.pow(2).mean()
-            #     losses['temporal_regularization'] = temporal_loss
+            if stage == 0:
+                indices = views_subset['idx']
+                sequential_frames = dataloader_train.collate_fn([dataset_train.get_sequential_frame(idx) for idx in indices])
+                sequential_features = neural_blendshapes.encoder(sequential_frames)
+                temporal_loss = (return_dict['features'] - sequential_features)
+                temporal_loss[:, 53:] *= 5e1
+                temporal_loss = temporal_loss.pow(2).mean()
+                losses['temporal_regularization'] = temporal_loss
 
             '''
             2D signal losses
@@ -668,11 +673,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 flame_loss_no_pose = FLAME_loss_function(FLAMEServer, views_subset['flame_expression'], zero_pose_w_jaw, deformed_vertices_no_pose, flame_pair_indices, ict_pair_indices, target_range=target_range)
 
+                flame_loss_template = FLAME_loss_function(FLAMEServer, torch.zeros_like(views_subset['flame_expression'][:1]), torch.zeros_like(views_subset['flame_pose'][:1]), return_dict['template_mesh'][None], flame_pair_indices, ict_pair_indices, target_range=tight_face_ict_flame)
+
                 losses['flame_regularization'] = flame_loss + flame_loss_no_pose
 
                 if stage > 0:
                     losses['flame_regularization'] *= 5e-1
                 
+                losses['flame_regularization'] += flame_loss_template
+
                 '''
                 Regularizations
                 '''
@@ -730,7 +739,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 acc_total_loss = 0
 
             if iteration % 200 == 1:
-                print(return_dict['features'][0, 53:53+7])
+                print(return_dict['features'][0, 53:53+7], neural_blendshapes.encoder.global_translation)
                 print("=="*50)
                 for k, v in losses.items():
                     # if k in losses_to_print:
@@ -786,11 +795,26 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     shader.eval()
 
                     return_dict_ = neural_blendshapes(views_subset['img'], views_subset)
+                    
+                    write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp_train.obj", mesh.with_vertices(return_dict_[deformed_vertices_key][0]).detach().to('cpu'))                    
+                    # save the posed meshes as well
+                    write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp_posed_train.obj", mesh.with_vertices(return_dict_[deformed_vertices_key + '_posed'][0]).detach().to('cpu'))
+
+                    vertices, _, _  = FLAMEServer(views_subset['flame_expression'], views_subset['flame_pose'])
+                    write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame_train.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
+
+                    zero_pose_w_jaw = torch.zeros_like(views_subset['flame_pose'])
+                    zero_pose_w_jaw[:, 6:9] = views_subset['flame_pose'][:, 6:9]
+                    vertices, _, _  = FLAMEServer(views_subset['flame_expression'], zero_pose_w_jaw)
+                    write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame_zero_pose_train.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
+
+
 
                     visualize_specific_traininig(deformed_vertices_key, return_dict_, renderer, shader, ict_facekit, views_subset, mesh, 'training', images_save_path, iteration, lgt)
                     
 
                     return_dict_ = neural_blendshapes(debug_views['img'], debug_views)
+
 
                     bshapes = return_dict_['features'][:, :53].detach().cpu().numpy()
                     bshapes = np.round(bshapes, 2)
@@ -826,9 +850,18 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                         n = ith                     
                         if n == 0: 
-                            write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp.obj", mesh.with_vertices(return_dict_['expression_mesh'][n]).detach().to('cpu'))                    
+                            write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp.obj", mesh.with_vertices(return_dict_[deformed_vertices_key][n]).detach().to('cpu'))                    
                             # save the posed meshes as well
-                            write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp_posed.obj", mesh.with_vertices(return_dict_['expression_mesh_posed'][n]).detach().to('cpu'))
+                            write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp_posed.obj", mesh.with_vertices(return_dict_[deformed_vertices_key+'_posed'][n]).detach().to('cpu'))
+
+                        vertices, _, _  = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
+                        write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
+
+                        zero_pose_w_jaw = torch.zeros_like(debug_views['flame_pose'])
+                        zero_pose_w_jaw[:, 6:9] = debug_views['flame_pose'][:, 6:9]
+                        vertices, _, _  = FLAMEServer(debug_views['flame_expression'], zero_pose_w_jaw)
+                        write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame_zero_pose.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
+
 
                     write_mesh(meshes_save_path / f"mesh_{iteration:06d}_temp.obj", mesh.with_vertices(return_dict_['template_mesh']).detach().to('cpu'))                                
                     del debug_gbuffer, return_dict_
