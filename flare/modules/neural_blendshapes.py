@@ -24,6 +24,8 @@ def initialize_weights(m, gain=0.1):
             except:
                 pass
 
+import time
+
 class Identity(nn.Module):
     def __init__(self):
         super().__init__()
@@ -62,9 +64,9 @@ class MLPTemplate(nn.Module):
 
 
 class NeuralBlendshapes(nn.Module):
-    def __init__(self, ict_facekit, aabb  = None, face_normals=None, zero_init=False, fix_bshapes=False):
+    def __init__(self, ict_facekit, aabb  = None, face_normals=None, zero_init=False, fix_bshapes=False, additive=False):
         super().__init__()
-        self.encoder = ResnetEncoder(ict_facekit, fix_bshapes=fix_bshapes)
+        self.encoder = ResnetEncoder(ict_facekit, fix_bshapes=fix_bshapes, additive=additive)
 
         self.aabb = aabb
 
@@ -128,11 +130,11 @@ class NeuralBlendshapes(nn.Module):
             self.template_deformer.mlp[-1].weight.data.zero_()
 
         # initialize last layer of template deformer with low weights
-        # torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 1024)
+        torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 512)
 # 
         # initialize last layer of expression deformer with zero
         # torch.nn.init.constant_(self.expression_deformer[-1].weight, 0.0)
-        # torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 1024)
+        torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 512)
 
         # for l in self.template_deformer.mlp:
         #     if isinstance(l, nn.Linear):
@@ -431,7 +433,92 @@ class NeuralBlendshapes(nn.Module):
         super().to(device)
         return self
 
-def get_neural_blendshapes(model_path=None, train=True, ict_facekit=None, aabb=None, face_normals=None, zero_init=False, fix_bshapes=False, device='cuda'):
+
+
+
+    def forward_measure_time(self, image=None, views=None, features=None, image_input=True, pretrain=False):
+
+        encoder_start = time.time()
+        if features is None:
+            bshape=None
+            if features is not None:
+                bshape = features
+            return_dict = {} 
+            features = self.encoder(views)
+
+            if bshape is not None:
+                features[:, :53] = bshape
+        else:
+            return_dict = {} 
+            features = features
+
+        encoder_end = time.time()
+
+        return_dict['features'] = features
+        
+        bsize = features.shape[0]
+        template = self.ict_facekit.canonical[0]
+        pose_weight_input = torch.cat([self.ict_facekit.canonical.repeat(bsize, 1, 1), features[:, None, 53:59].repeat(1, template.shape[0], 1)], dim=-1)
+
+        encoded_points = template
+        encoded_points2 = template
+        blendshapes_start = time.time()
+        pose_weight = self.pose_weight(pose_weight_input)  # shape of B, V, 2
+        template_mesh_delta = self.template_deformer(encoded_points)
+        expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
+        face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
+        template_mesh_delta[:self.full_head_index] += face_details
+
+        blendshapes_end = time.time()
+
+        
+        
+        # self.ict_facekit.update_eyeball_centers(template_mesh)
+
+        deform_start = time.time()
+
+        ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(bsize, 1))
+
+        ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
+
+        # expression_mesh_delta_u[9409:11248] = 0
+
+        feat = features[:, :53].clamp(0, 1)
+
+        expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
+        
+        expression_mesh = ict_mesh_w_temp + expression_mesh_delta
+
+        expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
+    
+        deform_end = time.time()
+
+        return_dict['encoder_time'] = encoder_end - encoder_start
+        return_dict['blendshapes_time'] = blendshapes_end - blendshapes_start
+        return_dict['deform_time'] = deform_end - deform_start
+        
+
+        return_dict['expression_mesh_posed'] = self.remove_teeth(expression_mesh_posed)
+
+
+        return return_dict
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def get_neural_blendshapes(model_path=None, train=True, ict_facekit=None, aabb=None, face_normals=None, zero_init=False, fix_bshapes=False, additive=False, device='cuda'):
     neural_blendshapes = NeuralBlendshapes(ict_facekit, aabb=aabb, face_normals=face_normals, zero_init=zero_init, fix_bshapes=fix_bshapes)
     neural_blendshapes.to(device)
 

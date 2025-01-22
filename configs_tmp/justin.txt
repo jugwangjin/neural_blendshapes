@@ -4,7 +4,7 @@ input_dir = /Bean/data/gwangjin/2024/nbshapes/flare/justin/justin
 train_dir = ["train"]
 eval_dir = ["test"]
 working_dir = .
-output_dir = /Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v9/
+output_dir = /Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v10/
 
 batch_size = 2
 sample_idx_ratio = 1
@@ -36,7 +36,7 @@ weight_closure = 1
 
 weight_linearity_regularization = 1e-5
 
-weight_flame_regularization = 2
+weight_flame_regularization = 10
 
 
 weight_temporal_regularization = 1e-4
@@ -46,5 +46,5 @@ light_mlp_dims = [64, 64]
 material_mlp_dims = [128, 128, 128, 128]
 material_mlp_ch = 5
 
-stage_iterations = [6000, 0000, 2000, 3000]
-only_flame_iterations = 1000
+stage_iterations = [7000, 0000, 3000, 4000]
+only_flame_iterations = 2500

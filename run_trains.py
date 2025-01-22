@@ -8,22 +8,30 @@ import shutil
 def worker(gpu_id, command_queue):
     while not command_queue.empty():
         command, directory = command_queue.get()
-        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v9/'
+        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v10/'
         # print(f"Running on GPU {gpu_id}: {command}")
         print(os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')), os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')))
-        if not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')) and not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')):
 
-            # write a dummy txt file, that will be used to check if the training is ongoing
-            os.makedirs(os.path.join(OUTPUT_DIR_ROOT, directory), exist_ok=True)
-            with open(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'), 'w') as f:
-                f.write('')
-            
+        if not os.path.exists(os.path.join('/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v10/', directory, 'final_eval.txt')):
 
-            command = command.format(gpu_id)
-            print(f"Running on GPU {gpu_id}: {command}")
-            subprocess.run(command, shell=True)
+            if not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')) and not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')):
 
-            os.remove(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'))
+                # write a dummy txt file, that will be used to check if the training is ongoing
+                os.makedirs(os.path.join(OUTPUT_DIR_ROOT, directory), exist_ok=True)
+                with open(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'), 'w') as f:
+                    f.write('')
+                
+                try:
+                    command = command.format(gpu_id)
+                    print(f"Running on GPU {gpu_id}: {command}")
+                    subprocess.run(command, shell=True)
+                except Exception as e:
+                    print(e)
+                    print(f"Failed to run on GPU {gpu_id}: {command}")
+                    # remove the currently_training.txt file
+                finally:
+                    if os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')):
+                        os.remove(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'))
         command_queue.task_done()
 
 def run_trackings(gpu_ids):
@@ -47,10 +55,11 @@ def run_trackings(gpu_ids):
     
         
     INPUT_DIR_ROOT = '/Bean/data/gwangjin/2024/nbshapes/flare/'
-    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v9/'
+    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v10/'
     
     directories = os.listdir(INPUT_DIR_ROOT)
     # reverse the order
+    directories = sorted(directories)
     directories = sorted(directories, reverse=True)
 
     # shuffle the directories
@@ -143,10 +152,10 @@ def run_trackings(gpu_ids):
 
     finally:
         # remove all currently_training.txt files
-        for directory in directories:
-            if os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')):
-                print(f"Removing {os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')}")
-                os.remove(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'))
+        # for directory in directories:
+            # if os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')):
+                # print(f"Removing {os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')}")
+                # os.remove(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'))
         for p in processes:
             p.join()
 

@@ -34,10 +34,11 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     facs_reg += bshapes_out.pow(2).mean()  +  feature[:, 60:63].pow(2).mean() * 1e-1
 
 
-    rotation_reg_features = torch.randn(random_features_batch_size, 6, device=facs.device) * 0.5
+    # rotation_reg_features = torch.randn(random_features_batch_size, 15, device=facs.device) * 0.5
 
-    rotation_out = neural_blendshapes.encoder.encoder.rotation_tail(rotation_reg_features)
-    rotation_reg = rotation_out.pow(2).mean() * 1e-1
+    # rotation_out = neural_blendshapes.encoder.encoder.rotation_tail(rotation_reg_features)
+    # translation_out = neural_blendshapes.encoder.encoder.translation_tail(rotation_reg_features) 
+    # rotation_reg = rotation_out.pow(2).mean() * 1e-1 
 
     # facs_reg += (bshapes_out - similar_bshapes_out).pow(2).mean()
 
@@ -55,7 +56,7 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
 
     translation_reg = (torch.pow(translation, 2).mean()) * 1e-1
 
-    loss =  facs_reg + rotation_reg + translation_reg
+    loss =  facs_reg + translation_reg
     
     return loss
 

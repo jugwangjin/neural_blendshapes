@@ -13,7 +13,7 @@ import pytorch3d.ops as p3do
 from . import resnet
 
 class DECAEncoder(nn.Module):
-    def __init__(self, last_op=None):
+    def __init__(self, last_op=None, additive=False):
         super(DECAEncoder, self).__init__()
         feature_size = 2048
         self.feature_size = feature_size
@@ -47,26 +47,32 @@ class DECAEncoder(nn.Module):
         )
 
         self.rotation_tail = nn.Sequential(
-            nn.Linear(6, 32),
-            nn.LayerNorm(32),
+            nn.Linear(15, 64),
+            nn.LayerNorm(64),
             nn.ReLU(),
-            nn.Linear(32, 3, bias=False),
+            nn.Linear(64, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 9, bias=False)
         )
-        self.translation_tail = nn.Sequential(
-            nn.Linear(6, 32, bias=False),
-            nn.LayerNorm(32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.LayerNorm(32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.LayerNorm(32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.LayerNorm(32),
-            nn.ReLU(),
-            nn.Linear(32, 6, bias=False)
-        )
+        # self.translation_tail = nn.Sequential(
+        #     nn.Linear(15, 32),
+        #     nn.LayerNorm(32),
+        #     nn.ReLU(),
+        #     nn.Linear(32, 32),
+        #     nn.LayerNorm(32),
+        #     nn.ReLU(),
+        #     nn.Linear(32, 32),
+        #     nn.LayerNorm(32),
+        #     nn.ReLU(),
+        #     nn.Linear(32, 32),
+        #     nn.LayerNorm(32),
+        #     nn.ReLU(),
+        #     nn.Linear(32, 6, bias=False)
+        # )
 
         
         # multiply by 0.1 to the last layers of rotation_tail and translation_tail
@@ -97,6 +103,9 @@ class DECAEncoder(nn.Module):
     
         self.extracted_features = {}
 
+        self.additive = additive
+        self.tanh = nn.Tanh()
+
     def train(self, mode=True):
         super().train(mode)
         self.encoder.eval()
@@ -121,9 +130,9 @@ class DECAEncoder(nn.Module):
 
             # shape tex exp pose cam 3 light 27
             # shape 100 # tex 50 # exp 50 # pose  6 
-
-            pose_features = self.layers(encoder_features)
-            pose_features = pose_features[..., -36:-30]
+            pose_features = inputs['flame_pose']
+            # pose_features = self.layers(encoder_features)
+            # pose_features = pose_features[..., -36:-30]
             # pose_features = torch.cat([pose_features[..., :100], pose_features[..., 150:-30]], dim=-1)
             # img = inputs['img_deca']
 
@@ -138,27 +147,32 @@ class DECAEncoder(nn.Module):
         
         bshapes_out = self.bshapes_tail(torch.cat([encoder_features, bshapes_additional_features], dim=-1))
         rotation_out = self.rotation_tail(pose_features)
-        translation_out = self.translation_tail(pose_features)
+        # translation_out = self.translation_tail(pose_features)
 
         bshapes_tail_out = bshapes_out
 
-        bshapes_out = torch.pow(bshapes, torch.exp(bshapes_out))
+        if not self.additive:
+            bshapes_out = torch.pow(bshapes, torch.exp(bshapes_out))
+        else:
+            bshapes_out = bshapes + self.tanh(bshapes_out)
+            bshapes_out = bshapes_out.clamp(0, 1)
+            
         # print(rotation_out.shape, mp_translation.shape, flame_cam_t.shape, torch.cat([rotation_out, mp_translation, flame_cam_t], dim=-1).shape)
         # translation_out = self.translation_tail(torch.cat([rotation_out], dim=-1))
         # translation_out = self.translation_tail(torch.cat([rotation_out, mp_translation, landmark], dim=-1))
         
-        out = torch.cat([bshapes_out, rotation_out, translation_out, bshapes_tail_out], dim=-1)
+        out = torch.cat([bshapes_out, rotation_out, bshapes_tail_out], dim=-1)
         if self.last_op:
             out = self.last_op(out)
         return out
 
 class ResnetEncoder(nn.Module):
-    def __init__(self, ict_facekit, fix_bshapes=False):
+    def __init__(self, ict_facekit, fix_bshapes=False, additive=False):
         super(ResnetEncoder, self).__init__()
 
         self.ict_facekit = ict_facekit
         
-        self.encoder = DECAEncoder(last_op = None)
+        self.encoder = DECAEncoder(last_op = None, additive=additive)
         self.load_deca_encoder()
         
         # set zero bias)

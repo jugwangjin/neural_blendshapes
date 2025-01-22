@@ -144,12 +144,13 @@ def shading_loss_batch(pred_color_masked, views, batch_size):
     color_loss, tonemap_pred, tonemap_target = image_loss_fn(pred_color_masked[..., :3] * views["mask"], views["img"] * views["mask"])
 
     
-    input = tonemap_pred.permute(0, 3, 1, 2)
-    target = tonemap_target.permute(0, 3, 1, 2)
+    # input = tonemap_pred.permute(0, 3, 1, 2)
+    # target = tonemap_target.permute(0, 3, 1, 2)
 
-    ssim_loss = (1.0 - ssim(input, target))
+    # ssim_loss = (1.0 - ssim(input, target))
 
-    color_loss = 0.95 * color_loss + 0.05 * ssim_loss
+    color_loss = color_loss
+    # color_loss = 0.95 * color_loss + 0.05 * ssim_loss
 
     return color_loss, pred_color_masked[..., :3], [tonemap_pred, tonemap_target]
 

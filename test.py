@@ -16,31 +16,19 @@ from arguments import config_parser
 import os
 from pathlib import Path
 import torch
-from flame.FLAME import FLAME
-from flare.core import (
-    Mesh, Renderer
-)
-from flare.modules import (
-    NeuralShader, get_neural_blendshapes
-)
-from flare.utils import (
-    AABB, read_mesh,
-    save_individual_img, make_dirs, save_relit_intrinsic_materials
-)
-import nvdiffrec.render.light as light
-from flare.dataset import DatasetLoader
-from flare.dataset import dataset_util
-from flare.metrics import metrics
-
 # Select the device
 device = torch.device('cpu')
 devices = 0
 if torch.cuda.is_available() and devices >= 0:
     device = torch.device(f'cuda:{devices}')
 
-from flare.utils.ict_model import ICTFaceKitTorch
 import open3d as o3d
 
+import sys
+
+import time
+
+from flare.metrics import metrics
 
 # ==============================================================================================
 # evaluation
@@ -69,6 +57,7 @@ def run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, de
     rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffers, views, mesh, args.finetune_color, lgt)
 
     return rgb_pred, gbuffers, cbuffers
+
 
 # ==============================================================================================
 # relight: run
@@ -119,9 +108,86 @@ def quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blend
             eval_list = [str(e) for e in eval_list]
             f.writelines(" ".join(eval_list))
             
+# ==============================================================================================
+# evaluation: numbers
+# ==============================================================================================  
+def measure_fps(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer,
+                        experiment_dir, images_eval_save_path, lgt=None, save_each=False):
+    import tqdm
+
+    running_times = []
+    encoder_times = []
+    blendshapes_times = []
+    deform_times = []
+    rendering_times = []
+
+
+    for it, views in tqdm.tqdm(enumerate(dataloader_validate)):
+        with torch.no_grad():
+            
+            neural_blendshapes.eval()
+            shader.eval()
+
+            start = time.time()
+
+            return_dict = neural_blendshapes.forward_measure_time(views["img"].to(device), views)
+            # print(return_dict['features'][:, 53:])
+
+            deformed_vertices = return_dict['expression_mesh_posed']
+
+            encoder_time = return_dict['encoder_time']
+
+            blendshapes_time = return_dict['blendshapes_time'] 
+            deform_time = return_dict['deform_time'] 
+            
+            rendering_start = time.time()
+            d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
+            ## ============== Rasterize ==============================
+            mesh_key_name = 'expression_mesh'
+
+            gbuffers = renderer.render_batch(views['flame_camera'], return_dict[mesh_key_name+'_posed'].contiguous(), d_normals,
+                            channels=channels_gbuffer, with_antialiasing=True, 
+                            canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                            mesh=mesh
+                            )
+
+    
+            ## ============== predict color ==============================
+            rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffers, views, mesh, args.finetune_color, lgt)
+
+            rendering_end = time.time()
+
+            end = time.time()
+
+            running_times.append(end-start)
+
+            rendering_times.append(rendering_end-rendering_start)
+            encoder_times.append(encoder_time)
+            blendshapes_times.append(blendshapes_time)
+            deform_times.append(deform_time)
+
+            print(
+                f"Runtime: {end-start}, Encoder time: {encoder_time}, Blendshapes time: {blendshapes_time}, Deform time: {deform_time}, Rendering time: {rendering_end-rendering_start}"
+            )
+
+
+    mean_runtime = sum(running_times) / len(running_times)
+    mean_encoder_time = sum(encoder_times) / len(encoder_times)
+    mean_blendshapes_time = sum(blendshapes_times) / len(blendshapes_times)
+    mean_deform_time = sum(deform_times) / len(deform_times)
+    mean_rendering_time = sum(rendering_times) / len(rendering_times)
+
+    print(f"Mean runtime: {mean_runtime}, fps: {1/mean_runtime}")
+    print(f"Mean encoder time: {mean_encoder_time}")
+    print(f"Mean blendshapes time: {mean_blendshapes_time}")
+    print(f"Mean deform time: {mean_deform_time}")
+    print(f"Mean rendering time: {mean_rendering_time}")
+
+
 if __name__ == '__main__':
     parser = config_parser()
     args = parser.parse_args()
+
 
     # Select the device
     device = torch.device('cpu')
@@ -129,77 +195,106 @@ if __name__ == '__main__':
         device = torch.device(f'cuda:{args.device}')
     print(f"Using device {device}")
 
-    # Create directories
-    run_name = args.run_name if args.run_name is not None else args.input_dir.parent.name
-    images_save_path, images_eval_save_path, meshes_save_path, shaders_save_path, experiment_dir = make_dirs(args, run_name, args.finetune_color)
-    flame_path = args.working_dir / 'flame/FLAME2020/generic_model.pkl'
 
-    # ==============================================================================================
-    # Create evalables: FLAME + Renderer + Views + Downsample
-    # ==============================================================================================
+    original_dir = os.getcwd()
+    # Add the path to the 'flare' directory
+    flare_path = os.path.join(args.output_dir, args.run_name, 'sources')
+    
+    sys.path.insert(0, flare_path)
 
-    ### Read the views
-    print("loading test views...")
-    dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=args.sample_idx_ratio, pre_load=True)
-    dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=4, collate_fn=dataset_val.collate, shuffle=False)
+
+    from flame.FLAME import FLAME
+    from flare.core import (
+        Mesh, Renderer
+    )
+    from flare.modules import (
+        NeuralShader, get_neural_blendshapes
+    )
+    from flare.utils import (
+        AABB, read_mesh,
+        save_individual_img, make_dirs, save_relit_intrinsic_materials
+    )
+    import nvdiffrec.render.light as light
+    from flare.dataset import DatasetLoader
+    from flare.dataset import dataset_util
+    from flare.utils.ict_model import ICTFaceKitTorch
+
+
+    from flare.dataset import DatasetLoader
+
+    from flare.utils.ict_model import ICTFaceKitTorch
+    import nvdiffrec.render.light as light
+    from flare.core import (
+        Mesh, Renderer
+    )
+    from flare.modules import (
+        NeuralShader, get_neural_blendshapes
+    )
+    from flare.utils import (
+        AABB, 
+        save_manipulation_image
+    )
+    ## ============== load ict facekit ==============================
+    dataset_train    = DatasetLoader(args, train_dir=args.train_dir, sample_ratio=args.sample_idx_ratio, pre_load=False, train=True)
+
 
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
-    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit,device=device)
+    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
     ict_canonical_mesh.compute_connectivity()
 
+    mesh = ict_canonical_mesh
 
     ## ============== renderer ==============================
     aabb = AABB(ict_canonical_mesh.vertices.cpu().numpy())
     ict_mesh_aabb = [torch.min(ict_canonical_mesh.vertices, dim=0).values, torch.max(ict_canonical_mesh.vertices, dim=0).values]
 
-
     renderer = Renderer(device=device)
-    renderer.set_near_far(dataset_val, torch.from_numpy(aabb.corners).to(device), epsilon=0.5)
-
+    renderer.set_near_far(dataset_train, torch.from_numpy(aabb.corners).to(device), epsilon=0.5)
     channels_gbuffer = ['mask', 'position', 'normal', "canonical_position"]
     print("Rasterizing:", channels_gbuffer)
+    
+    renderer_visualization = Renderer(device=device)
+    renderer_visualization.set_near_far(dataset_train, torch.from_numpy(aabb.corners).to(device), epsilon=0.5)
+
+    shader = NeuralShader.load(os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'shader.pt'), device=device)
+    # ==============================================================================================
+    # deformation 
+    # ==============================================================================================
+
+ # neural blendshapes
+    model_path = os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'neural_blendshapes.pt')
+    print("=="*50)
+    print("Training Deformer")
+    face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.neutral_mesh_canonical[0])[0]
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, face_normals=face_normals,device=device) 
+    
 
 
-    model_path = Path(experiment_dir / "stage_2" / "network_weights" / f"neural_blendshapes_latest.pt")
-    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, device=device) 
+    # Create directories
+    run_name = args.run_name if args.run_name is not None else args.input_dir.parent.name
+    images_save_path, images_eval_save_path, meshes_save_path, shaders_save_path, experiment_dir = make_dirs(args, run_name, args.finetune_color)
+    
 
-    head_template = ict_canonical_mesh.vertices[ict_facekit.head_indices].to(device)
-    eye_template = ict_canonical_mesh.vertices[ict_facekit.eyeball_indices].to(device)
-
-    neural_blendshapes.set_template(ict_canonical_mesh.vertices,
-                                    ict_facekit.uv_neutral_mesh)
-    # neural_blendshapes.set_template((head_template, eye_template))
-
-    load_shader = Path(experiment_dir / "stage_2" / "network_weights" / f"shader_latest.pt")
-    assert os.path.exists(load_shader)
-
-    shader = NeuralShader.load(load_shader, device=device)
 
     lgt = light.create_env_rnd()    
 
-    print("=="*50)
-    shader.eval()
-    neural_blendshapes.eval()
 
-    batch_size = args.batch_size
-    print("Batch Size:", batch_size)
-    
-    mesh = ict_canonical_mesh.with_vertices(ict_canonical_mesh.vertices)
-    # ==============================================================================================
-    # evaluation: intrinsic materials and relighting
-    # ==============================================================================================  
-    lgt_list = light.load_target_cubemaps(args.working_dir)
-    for i in range(len(lgt_list)):
-        Path(images_eval_save_path / "qualitative_results" / f"env_map_{i}" ).mkdir(parents=True, exist_ok=True)
+    dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=100, pre_load=False)
 
-    for it, views in enumerate(dataloader_validate):
-        with torch.no_grad():
-            run_relight(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, lgt_list, images_eval_save_path / "qualitative_results")
-            
-    # # ==============================================================================================
-    # # evaluation: qualitative and quantitative - animation
-    # # ==============================================================================================  
+    dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=1, collate_fn=dataset_val.collate)
+
+    measure_fps(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, experiment_dir
+                    , images_eval_save_path / "qualitative_results", lgt=lgt, save_each=True)
+
+
+
+    dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=1, pre_load=False)
+
+    dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=4, collate_fn=dataset_val.collate)
+
     quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, experiment_dir
-                    , images_eval_save_path  / "qualitative_results", lgt=lgt, save_each=True)
+                    , images_eval_save_path / "qualitative_results", lgt=lgt, save_each=True)
+
+

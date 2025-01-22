@@ -256,7 +256,7 @@ def run(output_dir, gt_dir, subfolders, load_npz=False):
 
             files = os.listdir(os.path.join(output_dir, pred_file_name))
 
-            files_nopng = [f[:-4] for f in files]
+            files_nopng = [f[:-4] for f in files if files.endswith('.png')]
 
             start_from = min([int(f) for f in files_nopng])
             files_nopng = [str(int(f) - start_from + 1) for f in files_nopng]
@@ -478,8 +478,8 @@ def run_one_folder(output_dir, gt_dir, save_dir, is_insta, no_cloth):
         if not file.endswith(".png") and not file.endswith(".jpg"):
             continue
         n += 1
-        if n > 300:
-            break
+        # if n > 300:
+        #     break
         try:
             pred_image = os.path.join(output_dir, file)
             # inverse of zfill?
@@ -536,11 +536,11 @@ def run_one_folder(output_dir, gt_dir, save_dir, is_insta, no_cloth):
         
             if not osp.exists(osp.join(save_dir, "err_l1")):
                 os.mkdir(osp.join(save_dir, "err_l1"))
-            cv2.imwrite(osp.join(save_dir, "err_l1", file), 255 * error_mask[0].permute(1,2,0).cpu().numpy())
+            # cv2.imwrite(osp.join(save_dir, "err_l1", file), 255 * error_mask[0].permute(1,2,0).cpu().numpy())
 
             if not osp.exists(osp.join(save_dir, "gt")):
                 os.mkdir(osp.join(save_dir, "gt"))
-            cv2.imwrite(osp.join(save_dir, "gt", file), cv2.cvtColor(255 * gt[0].permute(1,2,0).cpu().numpy(), cv2.COLOR_RGB2BGR))
+            # cv2.imwrite(osp.join(save_dir, "gt", file), cv2.cvtColor(255 * gt[0].permute(1,2,0).cpu().numpy(), cv2.COLOR_RGB2BGR))
 
             mse = img_mse(pred, gt, mask=mask, error_type='mse', use_mask=use_mask)
             rmse = img_mse(pred, gt, mask=mask, error_type='rmse', use_mask=use_mask)
@@ -597,6 +597,11 @@ def run_one_folder(output_dir, gt_dir, save_dir, is_insta, no_cloth):
     print("Written result to ", path_result_npz)
 
     print("{}\t{}\t{}\t{}".format(np.mean(mae_l), np.mean(perceptual_l), np.mean(ssim_l), np.mean(psnr_l)))
+
+    if args.name != None:
+        with open(os.path.join(save_dir, f"{args.name}_metrics.txt"), "w") as f:
+            f.write(f"MAE: {np.mean(mae_l)}\nPerceptual: {np.mean(perceptual_l)}\nSSIM: {np.mean(ssim_l)}\nPSNR: {np.mean(psnr_l)}")
+
     return np.mean(mae_l), np.mean(perceptual_l), np.mean(ssim_l), np.mean(psnr_l)
 
 
@@ -610,8 +615,17 @@ if __name__ == '__main__':
     parser.add_argument('--save_dir', type=str)
     parser.add_argument('--is_insta', action='store_true')
     parser.add_argument('--no_cloth', action='store_true')
+    parser.add_argument('--name', type=str)
 
     args = parser.parse_args()
+    if os.path.exists(os.path.join(args.save_dir, f"{args.name}_metrics.txt")):
+        print("Already ran this folder")
+        exit()
+
+    if not os.path.exists(args.data_dir):
+        print("Data directory does not exist")
+        exit()
+
     os.makedirs(args.save_dir, exist_ok=True)
     _,_, _, _ = run_one_folder(args.data_dir, args.gt_dir, args.save_dir, args.is_insta, args.no_cloth)
 
