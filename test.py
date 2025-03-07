@@ -30,6 +30,37 @@ import time
 
 from flare.metrics import metrics
 
+from flame.FLAME import FLAME
+from flare.core import (
+    Mesh, Renderer
+)
+from flare.modules import (
+    NeuralShader, get_neural_blendshapes
+)
+from flare.utils import (
+    AABB, read_mesh,
+    save_individual_img, make_dirs, save_relit_intrinsic_materials
+)
+import nvdiffrec.render.light as light
+from flare.dataset import DatasetLoader
+from flare.dataset import dataset_util
+from flare.utils.ict_model import ICTFaceKitTorch
+
+
+from flare.dataset import DatasetLoader
+
+from flare.utils.ict_model import ICTFaceKitTorch
+import nvdiffrec.render.light as light
+from flare.core import (
+    Mesh, Renderer
+)
+from flare.modules import (
+    NeuralShader, get_neural_blendshapes
+)
+from flare.utils import (
+    AABB, 
+    save_manipulation_image
+)
 # ==============================================================================================
 # evaluation
 # ==============================================================================================    
@@ -80,14 +111,39 @@ def run_relight(args, mesh, views, ict_facekit, neural_blendshapes, shader, rend
 # ==============================================================================================
 # evaluation: numbers
 # ==============================================================================================  
+@torch.no_grad()
 def quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer,
                         experiment_dir, images_eval_save_path, lgt=None, save_each=False):
     import tqdm
+
+    # if there are same number of images in images_eval_save_path, 
+    
+    # if there are same number of images in images_eval_save_path / "rgb", which ends with .png with the length of dataloader_validate, then skip
+
+    num_images = len(list(images_eval_save_path.glob("rgb/*.png")))
+    if num_images == len(dataloader_validate):
+        print("All images already exist")
+        return
+
     for it, views in tqdm.tqdm(enumerate(dataloader_validate)):
         with torch.no_grad():
+            # saved image name 
+            # assume batch size is 1
+
             
-            neural_blendshapes.eval()
-            shader.eval()
+            for i in range(views['img'].shape[0]):
+                
+                id = int(views["frame_name"][i])
+
+                saved_image_name = images_eval_save_path / "rgb" / f'{id:05d}.png'
+
+                if saved_image_name.exists():
+                    print(f"Image {id} already exists")
+                    continue
+
+
+                neural_blendshapes.eval()
+                shader.eval()
 
             rgb_pred, gbuffer, cbuffer = run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, 
                     channels_gbuffer, lgt=lgt)
@@ -258,17 +314,18 @@ if __name__ == '__main__':
     renderer_visualization = Renderer(device=device)
     renderer_visualization.set_near_far(dataset_train, torch.from_numpy(aabb.corners).to(device), epsilon=0.5)
 
-    shader = NeuralShader.load(os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'shader.pt'), device=device)
+
+    shader = NeuralShader.load(os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'shader_latest.pt'), device=device)
     # ==============================================================================================
     # deformation 
     # ==============================================================================================
 
  # neural blendshapes
-    model_path = os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'neural_blendshapes.pt')
+    model_path = os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'neural_blendshapes_latest.pt')
     print("=="*50)
     print("Training Deformer")
     face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.neutral_mesh_canonical[0])[0]
-    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, face_normals=face_normals,device=device) 
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, face_normals=face_normals, fix_bshapes=args.fix_bshapes, additive=args.additive, disable_pose=args.disable_pose, device=device) 
     
 
 
@@ -277,22 +334,21 @@ if __name__ == '__main__':
     images_save_path, images_eval_save_path, meshes_save_path, shaders_save_path, experiment_dir = make_dirs(args, run_name, args.finetune_color)
     
 
-
     lgt = light.create_env_rnd()    
 
 
-    dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=100, pre_load=False)
+    # dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=100, pre_load=False)
 
-    dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=1, collate_fn=dataset_val.collate)
+    # dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=1, collate_fn=dataset_val.collate)
 
-    measure_fps(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, experiment_dir
-                    , images_eval_save_path / "qualitative_results", lgt=lgt, save_each=True)
+    # measure_fps(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, experiment_dir
+    #                 , images_eval_save_path / "qualitative_results", lgt=lgt, save_each=True)
 
 
 
     dataset_val      = DatasetLoader(args, train_dir=args.eval_dir, sample_ratio=1, pre_load=False)
 
-    dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=4, collate_fn=dataset_val.collate)
+    dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=1, collate_fn=dataset_val.collate)
 
     quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, experiment_dir
                     , images_eval_save_path / "qualitative_results", lgt=lgt, save_each=True)

@@ -254,21 +254,21 @@ def run(output_dir, gt_dir, subfolders, load_npz=False):
 
             expressions = {os.path.basename(frame['file_path']): frame["expression"] for frame in camera_dict["frames"]}
 
-            files = os.listdir(os.path.join(output_dir, pred_file_name))
+            files = [f for f in os.listdir(os.path.join(output_dir, pred_file_name)) if f.endswith('.png')]
 
-            files_nopng = [f[:-4] for f in files if files.endswith('.png')]
+            files_nopng = [f for f in files if f.endswith('.png')]
 
-            start_from = min([int(f) for f in files_nopng])
-            files_nopng = [str(int(f) - start_from + 1) for f in files_nopng]
+            start_from = min([int(f[:-4]) for f in files_nopng])
+            files_nopng = [str(int(f[:-4]) - start_from + 1) for f in files_nopng]
             print("image index start from: ", start_from)
-            assert len(set(files_nopng).intersection(set(expressions.keys()))) == len(files)
+            assert len(set(files_nopng).intersection(set(expressions.keys()))) == len(files_nopng)
             
-            
+            # files = files_nopng
             print(files_nopng, len(frames))
-            for i in tqdm(range(len(files))):
+            for i in tqdm(range(len(files_nopng))):
                 filename = files[i]
-                filename_nopad =  str(int(files[i][:-4]) - start_from + 1) + ".png"
-                gt_single_pad = f'{(int(files[i][:-4]) - start_from + 1)}.png'
+                filename_nopad =  str(int(files_nopng[i]) - start_from + 1) + ".png"
+                gt_single_pad = f'{(int(files_nopng[i]) - start_from + 1)}.png'
                 # for i in tqdm(range(len(frames_))):
                 #     gt_single_pad = f'{int(frames_[i])+1:04d}.png'
                 #     filename = f'{int(frames_[i]):05d}.png'
@@ -478,8 +478,8 @@ def run_one_folder(output_dir, gt_dir, save_dir, is_insta, no_cloth):
         if not file.endswith(".png") and not file.endswith(".jpg"):
             continue
         n += 1
-        # if n > 300:
-        #     break
+        if n > 300:
+            break
         try:
             pred_image = os.path.join(output_dir, file)
             # inverse of zfill?
@@ -618,9 +618,9 @@ if __name__ == '__main__':
     parser.add_argument('--name', type=str)
 
     args = parser.parse_args()
-    if os.path.exists(os.path.join(args.save_dir, f"{args.name}_metrics.txt")):
-        print("Already ran this folder")
-        exit()
+    # if os.path.exists(os.path.join(args.save_dir, f"{args.name}_metrics.txt")):
+    #     print("Already ran this folder")
+    #     exit()
 
     if not os.path.exists(args.data_dir):
         print("Data directory does not exist")

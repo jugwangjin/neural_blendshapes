@@ -24,9 +24,12 @@ def main():
             test_set = 'MVI_1802'
 
         gt_dir = os.path.join(data_dir, directory, directory, test_set)
-        images_dir = os.path.join(exps_dir, 'ours_enc_v10', directory, 'images_evaluation', 'qualitative_results', 'rgb')
+        images_dir = os.path.join(exps_dir, 'ours_enc_v14', directory, 'images_evaluation', 'qualitative_results', 'rgb')
 
-        name = 'oursv10_' + directory
+        if not os.path.exists(images_dir):
+            continue
+
+        name = 'oursv14_' + directory
 
         command = f'python flare/metrics/metrics.py --gt_dir {gt_dir} --data_dir {images_dir} --save_dir {save_dir} --no_cloth --name {name}'
 
@@ -34,6 +37,31 @@ def main():
         os.system(command)
 
     if not skip:
+
+
+
+        for directory in os.listdir(data_dir):
+            print(directory)
+            test_set = 'test'
+            if directory == 'yufeng':
+                test_set = 'MVI_1812'
+            elif directory == 'marcel':
+                test_set = 'MVI_1802'
+
+            gt_dir = os.path.join(data_dir, directory, directory, test_set)
+            images_dir = os.path.join(exps_dir, 'ours_enc_v13', directory, 'images_evaluation', 'qualitative_results', 'rgb')
+
+            if not os.path.exists(images_dir):
+                continue
+
+            name = 'oursv13_' + directory
+
+            command = f'python flare/metrics/metrics.py --gt_dir {gt_dir} --data_dir {images_dir} --save_dir {save_dir} --no_cloth --name {name}'
+
+            print(command)
+            os.system(command)
+
+
         for directory in os.listdir(data_dir):
             print(directory)
             test_set = 'test'

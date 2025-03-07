@@ -100,6 +100,7 @@ def config_parser():
     parser.add_argument('--recompute_mode', action='store_true', help="skip eval")
     parser.add_argument('--fix_bshapes', action='store_true', help="skip eval")
     parser.add_argument('--additive', action='store_true', help="skip eval")
+    parser.add_argument('--disable_pose', action='store_true', help="skip eval")
 
     # str - model_path , shader_path
     parser.add_argument('--model_path', type=str, default=None, help="Path to the input data")

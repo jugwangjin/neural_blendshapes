@@ -46,10 +46,12 @@ def landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
         detected_landmarks[..., :2] = detected_landmarks[..., :2] * 2 - 1
         detected_landmarks[..., 2] = detected_landmarks[..., 2] * -2
         mean_z_detected_landmarks = detected_landmarks[..., 2].mean(dim=-1, keepdim=True)[0]
-        detected_landmarks[..., 2] -= mean_z_detected_landmarks
+        detected_landmarks[..., 2] = detected_landmarks[..., 2] - mean_z_detected_landmarks
+        # detected_landmarks[..., 2] -= mean_z_detected_landmarks
 
     mean_z_landmarks_on_clip_space = landmarks_on_clip_space[..., 2].mean(dim=-1, keepdim=True)[0]
-    landmarks_on_clip_space[..., 2] -= mean_z_landmarks_on_clip_space
+    landmarks_on_clip_space[..., 2] = landmarks_on_clip_space[..., 2] - mean_z_landmarks_on_clip_space
+    # landmarks_on_clip_space[..., 2] -= mean_z_landmarks_on_clip_space
 
     # print statistics of both landmarks
     # print(detected_landmarks[..., :2].mean(dim=1), detected_landmarks[..., :2].std(dim=1), detected_landmarks[..., :2].amin(dim=1), detected_landmarks[..., :2].amax(dim=1))
@@ -72,13 +74,13 @@ def landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
         estimated_closure = landmarks_on_clip_space[:, None, block, :2] - landmarks_on_clip_space[:, block, None, :2]
         confidence = torch.minimum(detected_landmarks[:, None, block, -1:], detected_landmarks[:, block, None, -1:])
 
-        closure_loss += ((estimated_closure - gt_closure).pow(2) * confidence).mean()
-
+        closure_loss = closure_loss + ((estimated_closure - gt_closure).pow(2) * confidence).mean()
         # closure_loss += torch.nn.functional.huber_loss(estimated_closure, gt_closure)
         # closure_loss += closure_loss_.mean()
         
     if use_jaw:
-        detected_landmarks[:, :17, -1] *= 0.1
+        # detected_landmarks[:, :17, -1] *= 0.1
+        detected_landmarks[:, :17, -1] = detected_landmarks[:, :17, -1] * 0.1
     else:
         detected_landmarks[:, :17, -1] *= 0
 

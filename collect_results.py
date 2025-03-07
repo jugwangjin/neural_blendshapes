@@ -9,6 +9,20 @@ if __name__=='__main__':
     os.makedirs(collection_dir, exist_ok=True)
     main_dir = '/Bean/log/gwangjin/2024/nbshapes_comparisons'
     
+
+    ours_images_dir = f'{{}}/images_evaluation/qualitative_results/rgb'
+
+    for exp in os.listdir(os.path.join(main_dir, 'ours_enc_v10')):
+        images_dir = os.path.join(main_dir, 'ours_enc_v10', exp, 'images_evaluation/qualitative_results/rgb')        
+        # collect every 50th
+        try:
+            for i, img in enumerate(sorted([img for img in os.listdir(images_dir) if not img.endswith('.db')])):
+                if i % ratio == 0:
+                    shutil.copy(os.path.join(images_dir, img), os.path.join(collection_dir, f'{exp}_{i:05d}_v10_ours.png'))
+        except:
+            pass
+
+
     # flare
     flare_images_dir = f'{{}}/images_evaluation/qualitative_results/rgb'
     gbshapes_images_dir = f'{{}}/gbshapes/{{}}/test/split_40000'
@@ -111,45 +125,47 @@ if __name__=='__main__':
 
     
     for exp in os.listdir(os.path.join(main_dir, 'nha')):
-        if exp.startswith('imavatar') and not exp.endswith('v2'):
-            continue
+        try:
+            if exp.startswith('imavatar') and not exp.endswith('v2'):
+                continue
+                
+            if exp.startswith('nha_person'):
+                continue
             
-        if exp.startswith('nha_person'):
-            continue
-        
-        if exp.startswith('new_nha_person'):
-            images_list = os.listdir(os.path.join(main_dir, 'nha', exp))
-            exp = exp.replace('new_', '')
+            if exp.startswith('new_nha_person'):
+                images_list = os.listdir(os.path.join(main_dir, 'nha', exp))
+                exp = exp.replace('new_', '')
 
-        else:
-            experiment_dir = os.path.join(main_dir, 'nha', exp, 'lightning_logs')
-            # there are version_0, version_1, ... multiple subdirectories
-            # pick the latest version
-            versions = sorted(os.listdir(experiment_dir), key=lambda x: int(x.split('_')[-1]))
-            latest_version = versions[-1]
-            if exp == 'obama':
-                latest_version = 'version_2'
-            # \\bean.postech.ac.kr\log\gwangjin\2024\nbshapes_comparisons\nha\imavatar_mar_v2\lightning_logs\version_0\NovelViewSynthesisResults\val\0_0
-
-            if not exp.startswith('nha_person'):
-                images_list = os.listdir(os.path.join(experiment_dir, latest_version, 'NovelViewSynthesisResults', 'val', '0_0'))
             else:
-                images_list = os.listdir(os.path.join(main_dir, 'nha', 'new_'+exp))
-        
-        # sort images list, by: name[5:].replace('.png', '') into integer,
-        images_list = sorted([img for img in images_list if not img.endswith('.db')], key=lambda x: int(x.replace('.png', '')))
+                experiment_dir = os.path.join(main_dir, 'nha', exp, 'lightning_logs')
+                # there are version_0, version_1, ... multiple subdirectories
+                # pick the latest version
+                versions = sorted(os.listdir(experiment_dir), key=lambda x: int(x.split('_')[-1]))
+                latest_version = versions[-1]
+                if exp == 'obama':
+                    latest_version = 'version_2'
+                # \\bean.postech.ac.kr\log\gwangjin\2024\nbshapes_comparisons\nha\imavatar_mar_v2\lightning_logs\version_0\NovelViewSynthesisResults\val\0_0
 
-        if exp == 'imavatar_mar_v2':
-            exp = 'marcel'
-        elif exp == 'imavatar_yuf_v2':
-            exp = 'yufeng'
-        elif exp == 'imavatar_sub3_v2':
-            exp = 'subject_3'
+                if not exp.startswith('nha_person'):
+                    images_list = os.listdir(os.path.join(experiment_dir, latest_version, 'NovelViewSynthesisResults', 'val', '0_0'))
+                else:
+                    images_list = os.listdir(os.path.join(main_dir, 'nha', 'new_'+exp))
+            
+            # sort images list, by: name[5:].replace('.png', '') into integer,
+            images_list = sorted([img for img in images_list if not img.endswith('.db')], key=lambda x: int(x.replace('.png', '')))
 
-        for i, img in enumerate(images_list):
-            if i % ratio == 0:
-                shutil.copy(os.path.join(experiment_dir, latest_version, 'NovelViewSynthesisResults', 'val', '0_0', img), os.path.join(collection_dir, f'{exp}_{i:05d}_nha.png'))
+            if exp == 'imavatar_mar_v2':
+                exp = 'marcel'
+            elif exp == 'imavatar_yuf_v2':
+                exp = 'yufeng'
+            elif exp == 'imavatar_sub3_v2':
+                exp = 'subject_3'
 
+            for i, img in enumerate(images_list):
+                if i % ratio == 0:
+                    shutil.copy(os.path.join(experiment_dir, latest_version, 'NovelViewSynthesisResults', 'val', '0_0', img), os.path.join(collection_dir, f'{exp}_{i:05d}_nha.png'))
+        except:
+            continue
     
     insta_dir = os.path.join('/Bean/data/gwangjin/2024/nbshapes/insta/')
 
@@ -210,6 +226,20 @@ if __name__=='__main__':
             if i % ratio == 0:
                 shutil.copy(os.path.join(images_dir, img), os.path.join(collection_dir, f'{exp}_{i:05d}_flare.png'))
                 shutil.copy(os.path.join(images_dir.replace('rgb', 'normal'), img), os.path.join(collection_dir, f'{exp}_{i:05d}_flare_normal.png'))
+
+    # ours
+    ours_images_dir = f'{{}}/images_evaluation/qualitative_results/rgb'
+
+    for exp in os.listdir(os.path.join(main_dir, 'ours_enc_v13')):
+        images_dir = os.path.join(main_dir, 'ours_enc_v13', exp, 'images_evaluation/qualitative_results/rgb')        
+        # collect every 50th
+        try:
+            for i, img in enumerate(sorted([img for img in os.listdir(images_dir) if not img.endswith('.db')])):
+                if i % ratio == 0:
+                    shutil.copy(os.path.join(images_dir, img), os.path.join(collection_dir, f'{exp}_{i:05d}_v13_ours.png'))
+                    shutil.copy(os.path.join(images_dir.replace('rgb', 'normal'), img), os.path.join(collection_dir, f'{exp}_{i:05d}_v13_ours_normal.png'))
+        except:
+            pass
 
     # ours
     ours_images_dir = f'{{}}/images_evaluation/qualitative_results/rgb'
@@ -334,5 +364,16 @@ if __name__=='__main__':
                 if i % ratio == 0:
                     shutil.copy(os.path.join(images_dir, img), os.path.join(collection_dir, f'{exp}_{i:05d}_v10_ours.png'))
                     shutil.copy(os.path.join(images_dir.replace('rgb', 'normal'), img), os.path.join(collection_dir, f'{exp}_{i:05d}_v10_ours_normal.png'))
+        except:
+            pass
+
+    for exp in os.listdir(os.path.join(main_dir, 'ours_enc_v13')):
+        images_dir = os.path.join(main_dir, 'ours_enc_v13', exp, 'images_evaluation/qualitative_results/rgb')        
+        # collect every 50th
+        try:
+            for i, img in enumerate(sorted([img for img in os.listdir(images_dir) if not img.endswith('.db')])):
+                if i % ratio == 0:
+                    shutil.copy(os.path.join(images_dir, img), os.path.join(collection_dir, f'{exp}_{i:05d}_v13_ours.png'))
+                    shutil.copy(os.path.join(images_dir.replace('rgb', 'normal'), img), os.path.join(collection_dir, f'{exp}_{i:05d}_v13_ours_normal.png'))
         except:
             pass

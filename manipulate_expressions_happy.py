@@ -62,7 +62,6 @@ def main(args, device):
         save_manipulation_image
     )
 
-    from flare.dataset import dataset_util
     
     '''
     dataset
@@ -183,68 +182,27 @@ def main(args, device):
     smiles = ['mouthSmile_L', 'mouthSmile_R']
     cheeks = ['cheekSquint_L', 'cheekSquint_R']
     eyebrow_raisers = ['browInnerUp_L', 'browInnerUp_R', 'browOuterUp_L', 'browOuterUp_R']
-    eyebrow_downers = ['browDown_L', 'browDown_R']  
 
     happiness = ['cheekSquint_L', 'cheekSquint_R', 'mouthSmile_L', 'mouthSmile_R']
     sadness = ['browInnerUp_L', 'browInnerUp_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
     disgust = ['noseSneer_L', 'noseSneer_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
-
     surprise = ['browInnerUp_L', 'browInnerUp_R', 'browOuterUp_L', 'browOuterUp_R', 'jawOpen']
-    mouth_frown_down_dimples = ['mouthFrown_L', 'mouthFrown_R', 'mouthDimple_L', 'mouthDimple_R']
-    
-    cheekpuffs = ['cheekPuff_L', 'cheekPuff_R']
-
-    lipfunnels = ['mouthFunnel']
-
-    jawopen = ['jawOpen']
 
     for index in args.index:
         views_subset = dataset_val.collate([dataset_val.__getitem__(index)])
 
-        os.makedirs(output_dir, exist_ok=True)
-        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_ori.png')
-        import imageio
-        # also save the gt 
-        gt_iamge = views_subset['img']
-        convert_uint = lambda x: np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().numpy() * 255.0), 0, 255).astype(np.uint8) 
-        for i in range(len(gt_iamge)):
-            # gt_img_with_mask = torch.cat([gt_iamge[i].cpu().data, views_subset['mask'][i].cpu().data], -1)
-            imageio.imsave(file_name.replace(f'.png', f'_gt_{i}.png'), convert_uint(gt_iamge[i].cpu().data))
-
-            # imageio.imsave(file_name.replace(f'.png', f'_gt_{i}.png'), convert_uint(gt_iamge[i].cpu().data))
-
         features = neural_blendshapes.encoder(views_subset)
         facs = features[:, :53]
-        rotation = features[:, 53:56]
-        translation = features[:, 56:59]
+        translation = features[:, 53:56]
+        rotation = features[:, 56:59]
         global_translation = features[:, 60:63]
         
-
-        '''
-        inference model, render, save rendered image
-        '''
-        return_dict = neural_blendshapes(features=features)
-        deformed_vertices = return_dict['expression_mesh_posed']
-        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
-
-        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
-                                    channels=channels_gbuffer, with_antialiasing=True, 
-                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                    mesh=ict_canonical_mesh
-                                    )
-        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
-
-        os.makedirs(output_dir, exist_ok=True)
-        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_ori.png')
-        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
-
-
 
         '''
         manipulation example - gaze correction
         '''
 
-        # overriding pose to forward facing
+        # # overriding pose to forward facing
         # translation = translation * 0
         # rotation = rotation * 0
         # global_translation = global_translation
@@ -265,198 +223,8 @@ def main(args, device):
         # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in sadness]] -= sadness_amount
         # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in happiness]] += sadness_amount
 
-        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in jawopen]] += 0.3
-
-        facs = facs.clamp(0, 1)
-
-        features[:, :53] = facs
-        features[:, 53:56] = rotation
-        features[:, 56:59] = translation
-        features[:, 60:63] = global_translation
-
-
-        return_dict = neural_blendshapes(features=features)
-        deformed_vertices = return_dict['expression_mesh_posed']
-        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
-
-        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
-                                    channels=channels_gbuffer, with_antialiasing=True, 
-                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                    mesh=ict_canonical_mesh
-                                    )
-        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
-
-        os.makedirs(output_dir, exist_ok=True)
-        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_more_jaw.png')
-        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
-
-        
-
-        features = neural_blendshapes.encoder(views_subset)
-        facs = features[:, :53]
-        rotation = features[:, 53:56]
-        translation = features[:, 56:59]
-        global_translation = features[:, 60:63]
-
-        # reduce smiles
-
-        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in smiles]] -= 0.3
-
-        facs = facs.clamp(0, 1)
-
-        features[:, :53] = facs
-        features[:, 53:56] = rotation
-        features[:, 56:59] = translation
-        features[:, 60:63] = global_translation
-
-        return_dict = neural_blendshapes(features=features)
-        deformed_vertices = return_dict['expression_mesh_posed']
-        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
-
-        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
-                                    channels=channels_gbuffer, with_antialiasing=True, 
-                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                    mesh=ict_canonical_mesh
-                                    )
-        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
-
-        os.makedirs(output_dir, exist_ok=True)
-        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_less_smile.png')
-        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
-
-        
-        features = neural_blendshapes.encoder(views_subset)
-        facs = features[:, :53]
-        rotation = features[:, 53:56]
-        translation = features[:, 56:59]
-        global_translation = features[:, 60:63]
-
-        # mouth funnels exaggerations 
-        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in lipfunnels]] += 0.6
-
-        facs = facs.clamp(0, 1)
-
-        features[:, :53] = facs
-        features[:, 53:56] = rotation
-        features[:, 56:59] = translation
-        features[:, 60:63] = global_translation
-
-        return_dict = neural_blendshapes(features=features)
-        deformed_vertices = return_dict['expression_mesh_posed']
-        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
-
-        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
-                                    channels=channels_gbuffer, with_antialiasing=True, 
-                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                    mesh=ict_canonical_mesh
-                                    )
-        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
-
-        os.makedirs(output_dir, exist_ok=True)
-        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_more_lipfunnels.png')
-        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
-
-
-        # now try brows up 
-        features = neural_blendshapes.encoder(views_subset)
-        facs = features[:, :53]
-        rotation = features[:, 53:56]
-        translation = features[:, 56:59]
-        global_translation = features[:, 60:63]
-
-        # brow raisers
-
-        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in eyebrow_raisers]] += 0.75
-
-        facs = facs.clamp(0, 1)
-
-        features[:, :53] = facs
-        features[:, 53:56] = rotation
-        features[:, 56:59] = translation
-        features[:, 60:63] = global_translation
-
-        return_dict = neural_blendshapes(features=features)
-        deformed_vertices = return_dict['expression_mesh_posed']
-        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
-
-        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
-                                    channels=channels_gbuffer, with_antialiasing=True, 
-                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                    mesh=ict_canonical_mesh
-                                    )
-        
-        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
-
-        os.makedirs(output_dir, exist_ok=True)
-        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_more_browraisers.png')
-        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
-
-
-
-        # now try brows up 
-        features = neural_blendshapes.encoder(views_subset)
-        facs = features[:, :53]
-        rotation = features[:, 53:56]
-        translation = features[:, 56:59]
-        global_translation = features[:, 60:63]
-
-        # more frown
-
-        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in mouth_frown_down_dimples]] += 0.3
-
-
-        facs = facs.clamp(0, 1)
-
-        features[:, :53] = facs
-        features[:, 53:56] = rotation
-        features[:, 56:59] = translation
-        features[:, 60:63] = global_translation
-
-        return_dict = neural_blendshapes(features=features)
-        deformed_vertices = return_dict['expression_mesh_posed']
-        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
-
-        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
-                                    channels=channels_gbuffer, with_antialiasing=True, 
-                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                    mesh=ict_canonical_mesh
-                                    )
-        
-        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
-
-        os.makedirs(output_dir, exist_ok=True)
-        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_more_frown.png')
-        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
-
-        # cheek puff
-
-        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in cheekpuffs]] += 0.5
-
-
-        facs = facs.clamp(0, 1)
-
-        features[:, :53] = facs
-        features[:, 53:56] = rotation
-        features[:, 56:59] = translation
-        features[:, 60:63] = global_translation
-
-        return_dict = neural_blendshapes(features=features)
-        deformed_vertices = return_dict['expression_mesh_posed']
-        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
-
-        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
-                                    channels=channels_gbuffer, with_antialiasing=True, 
-                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                    mesh=ict_canonical_mesh
-                                    )
-        
-        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
-
-        os.makedirs(output_dir, exist_ok=True)
-        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_cheek.png')
-        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
-
-
+        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in sadness]] = 0
+        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in happiness]] = 0.8
 
         '''
         manipulation example - specific expression scaling
@@ -468,53 +236,131 @@ def main(args, device):
         # Or, you might suppress some expressions.
         # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in eyebrow_raisers]] *= 0.5
         
-        # min_brow_downers = torch.min(facs[:, [ict_facekit.expression_names.tolist().index(name) for name in eyebrow_downers]], dim=1).values
-        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in eyebrow_downers]] -= min_brow_downers
-
-        # # brow raisers 
-        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in eyebrow_raisers]] += min_brow_downers
         
-        # min_mouth_frown_down_dimples = torch.min(facs[:, [ict_facekit.expression_names.tolist().index(name) for name in mouth_frown_down_dimples]], dim=1).values
-        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in mouth_frown_down_dimples]] -= min_mouth_frown_down_dimples
+        '''
+        weave controlled features as blendshapes input
+        '''
+        facs = facs.clamp(0, 1)
 
-        # # smile
-        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in smiles]] += min_mouth_frown_down_dimples * 5
+        features[:, :53] = facs
+        features[:, 53:56] = rotation
+        features[:, 56:59] = translation
+        features[:, 60:63] = global_translation
 
-        # get max surprise
-        # max_surprise = torch.max(facs[:, [ict_facekit.expression_names.tolist().index(name) for name in surprise]], dim=1).values
-        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in surprise]] -= max_surprise
+        features[:, 61:62] -= 0.3
+        features[:, 62:63] -= 0.15
 
-        # # add smile
-        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in smiles]] += max_surprise 
+        '''
+        inference model, render, save rendered image
+        '''
+        return_dict = neural_blendshapes(features=features)
+        deformed_vertices = return_dict['expression_mesh_posed']
+        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
 
-        # '''
-        # weave controlled features as blendshapes input
-        # '''
-        # facs = facs.clamp(0, 1)
+        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
+                                    channels=channels_gbuffer, with_antialiasing=True, 
+                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                    mesh=ict_canonical_mesh
+                                    )
+        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
 
-        # features[:, :53] = facs
-        # features[:, 53:56] = rotation
-        # features[:, 56:59] = translation
-        # features[:, 60:63] = global_translation
+        os.makedirs(output_dir, exist_ok=True)
+        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_happy.png')
+        print(file_name)
+        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
 
 
-        # '''
-        # inference model, render, save rendered image
-        # '''
-        # return_dict = neural_blendshapes(features=features)
-        # deformed_vertices = return_dict['expression_mesh_posed']
-        # d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
+        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in sadness]] = 0.8
+        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in happiness]] = 0
 
-        # gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
-        #                             channels=channels_gbuffer, with_antialiasing=True, 
-        #                             canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-        #                             mesh=ict_canonical_mesh
-        #                             )
-        # pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
+        '''
+        manipulation example - specific expression scaling
+        '''
+        # You would like to exaggerate smile, while keeping eyes expressions. 
+        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in smiles]] *= 2
+        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in cheeks]] *= 1.25
 
-        # os.makedirs(output_dir, exist_ok=True)
-        # file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}.png')
-        # save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
+        # Or, you might suppress some expressions.
+        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in eyebrow_raisers]] *= 0.5
+        
+        
+        '''
+        weave controlled features as blendshapes input
+        '''
+        facs = facs.clamp(0, 1)
+
+        features[:, :53] = facs
+        features[:, 53:56] = rotation
+        features[:, 56:59] = translation
+        features[:, 60:63] = global_translation
+        features[:, 61:62] += 0.15
+
+        '''
+        inference model, render, save rendered image
+        '''
+        return_dict = neural_blendshapes(features=features)
+        deformed_vertices = return_dict['expression_mesh_posed']
+        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
+
+        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
+                                    channels=channels_gbuffer, with_antialiasing=True, 
+                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                    mesh=ict_canonical_mesh
+                                    )
+        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
+
+        os.makedirs(output_dir, exist_ok=True)
+        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_sadness.png')
+        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
+
+
+
+
+
+        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in sadness]] = 0
+        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in happiness]] = 0
+        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in surprise]] = 0.6
+
+        '''
+        manipulation example - specific expression scaling
+        '''
+        # You would like to exaggerate smile, while keeping eyes expressions. 
+        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in smiles]] *= 2
+        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in cheeks]] *= 1.25
+
+        # Or, you might suppress some expressions.
+        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in eyebrow_raisers]] *= 0.5
+        
+        
+        '''
+        weave controlled features as blendshapes input
+        '''
+        facs = facs.clamp(0, 1)
+
+        features[:, :53] = facs
+        features[:, 53:56] = rotation
+        features[:, 56:59] = translation
+        features[:, 60:63] = global_translation
+        features[:, 61:62] += 0.15
+
+        '''
+        inference model, render, save rendered image
+        '''
+        return_dict = neural_blendshapes(features=features)
+        deformed_vertices = return_dict['expression_mesh_posed']
+        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
+
+        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
+                                    channels=channels_gbuffer, with_antialiasing=True, 
+                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                    mesh=ict_canonical_mesh
+                                    )
+        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
+
+        os.makedirs(output_dir, exist_ok=True)
+        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_surprise.png')
+        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
+
 
 
 def parse_index(input_list):

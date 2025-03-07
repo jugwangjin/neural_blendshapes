@@ -48,13 +48,16 @@ class DECAEncoder(nn.Module):
 
         self.rotation_tail = nn.Sequential(
             nn.Linear(15, 64),
-            nn.LayerNorm(64),
+            # nn.LayerNorm(64),
             nn.ReLU(),
             nn.Linear(64, 64),
-            nn.LayerNorm(64),
+            # nn.LayerNorm(64),
             nn.ReLU(),
             nn.Linear(64, 64),
-            nn.LayerNorm(64),
+            # nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            # nn.LayerNorm(64),
             nn.ReLU(),
             nn.Linear(64, 9, bias=False)
         )
@@ -147,6 +150,8 @@ class DECAEncoder(nn.Module):
         
         bshapes_out = self.bshapes_tail(torch.cat([encoder_features, bshapes_additional_features], dim=-1))
         rotation_out = self.rotation_tail(pose_features)
+
+        rotation_out[..., 3:] *= 0.1
         # translation_out = self.translation_tail(pose_features)
 
         bshapes_tail_out = bshapes_out
@@ -154,7 +159,7 @@ class DECAEncoder(nn.Module):
         if not self.additive:
             bshapes_out = torch.pow(bshapes, torch.exp(bshapes_out))
         else:
-            bshapes_out = bshapes + self.tanh(bshapes_out)
+            bshapes_out = bshapes + bshapes_out
             bshapes_out = bshapes_out.clamp(0, 1)
             
         # print(rotation_out.shape, mp_translation.shape, flame_cam_t.shape, torch.cat([rotation_out, mp_translation, flame_cam_t], dim=-1).shape)
@@ -167,7 +172,7 @@ class DECAEncoder(nn.Module):
         return out
 
 class ResnetEncoder(nn.Module):
-    def __init__(self, ict_facekit, fix_bshapes=False, additive=False):
+    def __init__(self, ict_facekit, fix_bshapes=False, additive=False, disable_pose=False):
         super(ResnetEncoder, self).__init__()
 
         self.ict_facekit = ict_facekit
@@ -205,6 +210,8 @@ class ResnetEncoder(nn.Module):
         # self.global_translation = torch.nn.Parameter(torch.zeros(3))
 
         self.fix_bshapes = fix_bshapes
+
+        self.disable_pose = disable_pose
         
     def load_deca_encoder(self):
         model_path = './assets/deca_model.tar'
@@ -223,6 +230,7 @@ class ResnetEncoder(nn.Module):
         with torch.no_grad():
             
             transform_matrix = views['mp_transform_matrix'].clone().detach().reshape(-1, 4, 4)
+            scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
 
             mp_translation = transform_matrix[:, :3, 3]
             mp_translation[..., -1] += 28
@@ -236,12 +244,27 @@ class ResnetEncoder(nn.Module):
             fixed_indices = [0, 16, 36, 45, 33]
             landmark = views['landmark'][:, fixed_indices, :3].reshape(-1, 15)
         
+            # transform_matrix = views_subset['mp_transform_matrix'].reshape(-1, 4, 4).detach()
+            # scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
+            # translation = transform_matrix[:, :3, 3]
+            rotation_matrix = transform_matrix[:, :3, :3]
+            rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
+
+            rotation_matrix[:, 2:3] *= -1
+            rotation_matrix[:, :, 2:3] *= -1
+
+            rotation_matrix = rotation_matrix.permute(0, 2, 1)
+            rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
+
         features = self.encoder(views, mp_bshapes, mp_translation, landmark)
         if self.fix_bshapes:
             blendshapes = mp_bshapes
         else:
             blendshapes = features[:, :53]
-        rotation = features[:, 53:56] 
+
+        if not self.disable_pose:
+            rotation = features[:, 53:56] 
+            
         translation = features[:, 56:59]
 
         global_translation = self.global_translation.unsqueeze(0).expand(translation.shape[0], -1)

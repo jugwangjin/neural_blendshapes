@@ -98,7 +98,7 @@ def point_in_triangle_batch(p, a, b, c):
     return (u >= 0) & (v >= 0) & (w >= 0)
 
 
-def create_position_map(mesh, uv_coords, uv_idx, canonical_v, output_path, size=1024):
+def create_position_map(mesh, uv_coords, uv_idx, canonical_v, output_path, size=512):
 
     # Sample points from UV space
     uv_points = sample_uv_grid(size) # shape of (size * size, 2)
@@ -233,10 +233,14 @@ def main(args, device):
     lgt = light.create_env_rnd()   
     shader = neuralshader.NeuralShader.load(os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'shader.pt'), device=device)
     shader.eval()
-    output_dir = './debug/texture_map/1024'
+    output_dir = f'./debug/texture_map/v10_{args.resolution}'
     os.makedirs(output_dir, exist_ok=True)
 
-    position_map = create_position_map(ict_canonical_mesh, ict_facekit.uvs, ict_facekit.uv_faces, ict_facekit.canonical[0], os.path.join(output_dir, f'{args.model_name}.png'))
+    if os.path.exists(os.path.join('debug', f'uv_position_map_{args.resolution}.npy')):
+        position_map = np.load(os.path.join('debug', f'uv_position_map_{args.resolution}.npy'))
+    else:
+        position_map = create_position_map(ict_canonical_mesh, ict_facekit.uvs, ict_facekit.uv_faces, ict_facekit.canonical[0], f'debug/texture_map/v10_{args.resolution}/{args.model_name}.png', size=args.resolution)
+        np.save(os.path.join('debug', f'uv_position_map_{args.resolution}.npy'), position_map)
     # position map shape of (size, size, 3) 
     # with neuralshader.forward, extract kd, kr, ko, all value range [0, 1]
     # kd: diffuse (albedo)
@@ -272,11 +276,30 @@ def main(args, device):
     cv2.imwrite(os.path.join(output_dir, f"{args.model_name}_kr.png"), kr_np)
     cv2.imwrite(os.path.join(output_dir, f"{args.model_name}_ko.png"), ko_np)
 
+    # kd crop save. 
+    
+    crop_size = int((200/2048.) * args.resolution)
+    crop_position_y = int((300 / 2048.) * args.resolution) 
+    crop_position_x = int((700 / 2048.) * args.resolution)
+
+    print(crop_size, crop_position_y, crop_position_x)
+
+    kd_crop = kd_np[crop_position_y:crop_position_y + crop_size, crop_position_x:crop_position_x + crop_size]
+
+    # upsample kd_crop to 400, 400  with Nearset Neighbor Interpolation
+    kd_crop = cv2.resize(kd_crop, (400, 400), interpolation=cv2.INTER_NEAREST)
+
+    cv2.imwrite(os.path.join(output_dir, f"{args.model_name}_kd_crop.png"), kd_crop)
+
+
+
+
 if __name__ == '__main__':
     import configargparse
     parser = configargparse.ArgumentParser()
-    parser.add_argument('--model_dir', type=str, default='/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v6', help='Path to the trained model')
+    parser.add_argument('--model_dir', type=str, default='/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v10', help='Path to the trained model')
     parser.add_argument('--model_name', type=str, default='marcel', help='Name of the run in model_dir')
+    parser.add_argument('--resolution', type=int, default=512, help='Name of the run in model_dir')
     args = parser.parse_args()
 
     config_file = os.path.join(args.model_dir, args.model_name, 'sources', 'config.txt')
@@ -288,6 +311,7 @@ if __name__ == '__main__':
     args2.output_dir = args.model_dir
     args2.model_dir = args.model_dir
     args2.model_name = args.model_name
+    args2.resolution = args.resolution
     
     # Select the device
     device = torch.device('cpu')

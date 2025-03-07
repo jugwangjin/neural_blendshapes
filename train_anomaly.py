@@ -178,6 +178,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
     ict_canonical_mesh.compute_connectivity()
+    laplacian_dense = ict_canonical_mesh.laplacian.to_dense()
+    print(laplacian_dense.min(), laplacian_dense.max())
 
     write_mesh(Path(meshes_save_path / "init_ict_canonical.obj"), ict_canonical_mesh.to('cpu'))
 
@@ -221,7 +223,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     print("Training Deformer")
 
     face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.neutral_mesh_canonical[0])[0]
-    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, face_normals=face_normals, fix_bshapes=args.fix_bshapes, additive=args.additive, disable_pose=args.disable_pose, device=device) 
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, face_normals=face_normals, fix_bshapes=args.fix_bshapes, additive=args.additive, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
 
     neural_blendshapes = neural_blendshapes.to(device)
@@ -374,28 +376,44 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     args.finetune_color = False
 
-    # with torch.no_grad():
-    #     verts = FLAMEServer.canonical_verts.squeeze(0)
-    #     faces = FLAMEServer.faces_tensor
+    with torch.no_grad():
+        verts = FLAMEServer.canonical_verts.squeeze(0)
+        faces = FLAMEServer.faces_tensor
 
-    #     flame_canonical_mesh: Mesh = None
-    #     flame_canonical_mesh = Mesh(verts, faces, device=device)
-    #     flame_canonical_mesh.compute_connectivity()
+        flame_canonical_mesh: Mesh = None
+        flame_canonical_mesh = Mesh(verts, faces, device=device)
+        flame_canonical_mesh.compute_connectivity()
 
-    #     channels_gbuffer = ['mask', 'position', 'normal', "canonical_position",]
-    #     return_dict = neural_blendshapes(debug_views['img'], debug_views)
+        channels_gbuffer = ['mask', 'position', 'normal', "canonical_position",]
+        return_dict = neural_blendshapes(debug_views['img'], debug_views)
 
-    #     vertices, _, _  = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
+        vertices, _, _  = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
         
-    #     # print(vertices.min(), vertices.max(), 
+    # def fetch_all_normals(self, deformed_vertices, mesh):
+    #     """ All normals are returned: Vertex, face, tangent space normals along with indices of faces. 
+    #     Args:
+    #         deformed vertices (tensor): New vertex positions (Vx3)
+    #         mesh (Mesh class with these new updated vertices)
+    #     """
+    #     d_normals = {"vertex_normals":[], "face_normals":[], "tangent_normals":[]}
+    #     for d_vert in deformed_vertices:
+    #         vertex_normals, face_normals = mesh.get_vertices_face_normals(d_vert)
+    #         tangents = mesh.compute_tangents(d_vert, vertex_normals)
+    #         d_normals["vertex_normals"].append(vertex_normals.unsqueeze(0)
 
-    #     debug_gbuffer = renderer.render_batch(debug_views['flame_camera'], vertices.contiguous(), flame_canonical_mesh.fetch_all_normals(vertices, flame_canonical_mesh),
-    #                             channels=channels_gbuffer, with_antialiasing=True, 
-    #                             canonical_v=flame_canonical_mesh.vertices, canonical_idx=flame_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-    #                             mesh=flame_canonical_mesh
-    #                             )
-    #     debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, debug_views, flame_canonical_mesh, args.finetune_color, lgt)
-    #     visualize_training_no_lm(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, 0, ict_facekit=ict_facekit, save_name='flame_init')
+        for d_vert in vertices:
+            vertex_normals, face_normals = flame_canonical_mesh.get_vertices_face_normals(d_vert)
+            print(vertex_normals.min(), vertex_normals.max())
+            print(d_vert.min(), d_vert.max(), d_vert.shape)
+            tangents = flame_canonical_mesh.compute_tangents(d_vert, vertex_normals)
+
+        debug_gbuffer = renderer.render_batch(debug_views['flame_camera'], vertices.contiguous(), flame_canonical_mesh.fetch_all_normals(vertices, flame_canonical_mesh),
+                                channels=channels_gbuffer, with_antialiasing=True, 
+                                canonical_v=flame_canonical_mesh.vertices, canonical_idx=flame_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                mesh=flame_canonical_mesh
+                                )
+        debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, debug_views, flame_canonical_mesh, args.finetune_color, lgt)
+        visualize_training_no_lm(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, 0, ict_facekit=ict_facekit, save_name='flame_init')
 
     iteration = 0
     for epoch in range(epochs):
@@ -706,7 +724,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # random_bshapes = torch.rand_like(return_dict['features'][:, :53]) 
             expression_delta_random = neural_blendshapes.get_expression_delta()
 
-            expression_linearity_regularization = expression_delta_random.abs().mean() * 1e1  if stage == 2 else 0
+            expression_linearity_regularization = expression_delta_random.pow(2).mean()   if stage == 2 else 0
             detail_linearity_regularization = neural_blendshapes.face_details.pow(2).mean() * 1e2
 
             template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean() 
@@ -979,27 +997,26 @@ if __name__ == '__main__':
     # print(lbs)
     
     # exit()
-
-    # ==============================================================================================
-    # main run
-    # ==============================================================================================
-    import time
-    while True:
-        try:
-            with torch.autograd.set_detect_anomaly(True):
+    with torch.autograd.set_detect_anomaly(True):
+        # ==============================================================================================
+        # main run
+        # ==============================================================================================
+        import time
+        while True:
+            try:
                 main(args, device, dataset_train, dataloader_train, debug_views)
-            break  # Exit the loop if main() runs successfully
-        except ValueError as e:
-            print(e)
-            print("--"*50)
-            print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
-            print("--"*50)
-            raise e
-            time.sleep(5)
+                break  # Exit the loop if main() runs successfully
+            except ValueError as e:
+                print(e)
+                print("--"*50)
+                print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
+                print("--"*50)
+                raise e
+                time.sleep(5)
 
-        except Exception as e:
-            print(e)
-            print('Error: Unexpected error occurred. Aborting the training.')
-            raise e
+            except Exception as e:
+                print(e)
+                print('Error: Unexpected error occurred. Aborting the training.')
+                raise e
 
-    
+        

@@ -17,6 +17,8 @@ from pathlib import Path
 import trimesh
 from flare.core import Mesh
 
+import os
+
 def make_dirs(args, run_name, finetune_color):
     experiment_dir = args.working_dir / args.output_dir / run_name
 

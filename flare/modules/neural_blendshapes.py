@@ -47,16 +47,19 @@ class MLPTemplate(nn.Module):
     def __init__(self, inp_dim):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(inp_dim, 512),
-            nn.LayerNorm(512),
-            nn.Softplus(beta=5),
-            nn.Linear(512, 512),
-            nn.LayerNorm(512),
-            nn.Softplus(beta=5),
-            nn.Linear(512, 512),
-            nn.LayerNorm(512),
-            nn.Softplus(beta=5),
-            nn.Linear(512, 3, bias=False)
+            nn.Linear(inp_dim, 64),
+            # nn.LayerNorm(64),
+            nn.Softplus(beta=100),
+            nn.Linear(64, 64),
+            # nn.LayerNorm(64),
+            nn.Softplus(beta=100),
+            nn.Linear(64, 64),
+            # nn.LayerNorm(64),
+            nn.Softplus(beta=100),
+            nn.Linear(64, 64),
+            # nn.LayerNorm(64),
+            nn.Softplus(beta=100),
+            nn.Linear(64, 3, bias=False)
         )
 
     def forward(self, x):
@@ -64,9 +67,9 @@ class MLPTemplate(nn.Module):
 
 
 class NeuralBlendshapes(nn.Module):
-    def __init__(self, ict_facekit, aabb  = None, face_normals=None, zero_init=False, fix_bshapes=False, additive=False):
+    def __init__(self, ict_facekit, aabb  = None, face_normals=None, zero_init=False, fix_bshapes=False, additive=False, disable_pose=False):
         super().__init__()
-        self.encoder = ResnetEncoder(ict_facekit, fix_bshapes=fix_bshapes, additive=additive)
+        self.encoder = ResnetEncoder(ict_facekit, fix_bshapes=fix_bshapes, additive=additive, disable_pose=disable_pose)
 
         self.aabb = aabb
 
@@ -102,21 +105,25 @@ class NeuralBlendshapes(nn.Module):
         # self.embed_fn, input_ch = get_embedder(multires)
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(3, 512),
-            nn.LayerNorm(512),
-            nn.Softplus(beta=5),
-            nn.Linear(512, 512),
-            nn.LayerNorm(512),
-            nn.Softplus(beta=5),
-            nn.Linear(512, 512),
-            nn.LayerNorm(512),
-            nn.Softplus(beta=5),
-            nn.Linear(512, 53*3, bias=False)
+            nn.Linear(3, 128),
+            # nn.LayerNorm(128),
+            nn.Softplus(beta=100),
+            nn.Linear(128, 128),
+            # nn.LayerNorm(128),
+            nn.Softplus(beta=100),
+            nn.Linear(128, 128),
+            # nn.LayerNorm(128),
+            nn.Softplus(beta=100),
+            nn.Linear(128, 128),
+            # nn.LayerNorm(128),
+            nn.Softplus(beta=100),
+            nn.Linear(128, 53*3, bias=False)
         )
+
 
         # self.register_buffer('tight_face_details', torch.zeros(self.tight_face_index, 1))
 
-        self.face_details = torch.nn.Parameter(torch.zeros(self.full_head_index))
+        self.face_details = torch.nn.Parameter(torch.randn(self.full_head_index, 3) * 0)
         if face_normals is None:
             self.register_buffer('face_normals', torch.zeros(self.full_head_index, 3))
         else:
@@ -125,16 +132,38 @@ class NeuralBlendshapes(nn.Module):
         self.template_deformer = MLPTemplate(3)
         self.template_embedder = Identity()
 
+
+        for lin in self.expression_deformer:
+            if isinstance(lin, nn.Linear):
+                out_dim = lin.weight.size(0)
+                if lin.bias is not None:
+                    torch.nn.init.constant_(lin.bias, 0.0)
+                # torch.nn.init.constant_(lin.bias, 0.0)
+                torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(out_dim))
+
+        for lin in self.template_deformer.mlp:
+            if isinstance(lin, nn.Linear):
+                out_dim = lin.weight.size(0)
+                if lin.bias is not None:
+                    torch.nn.init.constant_(lin.bias, 0.0)
+                torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(out_dim))
+        
+        lin = self.expression_deformer[-1]
+        torch.nn.init.constant_(lin.weight, 0.0)
+
+        lin = self.template_deformer.mlp[-1]
+        torch.nn.init.constant_(lin.weight, 0.0)
+
         if zero_init:
             self.expression_deformer[-1].weight.data.zero_()
             self.template_deformer.mlp[-1].weight.data.zero_()
 
         # initialize last layer of template deformer with low weights
-        torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 512)
+        # torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 512)
 # 
         # initialize last layer of expression deformer with zero
         # torch.nn.init.constant_(self.expression_deformer[-1].weight, 0.0)
-        torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 512)
+        # torch.nn.init.normal_(self.expression_deformer[-1].weight, mean=0.0, std=1.0 / 512)
 
         # for l in self.template_deformer.mlp:
         #     if isinstance(l, nn.Linear):
@@ -154,9 +183,9 @@ class NeuralBlendshapes(nn.Module):
 
         self.pose_weight = nn.Sequential(
                     nn.Linear(3 + 6, 32),
-                    nn.Softplus(beta=5),
+                    nn.Softplus(beta=100),
                     nn.Linear(32, 32),
-                    nn.Softplus(beta=5),
+                    nn.Softplus(beta=100),
                     nn.Linear(32,1),
                     nn.Sigmoid()
         )
@@ -168,7 +197,17 @@ class NeuralBlendshapes(nn.Module):
 
 
     def encode_position(self, coords):
+
+        coords = (coords - self.aabb[0][None, ...]) / (self.aabb[1][None, ...] - self.aabb[0][None, ...])
+        coords = coords * 2 - 1
+
+        # it normalize the coordinates to -1, 1
+
+        return coords
+
         template = self.ict_facekit.canonical[0] # shape of V, 3
+
+
 
         org_coords = coords 
 
@@ -207,46 +246,46 @@ class NeuralBlendshapes(nn.Module):
         face[..., 17039:21451, :] = 0
         return face
 
-    @torch.no_grad()
-    def precompute_networks(self):
-        # precompute the fixed mlps and return. 
-        template = self.ict_facekit.canonical[0]
-        pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
+    # @torch.no_grad()
+    # def precompute_networks(self):
+    #     # precompute the fixed mlps and return. 
+    #     template = self.ict_facekit.canonical[0]
+    #     pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
 
-        template_mesh_u_delta = self.template_deformer(template)
+    #     template_mesh_u_delta = self.template_deformer(template)
 
-        expression_mesh_delta_u = self.expression_deformer(template).reshape(template.shape[0], 53, 3)
+    #     expression_mesh_delta_u = self.expression_deformer(template).reshape(template.shape[0], 53, 3)
 
-        return {'template_mesh_u_delta': template_mesh_u_delta, 'expression_mesh_delta_u': expression_mesh_delta_u, 'pose_weight': pose_weight}
+    #     return {'template_mesh_u_delta': template_mesh_u_delta, 'expression_mesh_delta_u': expression_mesh_delta_u, 'pose_weight': pose_weight}
         
-    @torch.no_grad()
-    def deform_with_precomputed(self, features, precomputed):
-        template = self.ict_facekit.canonical[0]
-        pose_weight = precomputed['pose_weight']
+    # @torch.no_grad()
+    # def deform_with_precomputed(self, features, precomputed):
+    #     template = self.ict_facekit.canonical[0]
+    #     pose_weight = precomputed['pose_weight']
 
-        template_mesh_delta = precomputed['template_mesh_u_delta']
+    #     template_mesh_delta = precomputed['template_mesh_u_delta']
 
-        face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
+    #     face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
 
-        template_mesh_delta[:self.full_head_index] += face_details
+    #     template_mesh_delta[:self.full_head_index] += face_details
 
-        expression_mesh_delta_u = precomputed['expression_mesh_delta_u']
-        # expression_mesh_delta_u[9409:11248] = 0
-        expression_mesh_delta = torch.einsum('bn, mnd -> bmd', features[..., :53], expression_mesh_delta_u[:, :53])
+    #     expression_mesh_delta_u = precomputed['expression_mesh_delta_u']
+    #     # expression_mesh_delta_u[9409:11248] = 0
+    #     expression_mesh_delta = torch.einsum('bn, mnd -> bmd', features[..., :53], expression_mesh_delta_u[:, :53])
 
 
-        template_mesh_delta = template_mesh_delta + expression_mesh_delta_u[:, -1]
+    #     template_mesh_delta = template_mesh_delta + expression_mesh_delta_u[:, -1]
 
-        ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(features.shape[0], 1))
+    #     ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(features.shape[0], 1))
 
-        ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
+    #     ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
 
-        return_dict = {}
-        expression_mesh = ict_mesh_w_temp + expression_mesh_delta
-        expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
-        return_dict['expression_mesh_posed'] = self.remove_teeth(expression_mesh_posed)
+    #     return_dict = {}
+    #     expression_mesh = ict_mesh_w_temp + expression_mesh_delta
+    #     expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
+    #     return_dict['expression_mesh_posed'] = self.remove_teeth(expression_mesh_posed)
 
-        return return_dict
+    #     return return_dict
         
 
     def forward(self, image=None, views=None, features=None, image_input=True, pretrain=False):
@@ -267,21 +306,22 @@ class NeuralBlendshapes(nn.Module):
         
         bsize = features.shape[0]
         template = self.ict_facekit.canonical[0]
-        pose_weight_input = torch.cat([self.ict_facekit.canonical.repeat(bsize, 1, 1), features[:, None, 53:59].repeat(1, template.shape[0], 1)], dim=-1)
+        encoded_points = self.encode_position(template)
+        pose_weight_input = torch.cat([encoded_points.repeat(bsize, 1, 1), features[:, None, 53:59].repeat(1, template.shape[0], 1)], dim=-1)
         pose_weight = self.pose_weight(pose_weight_input)  # shape of B, V, 2
 
-        encoded_points = template
         # encoded_points = torch.cat([self.encode_position(template)], dim=-1)
-        encoded_points2 = template
+        # encoded_points2 = self.encode_position(template)
         # encoded_points2 = self.encode_position(template)
         # encoded_points2 = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
         template_mesh_delta = self.template_deformer(encoded_points)
 
         
-        face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
+        face_details = self.face_details * 1e-1 # shape of 11248, 3
+        # face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
         
-        template_mesh_delta[:self.full_head_index] += face_details
+        template_mesh_delta[:self.full_head_index] = template_mesh_delta[:self.full_head_index] + face_details
 
         template_mesh = self.ict_facekit.neutral_mesh_canonical[0] + template_mesh_delta
 
@@ -306,7 +346,7 @@ class NeuralBlendshapes(nn.Module):
         if pretrain:
             return return_dict
 
-        expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
+        expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template.shape[0], 53, 3)
         # expression_mesh_delta_u[9409:11248] = 0
 
         feat = features[:, :53].clamp(0, 1)
@@ -339,12 +379,15 @@ class NeuralBlendshapes(nn.Module):
             random_features = torch.rand(bsize, 53, device=device)
             random_features[:, eyeblink_R_index] = 1
             random_features[:, eyeblink_L_index] = 1
+        template = self.ict_facekit.canonical[0]
+        encoded_points = self.encode_position(template)
 
-        template_mesh_delta = self.template_deformer(self.ict_facekit.canonical[0])
+        template_mesh_delta = self.template_deformer(encoded_points)
 
-        face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
+        face_details = self.face_details * 1e-1 # shape of 11248, 3
+        # face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
         
-        template_mesh_delta[:self.full_head_index] += face_details
+        template_mesh_delta[:self.full_head_index] = template_mesh_delta[:self.full_head_index] + face_details
 
         template_mesh = self.ict_facekit.neutral_mesh_canonical[0]
 
@@ -354,7 +397,7 @@ class NeuralBlendshapes(nn.Module):
             return self.remove_teeth(ict_mesh_w_temp)
 
         elif deformed_vertices_key == 'expression_mesh':
-            expression_mesh_delta_u = self.expression_deformer(self.ict_facekit.canonical[0]).reshape(template_mesh.shape[0], 53, 3)
+            expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template_mesh.shape[0], 53, 3)
             # expression_mesh_delta_u[9409:11248] = 0
 
             feat = random_features
@@ -374,7 +417,7 @@ class NeuralBlendshapes(nn.Module):
 
         template = self.ict_facekit.canonical[0]
         uv_coords = self.ict_facekit.uv_neutral_mesh[0]
-        encoded_points = template
+        encoded_points = self.encode_position(template)
         # encoded_points = self.encode_position(template)
         # encoded_points = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
@@ -456,18 +499,19 @@ class NeuralBlendshapes(nn.Module):
 
         return_dict['features'] = features
         
+        encoded_points = self.encode_position(template)
+        encoded_points2 = self.encode_position(template)
         bsize = features.shape[0]
         template = self.ict_facekit.canonical[0]
-        pose_weight_input = torch.cat([self.ict_facekit.canonical.repeat(bsize, 1, 1), features[:, None, 53:59].repeat(1, template.shape[0], 1)], dim=-1)
+        pose_weight_input = torch.cat([encoded_points.repeat(bsize, 1, 1), features[:, None, 53:59].repeat(1, template.shape[0], 1)], dim=-1)
 
-        encoded_points = template
-        encoded_points2 = template
         blendshapes_start = time.time()
         pose_weight = self.pose_weight(pose_weight_input)  # shape of B, V, 2
         template_mesh_delta = self.template_deformer(encoded_points)
         expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
-        face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
-        template_mesh_delta[:self.full_head_index] += face_details
+        face_details = self.face_details * 1e-1 # shape of 11248, 3
+        # face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
+        template_mesh_delta[:self.full_head_index] = template_mesh_delta[:self.full_head_index] + face_details
 
         blendshapes_end = time.time()
 
@@ -496,7 +540,7 @@ class NeuralBlendshapes(nn.Module):
         return_dict['encoder_time'] = encoder_end - encoder_start
         return_dict['blendshapes_time'] = blendshapes_end - blendshapes_start
         return_dict['deform_time'] = deform_end - deform_start
-        
+
 
         return_dict['expression_mesh_posed'] = self.remove_teeth(expression_mesh_posed)
 
@@ -518,8 +562,8 @@ class NeuralBlendshapes(nn.Module):
 
 
 
-def get_neural_blendshapes(model_path=None, train=True, ict_facekit=None, aabb=None, face_normals=None, zero_init=False, fix_bshapes=False, additive=False, device='cuda'):
-    neural_blendshapes = NeuralBlendshapes(ict_facekit, aabb=aabb, face_normals=face_normals, zero_init=zero_init, fix_bshapes=fix_bshapes)
+def get_neural_blendshapes(model_path=None, train=True, ict_facekit=None, aabb=None, face_normals=None, zero_init=False, fix_bshapes=False, additive=False, disable_pose=False, device='cuda'):
+    neural_blendshapes = NeuralBlendshapes(ict_facekit, aabb=aabb, face_normals=face_normals, zero_init=zero_init, fix_bshapes=fix_bshapes, additive=additive, disable_pose=disable_pose)
     neural_blendshapes.to(device)
 
     import os

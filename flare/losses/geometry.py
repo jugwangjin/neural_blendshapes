@@ -97,8 +97,8 @@ def laplacian_loss_two_meshes(mesh, vertices1, vertices2, L, head_index=14062):
         V1 = V1.unsqueeze(0)
         V2 = V2.unsqueeze(0)
 
-    V1 = V1
-    V2 = V2
+    V1 = V1 * 10
+    V2 = V2 * 10
 
     for b in range(V1.shape[0]):
         v1_lap = L.mm(V1[b])
