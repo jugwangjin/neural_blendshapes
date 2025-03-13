@@ -207,8 +207,11 @@ def main(args, device):
         # also save the gt 
         gt_iamge = views_subset['img']
         convert_uint = lambda x: np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().numpy() * 255.0), 0, 255).astype(np.uint8) 
+        # views_subset["mask"]
+        gt_mask = views_subset["mask"]
         for i in range(len(gt_iamge)):
             # gt_img_with_mask = torch.cat([gt_iamge[i].cpu().data, views_subset['mask'][i].cpu().data], -1)
+            gt_iamge = torch.cat([gt_iamge.cpu().data, gt_mask.cpu().data], -1)
             imageio.imsave(file_name.replace(f'.png', f'_gt_{i}.png'), convert_uint(gt_iamge[i].cpu().data))
 
             # imageio.imsave(file_name.replace(f'.png', f'_gt_{i}.png'), convert_uint(gt_iamge[i].cpu().data))
@@ -330,6 +333,46 @@ def main(args, device):
         rotation = features[:, 53:56]
         translation = features[:, 56:59]
         global_translation = features[:, 60:63]
+
+
+        # more smile
+
+        facs[:, [ict_facekit.expression_names.tolist().index(name) for name in smiles]] += 0.5
+        # brows up
+
+        # facs[:, [ict_facekit.expression_names.tolist().index(name) for name in eyebrow_raisers]] += 0.
+
+        facs = facs.clamp(0, 1)
+
+        features[:, :53] = facs
+        features[:, 53:56] = rotation
+        features[:, 56:59] = translation
+        features[:, 60:63] = global_translation
+
+        return_dict = neural_blendshapes(features=features)
+        deformed_vertices = return_dict['expression_mesh_posed']
+
+        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
+
+        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
+                                    channels=channels_gbuffer, with_antialiasing=True, 
+                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                    mesh=ict_canonical_mesh
+                                    )
+        
+        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
+
+        os.makedirs(output_dir, exist_ok=True)
+        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{index}_more_smile.png')
+        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
+
+        features = neural_blendshapes.encoder(views_subset)
+        facs = features[:, :53]
+        rotation = features[:, 53:56]
+        translation = features[:, 56:59]
+        global_translation = features[:, 60:63]
+
+
 
         # mouth funnels exaggerations 
         facs[:, [ict_facekit.expression_names.tolist().index(name) for name in lipfunnels]] += 0.6

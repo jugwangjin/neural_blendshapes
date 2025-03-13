@@ -706,7 +706,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # random_bshapes = torch.rand_like(return_dict['features'][:, :53]) 
             expression_delta_random = neural_blendshapes.get_expression_delta()
 
-            expression_linearity_regularization = expression_delta_random.abs().mean() * 1e1  if stage == 2 else 0
+            expression_linearity_regularization = expression_delta_random.pow(2).mean()   if stage == 2 else 0
+            # expression_linearity_regularization = expression_delta_random.abs().mean() * 1e1  if stage == 2 else 0
             detail_linearity_regularization = neural_blendshapes.face_details.pow(2).mean() * 1e2
 
             template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean() 
@@ -812,13 +813,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     # save the posed meshes as well
                     write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp_posed_train.obj", mesh.with_vertices(return_dict_[deformed_vertices_key + '_posed'][0]).detach().to('cpu'))
 
-                    vertices, _, _  = FLAMEServer(views_subset['flame_expression'], views_subset['flame_pose'])
-                    write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame_train.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
+                    # vertices, _, _  = FLAMEServer(views_subset['flame_expression'], views_subset['flame_pose'])
+                    # write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame_train.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
 
                     zero_pose_w_jaw = torch.zeros_like(views_subset['flame_pose'])
                     zero_pose_w_jaw[:, 6:9] = views_subset['flame_pose'][:, 6:9]
                     vertices, _, _  = FLAMEServer(views_subset['flame_expression'], zero_pose_w_jaw)
-                    write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame_zero_pose_train.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
+                    # write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame_zero_pose_train.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
 
 
 
@@ -866,13 +867,13 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                             # save the posed meshes as well
                             write_mesh(meshes_save_path / f"mesh_{iteration:06d}_exp_posed.obj", mesh.with_vertices(return_dict_[deformed_vertices_key+'_posed'][n]).detach().to('cpu'))
 
-                        vertices, _, _  = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
-                        write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
+                        # vertices, _, _  = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
+                        # write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
 
-                        zero_pose_w_jaw = torch.zeros_like(debug_views['flame_pose'])
-                        zero_pose_w_jaw[:, 6:9] = debug_views['flame_pose'][:, 6:9]
-                        vertices, _, _  = FLAMEServer(debug_views['flame_expression'], zero_pose_w_jaw)
-                        write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame_zero_pose.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
+                        # zero_pose_w_jaw = torch.zeros_like(debug_views['flame_pose'])
+                        # zero_pose_w_jaw[:, 6:9] = debug_views['flame_pose'][:, 6:9]
+                        # vertices, _, _  = FLAMEServer(debug_views['flame_expression'], zero_pose_w_jaw)
+                        # write_mesh(meshes_save_path / f"mesh_{iteration:06d}_flame_zero_pose.obj", flame_canonical_mesh.with_vertices(vertices[0]).detach().to('cpu'))
 
 
                     write_mesh(meshes_save_path / f"mesh_{iteration:06d}_temp.obj", mesh.with_vertices(return_dict_['template_mesh']).detach().to('cpu'))                                
@@ -986,8 +987,8 @@ if __name__ == '__main__':
     import time
     while True:
         try:
-            with torch.autograd.set_detect_anomaly(True):
-                main(args, device, dataset_train, dataloader_train, debug_views)
+            # with torch.autograd.set_detect_anomaly(True):
+            main(args, device, dataset_train, dataloader_train, debug_views)
             break  # Exit the loop if main() runs successfully
         except ValueError as e:
             print(e)

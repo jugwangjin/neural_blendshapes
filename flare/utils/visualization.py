@@ -331,7 +331,7 @@ def save_individual_img(rgb_pred, views, normals, gbuffer_mask, buffers, images_
 
         
 
-def save_manipulation_image(rgb_pred, views, normals, gbuffer_mask, file_name):
+def save_manipulation_image(rgb_pred, views, normals, gbuffer_mask, file_name, normal=True):
     convert_uint = lambda x: np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().numpy() * 255.0), 0, 255).astype(np.uint8) 
     convert_uint_255 = lambda x: (x * 255).to(torch.uint8)
     
@@ -340,8 +340,8 @@ def save_manipulation_image(rgb_pred, views, normals, gbuffer_mask, file_name):
 
         # rgb prediction
         imageio.imsave(file_name.replace(f'.png', f'_rgb_{i}.png'), convert_uint(torch.cat([rgb_pred[i].cpu().data, mask], -1))) 
-
-        ##normal
-        normal = (normals[i] + 1.) / 2.
-        normal = torch.cat([normal.cpu(), mask], -1)
-        imageio.imsave(file_name.replace(f'.png', f'_normal_{i}.png'), convert_uint_255(normal))
+        if normal:
+            ##normal
+            normal = (normals[i] + 1.) / 2.
+            normal = torch.cat([normal.cpu(), mask], -1)
+            imageio.imsave(file_name.replace(f'.png', f'_normal_{i}.png'), convert_uint_255(normal))    

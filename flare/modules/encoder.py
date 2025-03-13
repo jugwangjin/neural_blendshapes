@@ -159,7 +159,7 @@ class DECAEncoder(nn.Module):
         if not self.additive:
             bshapes_out = torch.pow(bshapes, torch.exp(bshapes_out))
         else:
-            bshapes_out = bshapes + bshapes_out
+            bshapes_out = bshapes + self.tanh(bshapes_out)
             bshapes_out = bshapes_out.clamp(0, 1)
             
         # print(rotation_out.shape, mp_translation.shape, flame_cam_t.shape, torch.cat([rotation_out, mp_translation, flame_cam_t], dim=-1).shape)
