@@ -5,7 +5,7 @@ import multiprocessing
 
 def main():
 
-    data_dir = '/Bean/data/gwangjin/2024/nbshapes/flare'
+    data_dir = '/Bean/data/gwangjin/2024/nbshapes/flare_2'
     exps_dir = os.path.join('/Bean/log/gwangjin/2024/nbshapes_comparisons/')
     save_dir = 'figures/metrics'
     # get flare image directories
@@ -22,14 +22,18 @@ def main():
             test_set = 'MVI_1812'
         elif directory == 'marcel':
             test_set = 'MVI_1802'
+            
+        if directory not in ['wojtek_1', 'obama']:
+            continue
+
 
         gt_dir = os.path.join(data_dir, directory, directory, test_set)
-        images_dir = os.path.join(exps_dir, 'ours_enc_v14', directory, 'images_evaluation', 'qualitative_results', 'rgb')
+        images_dir = os.path.join(exps_dir, 'ours_enc_v13', directory, 'images_evaluation', 'qualitative_results', 'rgb')
 
         if not os.path.exists(images_dir):
             continue
 
-        name = 'oursv14_' + directory
+        name = 'oursv13_' + directory
 
         command = f'python flare/metrics/metrics.py --gt_dir {gt_dir} --data_dir {images_dir} --save_dir {save_dir} --no_cloth --name {name}'
 

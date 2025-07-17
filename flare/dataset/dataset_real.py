@@ -317,17 +317,30 @@ class DatasetLoader(Dataset):
         }
 
 
+    def get_random_flame_pose(self, batch_size):
+        random_idx = np.random.randint(0, self.len_img, size=(batch_size,))
+        flame_pose = []
+        for idx in random_idx:
+            json_dict = self.all_img_path[idx]
+            flame_pose.append(torch.tensor(json_dict["pose"], dtype=torch.float32))
+        flame_pose = torch.stack(flame_pose, dim=0)
+            
+        return flame_pose
+
+
     def get_sequential_frame(self, idx):
         idx = idx % self.len_img
         json_dict = self.all_img_path[idx]
         subdir = json_dict["dir"]
 
-        prev_idx = idx - 1
-        subdir_prev = self.all_img_path[prev_idx]["dir"]
+        if idx > 0:
+            prev_idx = idx - 1
+            subdir_prev = self.all_img_path[prev_idx]["dir"]
 
-        if subdir == subdir_prev:
-            return self.__getitem__(idx - 1)
+            if subdir == subdir_prev:
+                return self.__getitem__(idx - 1)
         
+
         next_idx = (idx + 1) % self.len_img
         subdir_next = self.all_img_path[next_idx]["dir"]
 

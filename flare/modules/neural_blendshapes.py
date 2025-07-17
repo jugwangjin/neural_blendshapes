@@ -349,6 +349,13 @@ class NeuralBlendshapes(nn.Module):
         expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template.shape[0], 53, 3)
         # expression_mesh_delta_u[9409:11248] = 0
 
+        # ICT 모델의 블렌드쉐이프 영향력 마스크 가져오기
+        blendshape_masks = self.ict_facekit.expression_shape_modes_norm.permute(1, 0).unsqueeze(-1)  # (V, 53, 1    )
+        
+        # 신경망 출력을 해당 블렌드쉐이프의 유효 영역으로 제한
+        # 각 블렌드쉐이프가 해당하는 얼굴 영역에만 변형 적용
+        expression_mesh_delta_u = expression_mesh_delta_u * blendshape_masks  # (V, 53, 3)
+
         feat = features[:, :53].clamp(0, 1)
 
         expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)

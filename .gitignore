@@ -32,6 +32,10 @@ flame/__pycache__/
 # C extensions
 *.so
 
+
+# face_normals
+face_normals/
+
 # Distribution / packaging
 .Python
 build/

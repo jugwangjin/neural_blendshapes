@@ -101,6 +101,7 @@ def visualize_specific_traininig(mesh_key_name, return_dict, renderer, shader, i
                             canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
                             mesh=mesh
                             )
+
     debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, views_subset, mesh, args.finetune_color, lgt)
     visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, views_subset, images_save_path, iteration, ict_facekit=ict_facekit, save_name=save_name)
 
@@ -435,6 +436,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes.zero_grad(set_to_none=True)
                 optimizer_neural_blendshapes = None
                 optimizer_neural_blendshapes = torch.optim.Adam([
+                                                    {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer * 1e-1, },
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e-1},
                                                     {'params': neural_blendshapes_detail_params, 'lr': args.lr_jacobian * 1e-2},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian * 1e-1},
@@ -567,7 +569,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 sequential_frames = dataloader_train.collate_fn([dataset_train.get_sequential_frame(idx) for idx in indices])
                 sequential_features = neural_blendshapes.encoder(sequential_frames)
                 temporal_loss = (return_dict['features'] - sequential_features)
-                temporal_loss[:, 53:] *= 1e1
+                # temporal_loss[:, 53:] *= 1e1
+                # temporal_loss[:, 53:] *= 1e1
                 temporal_loss = temporal_loss.pow(2).mean()
                 losses['temporal_regularization'] = temporal_loss
 
@@ -688,7 +691,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['flame_regularization'] = flame_loss + flame_loss_no_pose
 
             if stage > 0:
-                losses['flame_regularization'] = losses['flame_regularization'] * 5e-1
+                losses['flame_regularization'] = losses['flame_regularization'] * 1e-1
+                flame_loss_template *= 1e-1
             
             losses['flame_regularization'] = losses['flame_regularization'] + flame_loss_template
 
@@ -699,16 +703,23 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             template_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, ict_facekit.neutral_mesh_canonical[0], return_dict['template_mesh'], ict_canonical_mesh.laplacian, head_index =ict_canonical_mesh.vertices.shape[0]) 
             # expression_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, return_dict['ict_mesh_w_temp'], return_dict['expression_mesh'], ict_canonical_mesh.laplacian, head_index =ict_canonical_mesh.vertices.shape[0]) * 1e1 if stage == 2 else 0
 
+            random_features_batch_size = 64
+
+            random_flame_pose = dataset_train.get_random_flame_pose(random_features_batch_size).to(device)
+
             # more regularizations
             feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], rot_mult=1e-1, mult=1)
+                                                                neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], random_flame_pose, rot_mult=1e-1, mult=1, random_features_batch_size=random_features_batch_size)
 
             # random_bshapes = torch.rand_like(return_dict['features'][:, :53]) 
             expression_delta_random = neural_blendshapes.get_expression_delta()
 
+            # expression_linearity_regularization = expression_delta_random.abs().mean()   if stage == 2 else 0
             expression_linearity_regularization = expression_delta_random.pow(2).mean()   if stage == 2 else 0
             # expression_linearity_regularization = expression_delta_random.abs().mean() * 1e1  if stage == 2 else 0
+            # detail_linearity_regularization = neural_blendshapes.face_details.abs().mean() * 1e2
             detail_linearity_regularization = neural_blendshapes.face_details.pow(2).mean() * 1e2
+            # detail_linearity_regularization = neural_blendshapes.face_details.pow(2).mean() * 1e2
 
             template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean() 
             # expression_geometric_regularization = (return_dict['ict_mesh_w_temp'] - return_dict['expression_mesh']).pow(2).mean() if stage == 2 else 0
@@ -784,6 +795,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             if optimizer_neural_blendshapes is not None:
                 optimizer_neural_blendshapes.step() 
+
+
+            ### increase the gradients of positional encoding following tinycudnn
+            if stage==3:
+                shader.fourier_feature_transform.params.grad /= 8.0
 
             optimizer_shader.step()
 

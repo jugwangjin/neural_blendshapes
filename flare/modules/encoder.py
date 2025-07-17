@@ -28,13 +28,8 @@ class DECAEncoder(nn.Module):
             nn.Linear(1024, outsize)
         )
 
-        self.blendshapes_prefix = nn.Sequential(
-            nn.Linear(53, 128),
-            nn.ReLU(),
-        )
-
-        self.bshapes_tail = nn.Sequential(
-            nn.Linear(feature_size + 128, 1024),
+        self.layers_prefix = nn.Sequential(
+            nn.Linear(feature_size + 53 + 15 + 3 + 3, 1024),
             nn.LayerNorm(1024),
             nn.ReLU(),
             nn.Linear(1024, 512),
@@ -43,23 +38,35 @@ class DECAEncoder(nn.Module):
             nn.Linear(512, 256),
             nn.LayerNorm(256),
             nn.ReLU(),
-            nn.Linear(256, 53)
+            nn.Linear(256, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+        )
+
+        self.bshapes_tail = nn.Sequential(
+            nn.Linear(256 + 53, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 53)
         )
 
         self.rotation_tail = nn.Sequential(
-            nn.Linear(15, 64),
+            nn.Linear(256 + 3, 64),
             # nn.LayerNorm(64),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(64, 32),
             # nn.LayerNorm(64),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(32, 10),
             # nn.LayerNorm(64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
+            # nn.ReLU(),
+            # nn.Linear(64, 64),
             # nn.LayerNorm(64),
-            nn.ReLU(),
-            nn.Linear(64, 9, bias=False)
+            # nn.ReLU(),
+            # nn.Linear(64, 9, bias=False)
         )
         # self.translation_tail = nn.Sequential(
         #     nn.Linear(15, 32),
@@ -115,7 +122,7 @@ class DECAEncoder(nn.Module):
         self.layers.eval()
 
 
-    def forward(self, inputs, bshapes, mp_translation, landmark):
+    def forward(self, inputs, bshapes, mp_translation, landmark, rotation):
         with torch.no_grad():
             idx = inputs['idx']
             img_path = inputs['img_path']
@@ -144,13 +151,16 @@ class DECAEncoder(nn.Module):
             encoder_features = encoder_features.data.detach()
             pose_features = pose_features.data.detach()
 
-            
+        layers_features = self.layers_prefix(torch.cat([encoder_features, bshapes, pose_features, rotation, mp_translation], dim=-1))
 
-        bshapes_additional_features = self.blendshapes_prefix(bshapes)
+        bshapes_out = self.bshapes_tail(torch.cat([layers_features, bshapes], dim=-1))
+        rotation_out = self.rotation_tail(torch.cat([layers_features, rotation], dim=-1))
+
+        # bshapes_additional_features = self.blendshapes_prefix(bshapes)
         
-        bshapes_out = self.bshapes_tail(torch.cat([encoder_features, bshapes_additional_features], dim=-1))
-        rotation_out = self.rotation_tail(pose_features)
-
+        # bshapes_out = self.bshapes_tail(torch.cat([encoder_features, bshapes_additional_features], dim=-1))
+        # rotation_out = self.rotation_tail(pose_features)
+        # rotation_out[..., :3] += rotation
         rotation_out[..., 3:] *= 0.1
         # translation_out = self.translation_tail(pose_features)
 
@@ -250,13 +260,21 @@ class ResnetEncoder(nn.Module):
             rotation_matrix = transform_matrix[:, :3, :3]
             rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
 
-            rotation_matrix[:, 2:3] *= -1
-            rotation_matrix[:, :, 2:3] *= -1
+            # rotation_matrix[:, :1] *= -1
+            # rotation_matrix[:, :, :1] *= -1
+            # rotation_matrix[:, 1:2] *= -1
+            # rotation_matrix[:, :, 1:2] *= -1
+            # rotation_matrix[:, 2:3] *= -1
+            # rotation_matrix[:, :, 2:3] *= -1
 
             rotation_matrix = rotation_matrix.permute(0, 2, 1)
             rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
 
-        features = self.encoder(views, mp_bshapes, mp_translation, landmark)
+            # rotation[..., 0] *= -1
+            # rotation[..., 1] *= -1  
+            # rotation[..., 2] *= -1
+
+        features = self.encoder(views, mp_bshapes, mp_translation, landmark, rotation)
         if self.fix_bshapes:
             blendshapes = mp_bshapes
         else:
@@ -266,15 +284,19 @@ class ResnetEncoder(nn.Module):
             rotation = features[:, 53:56] 
             
         translation = features[:, 56:59]
+        
 
         global_translation = self.global_translation.unsqueeze(0).expand(translation.shape[0], -1)
 
+        # scale = self.elu(features[:, 59:60]) + 1
+        # global_translation = features[:, 60:63]
+
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 
-        bshapes_tail_out = features[:, 62:]
+        bshapes_tail_out = features[:, 63:]
 
         out_features = torch.cat([blendshapes, rotation, translation, scale, global_translation, bshapes_tail_out], dim=-1)
-
+           #                       0:53            53:56      56:59    59:60      60:63                 63:
         return out_features
 
 

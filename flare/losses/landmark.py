@@ -80,7 +80,7 @@ def landmark_loss_function(ict_facekit, gbuffers, views_subset, use_jaw, device)
         
     if use_jaw:
         # detected_landmarks[:, :17, -1] *= 0.1
-        detected_landmarks[:, :17, -1] = detected_landmarks[:, :17, -1] * 0.1
+        detected_landmarks[:, :17, -1] = detected_landmarks[:, :17, -1] 
     else:
         detected_landmarks[:, :17, -1] *= 0
 
