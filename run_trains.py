@@ -4,6 +4,10 @@ import multiprocessing
 from queue import Queue
 import argparse
 import shutil
+import time
+
+error_dir = './errors'
+os.makedirs(error_dir, exist_ok=True)
 
 def worker(gpu_id, command_queue):
     while not command_queue.empty():
@@ -27,6 +31,8 @@ def worker(gpu_id, command_queue):
                 with open(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'), 'w') as f:
                     f.write('')
                 
+                start_time = time.time()
+
                 try:
                     command = command.format(gpu_id)
                     print(f"Running on GPU {gpu_id}: {command}")
@@ -35,6 +41,27 @@ def worker(gpu_id, command_queue):
                     print(e)
                     print(f"Failed to run on GPU {gpu_id}: {command}")
                     # remove the currently_training.txt file
+                    # dump the error to a file
+                    with open(os.path.join(OUTPUT_DIR_ROOT, directory, 'error.txt'), 'w') as f:
+                        f.write(str(e))
+
+                    # dump error to a file, in error_dir, as well as running time, currnt time, start time, and arguments, and so on.
+                    
+                    current_time = time.time()
+                    with open(os.path.join(error_dir, f'{directory}.txt'), 'w') as f:
+                        f.write(f'Error: {e}\n')
+                        f.write(f'Running time: {current_time - start_time}\n')
+                        f.write(f'Current time: {current_time}\n')  
+                        f.write(f'Start time: {start_time}\n')
+                        f.write(f'Arguments: {command}\n')
+                        f.write(f'GPU: {gpu_id}\n')
+                        f.write(f'Directory: {directory}\n')
+                        f.write(f'Command: {command}\n')
+                        f.write(f'Error: {e}\n')
+                        f.write(f'Running time: {current_time - start_time}\n')
+                        f.write(f'Current time: {current_time}\n')  
+                        f.write(f'Start time: {start_time}\n')  
+
                 finally:
                     if os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')):
                         os.remove(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'))
@@ -82,6 +109,10 @@ def run_trackings(gpu_ids):
 
             # if not directory.endswith('v2'):
             #       continue=
+
+        # if directory not in ['subject_3']:
+        #     continue
+
         input_dir = os.path.join(INPUT_DIR_ROOT, directory, directory)
         
         if directory == 'yufeng':

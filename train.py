@@ -579,6 +579,18 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             '''
             if iteration > args.only_flame_iterations:
 
+                # For only the face segmentation
+                features = return_dict['features'].detach()
+                return_dict_no_encoder = neural_blendshapes(input_image, views_subset, features=features)
+                    
+                deformed_vertices_no_encoder = return_dict_no_encoder[deformed_vertices_key+'_posed']
+                d_normals_no_encoder = mesh.fetch_all_normals(deformed_vertices_no_encoder, mesh)
+
+                gbuffers_no_encoder = renderer.render_batch(views_subset['flame_camera'], deformed_vertices_no_encoder.contiguous(), d_normals_no_encoder,
+                                        channels=['segmentation'], with_antialiasing=True, 
+                                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                        mesh=mesh, target_resolution=target_res
+                                        )
 
                 # skin_mask_w_mouth: views_subset["skin_mask"][..., :1] + views_subset["skin_mask"][..., 4:5]
                 # skin_mask_w_mouth = (views_subset["skin_mask"][..., :1] + views_subset["skin_mask"][..., 4:5] >= 1).float()
@@ -590,7 +602,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 mask_loss_segmentation = mask_loss_function(views_subset["mask"], gbuffer_mask)
                 shading_loss, pred_color, tonemapped_colors = shading_loss_batch(pred_color_masked, views_subset, views_subset['img'].size(0))
-
 
                 eyes_closed_expression_mesh = neural_blendshapes.get_random_mesh_eyes_closed(deformed_vertices_key)
                 eyes_closed_normals = {k: v[:1] for k, v in d_normals.items()}
@@ -606,7 +617,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 segmentation_loss = segmentation_loss_function(left_eye_segmentation_gt, gbuffers['left_eye']) * 1e-1 +\
                                     segmentation_loss_function(right_eye_segmentation_gt, gbuffers['right_eye']) * 1e-1 +\
                                     segmentation_loss_function(mouth_segmentation_gt, gbuffers['mouth']) * 1e-1 +\
-                                    segmentation_loss_function(face_segmentation_gt, gbuffers['face']) * 1e-1 +\
+                                    segmentation_loss_function(face_segmentation_gt, gbuffers_no_encoder['face']) * 1e-1 +\
                                     eyes_closed_left_eye_seg_loss * 1e-1 +\
                                     eyes_closed_right_eye_seg_loss * 1e-1
 
@@ -639,7 +650,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 eyeball_normal_loss = eyeball_normal_loss_function(gbuffers, views_subset, gbuffer_mask, device)
 
                 losses['mask'] = mask_loss_segmentation 
-                losses['segmentation'] = segmentation_loss
+                losses['segmentation'] = segmentation_loss * 1e1
 
                 # if stage == 0:
                 #     shading_loss *= 1e-1
@@ -692,7 +703,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             if stage > 0:
                 losses['flame_regularization'] = losses['flame_regularization'] * 1e-1
-                flame_loss_template *= 1e-1
+                flame_loss_template *= 1e-2
             
             losses['flame_regularization'] = losses['flame_regularization'] + flame_loss_template
 
@@ -706,10 +717,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             random_features_batch_size = 64
 
             random_flame_pose = dataset_train.get_random_flame_pose(random_features_batch_size).to(device)
+            random_landmark = dataset_train.get_random_landmark(random_features_batch_size).to(device)
 
             # more regularizations
             feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
-                                                                neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], random_flame_pose, rot_mult=1e-1, mult=1, random_features_batch_size=random_features_batch_size)
+                                                                neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], random_flame_pose, random_landmark, rot_mult=1e-1, mult=1, random_features_batch_size=random_features_batch_size)
 
             # random_bshapes = torch.rand_like(return_dict['features'][:, :53]) 
             expression_delta_random = neural_blendshapes.get_expression_delta()

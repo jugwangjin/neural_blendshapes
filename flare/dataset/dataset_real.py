@@ -327,6 +327,16 @@ class DatasetLoader(Dataset):
             
         return flame_pose
 
+    def get_random_landmark(self, batch_size):
+        random_idx = np.random.randint(0, self.len_img, size=(batch_size,))
+        landmark = []
+        for idx in random_idx:
+            data = self.__getitem__(idx)
+            landmark.append(data['landmark'])
+        landmark = torch.cat(landmark, dim=0)
+
+        return landmark
+
 
     def get_sequential_frame(self, idx):
         idx = idx % self.len_img

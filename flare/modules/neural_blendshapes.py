@@ -47,19 +47,19 @@ class MLPTemplate(nn.Module):
     def __init__(self, inp_dim):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(inp_dim, 64),
+            nn.Linear(inp_dim, 128),
             # nn.LayerNorm(64),
             nn.Softplus(beta=100),
-            nn.Linear(64, 64),
+            nn.Linear(128, 128),
             # nn.LayerNorm(64),
             nn.Softplus(beta=100),
-            nn.Linear(64, 64),
+            nn.Linear(128, 128),
             # nn.LayerNorm(64),
             nn.Softplus(beta=100),
-            nn.Linear(64, 64),
+            nn.Linear(128, 128),
             # nn.LayerNorm(64),
             nn.Softplus(beta=100),
-            nn.Linear(64, 3, bias=False)
+            nn.Linear(128, 3, bias=False)
         )
 
     def forward(self, x):
