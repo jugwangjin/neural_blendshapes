@@ -66,6 +66,8 @@ def config_parser():
     parser.add_argument('--weight_geometric_regularization', type=float, default=1e-3, help="Weight of the flame term")
     parser.add_argument('--weight_linearity_regularization', type=float, default=1e-5, help="Weight of the flame term")
     parser.add_argument('--weight_temporal_regularization', type=float, default=1e-5, help="Weight of the flame term")
+    parser.add_argument('--weight_synthetic_encoder_regularization', type=float, default=1, help="Weight of the flame term")
+
 
     parser.add_argument('--r_mean', type=float, default=0.500, help="mean roughness")
 

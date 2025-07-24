@@ -291,6 +291,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         "albedo_regularization": args.weight_albedo_regularization,
         "fresnel_coeff": args.weight_fresnel_coeff,
         "temporal_regularization": args.weight_temporal_regularization,
+        "synthetic_encoder_regularization": args.weight_synthetic_encoder_regularization,
     }
 
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
@@ -517,6 +518,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes.zero_grad(set_to_none=True)
                 optimizer_neural_blendshapes = None
                 optimizer_neural_blendshapes = torch.optim.Adam([
+                                                    {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer * 1e-1, },
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e-2},
                                                     {'params': neural_blendshapes_detail_params, 'lr': args.lr_jacobian * 1e-2},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian * 1e-2},
@@ -592,9 +594,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                         mesh=mesh, target_resolution=target_res
                                         )
 
-                # skin_mask_w_mouth: views_subset["skin_mask"][..., :1] + views_subset["skin_mask"][..., 4:5]
-                # skin_mask_w_mouth = (views_subset["skin_mask"][..., :1] + views_subset["skin_mask"][..., 4:5] >= 1).float()
-                # segmentation_gt = downsample_upsample(skin_mask_w_mouth, None, (512, 512))
                 left_eye_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 3:4], None, (512, 512))
                 right_eye_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 4:5], None, (512, 512))
                 mouth_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 5:6], None, (512, 512))
@@ -620,28 +619,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                                     segmentation_loss_function(face_segmentation_gt, gbuffers_no_encoder['face']) * 1e-1 +\
                                     eyes_closed_left_eye_seg_loss * 1e-1 +\
                                     eyes_closed_right_eye_seg_loss * 1e-1
-
-                # visualize gbuffer_mask, views_subset["mask"], gbuffers['eyes'], eyes_segmentation_gt, mouth_segmentation_gt, gbuffers['mouth'], views_subset["img"]
-                # for bn in range(views_subset["img"].size(0)):
-                #     os.makedirs('debug/masks_vis', exist_ok=True)
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_gbuffer_mask.png"), (gbuffer_mask[bn].cpu().data.numpy() * 255).astype(np.uint8))
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_mask.png"), (views_subset["mask"][bn].cpu().data.numpy() * 255).astype(np.uint8))
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_lefteye_segmentation_gt.png"), (left_eye_segmentation_gt[bn].cpu().data.numpy() * 255).astype(np.uint8))
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_righteyes_segmentation_gt.png"), (right_eye_segmentation_gt[bn].cpu().data.numpy() * 255).astype(np.uint8))
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_mouth_segmentation_gt.png"), (mouth_segmentation_gt[bn].cpu().data.numpy() * 255).astype(np.uint8))
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_face_segmentation_gt.png"), (face_segmentation_gt[bn].cpu().data.numpy() * 255).astype(np.uint8))
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_gbuffers_lefteye.png"), (gbuffers['left_eye'][bn].cpu().data.numpy() * 255).astype(np.uint8))
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_gbuffers_righteye.png"), (gbuffers['right_eye'][bn].cpu().data.numpy() * 255).astype(np.uint8))
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_gbuffers_mouth.png"), (gbuffers['mouth'][bn].cpu().data.numpy() * 255).astype(np.uint8))
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_gbuffers_seg.png"), (gbuffers['segmentation'][bn].cpu().data.numpy() * 255).astype(np.uint8))
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_gbuffers_face.png"), (gbuffers['face'][bn].cpu().data.numpy() * 255).astype(np.uint8))
-                #     cv2.imwrite(os.path.join('debug', 'masks_vis', f"{iteration}_{bn}_img.png"), (views_subset["img"][bn].cpu().data.numpy() * 255).astype(np.uint8))    
-
-                
-
-                # if iteration > 10:
-                #     exit()
-                
 
                 perceptual_loss = VGGloss(tonemapped_colors[0], tonemapped_colors[1], iteration)
 
@@ -712,37 +689,34 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             '''
             # laplacian regularization
             template_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, ict_facekit.neutral_mesh_canonical[0], return_dict['template_mesh'], ict_canonical_mesh.laplacian, head_index =ict_canonical_mesh.vertices.shape[0]) 
-            # expression_mesh_laplacian_regularization = laplacian_loss_two_meshes(mesh, return_dict['ict_mesh_w_temp'], return_dict['expression_mesh'], ict_canonical_mesh.laplacian, head_index =ict_canonical_mesh.vertices.shape[0]) * 1e1 if stage == 2 else 0
-
             random_features_batch_size = 64
 
-            random_flame_pose = dataset_train.get_random_flame_pose(random_features_batch_size).to(device)
-            random_landmark = dataset_train.get_random_landmark(random_features_batch_size).to(device)
+            random_flame_pose = None
+            random_landmark = None
 
             # more regularizations
             feature_regularization = feature_regularization_loss(return_dict['features'], views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
                                                                 neural_blendshapes, None, views_subset, dataset_train.bshapes_mode[ict_facekit.mediapipe_to_ict], random_flame_pose, random_landmark, rot_mult=1e-1, mult=1, random_features_batch_size=random_features_batch_size)
 
-            # random_bshapes = torch.rand_like(return_dict['features'][:, :53]) 
             expression_delta_random = neural_blendshapes.get_expression_delta()
 
-            # expression_linearity_regularization = expression_delta_random.abs().mean()   if stage == 2 else 0
             expression_linearity_regularization = expression_delta_random.pow(2).mean()   if stage == 2 else 0
-            # expression_linearity_regularization = expression_delta_random.abs().mean() * 1e1  if stage == 2 else 0
-            # detail_linearity_regularization = neural_blendshapes.face_details.abs().mean() * 1e2
             detail_linearity_regularization = neural_blendshapes.face_details.pow(2).mean() * 1e2
-            # detail_linearity_regularization = neural_blendshapes.face_details.pow(2).mean() * 1e2
 
             template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean() 
-            # expression_geometric_regularization = (return_dict['ict_mesh_w_temp'] - return_dict['expression_mesh']).pow(2).mean() if stage == 2 else 0
 
 
             losses['feature_regularization'] = feature_regularization
             losses['laplacian_regularization'] = template_mesh_laplacian_regularization 
-            # losses['laplacian_regularization'] = template_mesh_laplacian_regularization + expression_mesh_laplacian_regularization 
             losses['geometric_regularization'] = template_geometric_regularization
-            # losses['geometric_regularization'] = template_geometric_regularization + expression_geometric_regularization
             losses['linearity_regularization'] = expression_linearity_regularization + detail_linearity_regularization 
+
+
+            if stage > 1:
+
+                batch_size = views_subset['img'].size(0)
+                synthetic_encoder_regularization = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, batch_size, deformed_vertices_key, lgt, device, save_debug=iteration % 100 == 0)
+                losses['synthetic_encoder_regularization'] = synthetic_encoder_regularization
 
             loss = torch.tensor(0., device=device) 
             for k, v in losses.items():

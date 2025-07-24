@@ -29,23 +29,24 @@ class DECAEncoder(nn.Module):
         )
 
         self.layers_prefix = nn.Sequential(
-            nn.Linear(feature_size + 53 + 18 + 3 + 3 + 3, 1024),
-            nn.LayerNorm(1024),
-            nn.ReLU(),
-            nn.Linear(1024, 512),
+            nn.Linear(feature_size + 53 + 18 + 3, 512),
             nn.LayerNorm(512),
             nn.ReLU(),
             nn.Linear(512, 256),
-        )
-
-        self.bshapes_tail = nn.Sequential(
-            nn.Linear(256 + 53 + 18 + 3 + 3 + 3, 256),
             nn.LayerNorm(256),
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.LayerNorm(128),
+        )
+
+        self.bshapes_tail = nn.Sequential(
+            nn.Linear(128 + 53 + 18 + 3, 128),
+            nn.LayerNorm(128),
             nn.ReLU(),
-            nn.Linear(128, 53 + 10, bias=False)
+            nn.Linear(128, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Linear(128, 53 + 10)
         )
 
         self.rotation_tail = nn.Sequential(
@@ -137,40 +138,45 @@ class DECAEncoder(nn.Module):
         self.layers.eval()
 
 
-    def forward(self, inputs, bshapes, mp_translation, landmark, rotation):
+    def forward(self, inputs, bshapes, mp_translation, landmark, rotation, synthetic=False):
         with torch.no_grad():
-            idx = inputs['idx']
-            img_path = inputs['img_path']
 
-            features = []
-            for b in range(idx.shape[0]):
-                if img_path[b] not in self.extracted_features:
-                    img = inputs['img_deca'][b:b+1]
-                    feature = self.encoder(img)
-                    self.extracted_features[img_path[b]] = feature
-                else:
-                    feature = self.extracted_features[img_path[b]]
-                features.append(feature)
-            encoder_features = torch.cat(features, dim=0)
+            if not synthetic:
+                idx = inputs['idx']
+                img_path = inputs['img_path']
+                features = []
+                for b in range(idx.shape[0]):
+                    if img_path[b] not in self.extracted_features:
+                        img = inputs['img_deca'][b:b+1]
+                        feature = self.encoder(img)
+                        self.extracted_features[img_path[b]] = feature
+                    else:
+                        feature = self.extracted_features[img_path[b]]
+                    features.append(feature)
+                encoder_features = torch.cat(features, dim=0)
+
+            else:
+                features = []
+                for b in range(inputs['img_deca'].shape[0]):
+                    feature = self.encoder(inputs['img_deca'][b:b+1])
+                    features.append(feature)
+                encoder_features = torch.cat(features, dim=0)
 
             # shape tex exp pose cam 3 light 27
             # shape 100 # tex 50 # exp 50 # pose  6 
-            pose_features = inputs['flame_pose']
+            # pose_features = inputs['flame_pose']
             # pose_features = self.layers(encoder_features)
             # pose_features = pose_features[..., -36:-30]
             # pose_features = torch.cat([pose_features[..., :100], pose_features[..., 150:-30]], dim=-1)
             # img = inputs['img_deca']
 
-
             # encoder_features = self.encoder(img)
             encoder_features = encoder_features.data.detach()
-            pose_features = pose_features.data.detach()
+            # pose_features = pose_features.data.detach()
 
-        translation_out = self.rotation_tail(torch.cat([landmark, mp_translation], dim=-1))
+        layers_features = self.layers_prefix(torch.cat([encoder_features, landmark, bshapes, rotation], dim=-1))
 
-        layers_features = self.layers_prefix(torch.cat([encoder_features, landmark, bshapes, rotation, mp_translation, translation_out], dim=-1))
-
-        bshapes_out = self.bshapes_tail(torch.cat([layers_features, landmark, bshapes, rotation, mp_translation, translation_out], dim=-1))
+        bshapes_out = self.bshapes_tail(torch.cat([layers_features, landmark, bshapes, rotation], dim=-1))
         
         rotation_out = bshapes_out[:, -10:]
         bshapes_out = bshapes_out[:, :-10]
@@ -182,7 +188,6 @@ class DECAEncoder(nn.Module):
         # rotation_out = self.rotation_tail(pose_features)
         # rotation_out[..., :3] += rotation
         rotation_out[..., :3] += rotation
-        rotation_out[..., 3:6] += translation_out
         # rotation_out[..., 3:] *= 0.1
         # translation_out = self.translation_tail(pose_features)
 
@@ -245,9 +250,6 @@ class ResnetEncoder(nn.Module):
 
         self.disable_pose = disable_pose
         
-        # Flag to control whether encoder gradients should be detached for mask loss
-        self.detach_encoder_for_mask_loss = False
-        
     def load_deca_encoder(self):
         model_path = './assets/deca_model.tar'
 
@@ -261,7 +263,7 @@ class ResnetEncoder(nn.Module):
         
     
 
-    def forward(self, views):
+    def forward(self, views, synthetic=False):
         with torch.no_grad():
             
             transform_matrix = views['mp_transform_matrix'].clone().detach().reshape(-1, 4, 4)
@@ -362,10 +364,10 @@ class ResnetEncoder(nn.Module):
             landmark_rotation = p3dt.matrix_to_euler_angles(quad_rotation_matrix, convention='XYZ')
 
 
+    
 
 
-
-        features = self.encoder(views, mp_bshapes, mp_translation, landmark, landmark_rotation)
+        features = self.encoder(views, mp_bshapes, mp_translation, landmark, landmark_rotation, synthetic)
         if self.fix_bshapes:
             blendshapes = mp_bshapes
         else:
@@ -377,7 +379,7 @@ class ResnetEncoder(nn.Module):
         translation = features[:, 56:59]
         
 
-        global_translation = self.global_translation.unsqueeze(0).expand(translation.shape[0], -1)
+        # global_translation = self.global_translation.unsqueeze(0).expand(translation.shape[0], -1)
 
         # scale = self.elu(features[:, 59:60]) + 1
         global_translation = features[:, 60:63]

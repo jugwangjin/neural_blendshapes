@@ -8,3 +8,4 @@ from .landmark import *
 from .normal import *
 from .feature import *
 
+from .synthetic import *

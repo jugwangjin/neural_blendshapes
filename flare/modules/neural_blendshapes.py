@@ -182,11 +182,13 @@ class NeuralBlendshapes(nn.Module):
                 
 
         self.pose_weight = nn.Sequential(
-                    nn.Linear(3 + 6, 32),
+                    nn.Linear(3 + 6, 16),
                     nn.Softplus(beta=100),
-                    nn.Linear(32, 32),
+                    nn.Linear(16, 16),
                     nn.Softplus(beta=100),
-                    nn.Linear(32,1),
+                    nn.Linear(16, 16),
+                    nn.Softplus(beta=100),
+                    nn.Linear(16,1),
                     nn.Sigmoid()
         )
         

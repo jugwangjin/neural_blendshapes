@@ -1,6 +1,6 @@
 import torch
 import pytorch3d.transforms as p3dt
-def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_modulation, views, mode, random_flame_pose, random_landmark, facs_weight=0, mult=1, rot_mult=1, random_features_batch_size=64):
+def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_modulation, views, mode, random_flame_pose=None, random_landmark=None, facs_weight=0, mult=1, rot_mult=1, random_features_batch_size=64):
     facs = feature[..., :53]
     rotation = feature[..., 53:56]
     translation = feature[..., 56:59]
@@ -23,53 +23,30 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     facs_reg = facs_reg.pow(2).mean() * mult 
 
     # 새로운 인코더 구조에 맞게 수정
-    random_features = torch.randn(random_features_batch_size, neural_blendshapes.encoder.encoder.feature_size, device=facs.device) * 0.2
-    random_facs = torch.rand(random_features_batch_size, 53, device=facs.device) ** 3
+    # random_features = torch.randn(random_features_batch_size, neural_blendshapes.encoder.encoder.feature_size, device=facs.device) * 0.2
+    # random_facs = torch.rand(random_features_batch_size, 53, device=facs.device) ** 3
     
-    random_mp_translation = torch.randn(random_features_batch_size, 3, device=facs.device) * 0.1
-    random_translation = torch.randn(random_features_batch_size, 3, device=facs.device) * 0.05
+    # random_mp_translation = torch.randn(random_features_batch_size, 3, device=facs.device) * 0.1
+    # random_translation = torch.randn(random_features_batch_size, 3, device=facs.device) * 0.05
 
-    random_rotation = torch.randn(random_features_batch_size, 3, device=facs.device) * 0.2
+    # random_rotation = torch.randn(random_features_batch_size, 3, device=facs.device) * 0.2
 
-    
-    fixed_indices = [0, 16, 36, 45, 27, 33]
-    random_landmark = random_landmark[:, fixed_indices, :3].reshape(-1, 18)
+    # fixed_indices = [0, 16, 36, 45, 27, 33]
+    # random_landmark = random_landmark[:, fixed_indices, :3].reshape(-1, 18)
 
     # 새로운 인코더 구조 사용
-    layers_features = neural_blendshapes.encoder.encoder.layers_prefix(torch.cat([random_features, random_landmark, random_facs, random_rotation, random_mp_translation, random_translation], dim=-1))
-    bshapes_out = neural_blendshapes.encoder.encoder.bshapes_tail(torch.cat([layers_features, random_landmark, random_facs, random_rotation, random_mp_translation, random_translation], dim=-1))[:, :-10]
+    # layers_features = neural_blendshapes.encoder.encoder.layers_prefix(torch.cat([random_features, random_landmark, random_facs, random_rotation], dim=-1))
+    # bshapes_out = neural_blendshapes.encoder.encoder.bshapes_tail(torch.cat([layers_features, random_landmark, random_facs, random_rotation], dim=-1))[:, :-10]
 
-    # similar_features = random_features + torch.randn_like(random_features) * 0.01
-    # similar_bshapes_out = neural_blendshapes.encoder.encoder.bshapes_tail(torch.cat([similar_features, bshapes_additional_features], dim=-1))
-    # similar_rotation_out = neural_blendshapes.encoder.encoder.rotation_tail(similar_features)
+    facs_reg += feature[:, 63:].pow(2).mean() * 1e-2
+    # facs_reg += bshapes_out.pow(2).mean() + feature[:, 63:].pow(2).mean() * 1e-2
 
-    facs_reg += bshapes_out.pow(2).mean() + feature[:, 63:].pow(2).mean() * 1e-2
+    # translation_reg = (torch.pow(translation, 2).mean()) * 1e-2 + (torch.pow(global_translation, 2).mean()) * 1e-2 + (torch.pow(scale, 2).mean()) * 1e-2
 
-
-    # rotation_reg_features = torch.randn(random_features_batch_size, 15, device=facs.device) * 0.5
-
-    # rotation_out = neural_blendshapes.encoder.encoder.rotation_tail(rotation_reg_features)
-    # translation_out = neural_blendshapes.encoder.encoder.translation_tail(rotation_reg_features) 
-    # rotation_reg = rotation_out.pow(2).mean() * 1e-1 
-
-    # facs_reg += (bshapes_out - similar_bshapes_out).pow(2).mean()
-
+    loss =  facs_reg 
+    # loss =  facs_reg + translation_reg
     
-
-    # transform_matrix = views['mp_transform_matrix'].reshape(-1, 4, 4).detach()
-    # scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)
-    # rotation_matrix = transform_matrix[:, :3, :3]
-    # rotation_matrix = transform_matrix[:, :3, :3] / scale[:, None]
-
-    # rotation_matrix = rotation_matrix.permute(0, 2, 1)
-    # mp_rotation = p3dt.matrix_to_euler_angles(rotation_matrix, convention='XYZ')
-
-    # rotation_reg += (torch.pow(rotation - mp_rotation, 2).mean()) * 1e-1
-
-    translation_reg = (torch.pow(translation, 2).mean()) * 1e-2 + (torch.pow(global_translation, 2).mean()) * 1e-2 + (torch.pow(scale, 2).mean()) * 1e-2
-
-    loss =  facs_reg + translation_reg
-    
+    # 
     return loss
 
 
