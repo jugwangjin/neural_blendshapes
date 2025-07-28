@@ -59,7 +59,7 @@ class DECAEncoder(nn.Module):
             nn.Linear(32, 32),
             nn.LayerNorm(32),
             nn.ReLU(),
-            nn.Linear(32, 10, bias=False),
+            nn.Linear(32, 10),
             # nn.LayerNorm(10),
             # nn.ReLU(),
             # nn.Linear(64, 64),
@@ -72,7 +72,7 @@ class DECAEncoder(nn.Module):
         self.rotation_tail = nn.Sequential(
             nn.Linear(18 + 3, 16),
             nn.ReLU(),
-            nn.Linear(16, 3, bias=False),
+            nn.Linear(16, 3),
             # nn.LayerNorm(10),
             # nn.ReLU(),
             # nn.Linear(64, 64),
@@ -99,8 +99,24 @@ class DECAEncoder(nn.Module):
 
         
         # multiply by 0.1 to the last layers of rotation_tail and translation_tail
+        # keep the weights, zero bias for all layers
+        
+        for lin in self.layers_prefix:
+            if isinstance(lin, nn.Linear):
+                if lin.bias is not None:
+                    torch.nn.init.constant_(lin.bias, 0.0)
+                torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(lin.weight.size(0)))
+        for lin in self.bshapes_tail:
+            if isinstance(lin, nn.Linear):
+                if lin.bias is not None:
+                    torch.nn.init.constant_(lin.bias, 0.0)
+                torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(lin.weight.size(0)))
+
+
         self.bshapes_tail[-1].weight.data *= 0.1
         self.rotation_tail[-1].weight.data *= 0.1
+
+
         # self.translation_tail[-1].weight.data *= 0.1
 
         self.last_op = last_op

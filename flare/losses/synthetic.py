@@ -39,8 +39,8 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
         random_rotation = torch.randn(batch_size, 3, device=device)
         random_rotation[:, 2] *= 0.5
         # Normalize so that sum of absolute values equals half pi
-        abs_sum = torch.sum(torch.abs(random_rotation), dim=1, keepdim=True)
-        degrees = torch.rand(2, device=device) 
+        abs_sum = torch.sum(torch.abs(random_rotation), dim=1, keepdim=True) + 1e-4
+        degrees = torch.rand(batch_size, device=device) 
         random_rotation = random_rotation / abs_sum * HALF_PI * degrees[:, None] * 0.9
 
         # x range in [-0.1, 0.1], y and z range in [-0.05, 0.05]
