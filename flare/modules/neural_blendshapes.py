@@ -408,6 +408,12 @@ class NeuralBlendshapes(nn.Module):
         elif deformed_vertices_key == 'expression_mesh':
             expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template_mesh.shape[0], 53, 3)
             # expression_mesh_delta_u[9409:11248] = 0
+            # ICT 모델의 블렌드쉐이프 영향력 마스크 가져오기
+            blendshape_masks = self.ict_facekit.expression_shape_modes_norm.permute(1, 0).unsqueeze(-1)  # (V, 53, 1    )
+            
+            # 신경망 출력을 해당 블렌드쉐이프의 유효 영역으로 제한
+            # 각 블렌드쉐이프가 해당하는 얼굴 영역에만 변형 적용
+            expression_mesh_delta_u = expression_mesh_delta_u * blendshape_masks  # (V, 53, 3)
 
             feat = random_features
 
@@ -431,6 +437,7 @@ class NeuralBlendshapes(nn.Module):
         # encoded_points = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
         expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template.shape[0], 53, 3)
+        
         # expression_mesh_delta_u[9409:11248] = 0
         return expression_mesh_delta_u
 
@@ -518,6 +525,13 @@ class NeuralBlendshapes(nn.Module):
         pose_weight = self.pose_weight(pose_weight_input)  # shape of B, V, 2
         template_mesh_delta = self.template_deformer(encoded_points)
         expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
+        # ICT 모델의 블렌드쉐이프 영향력 마스크 가져오기
+        blendshape_masks = self.ict_facekit.expression_shape_modes_norm.permute(1, 0).unsqueeze(-1)  # (V, 53, 1    )
+        
+        # 신경망 출력을 해당 블렌드쉐이프의 유효 영역으로 제한
+        # 각 블렌드쉐이프가 해당하는 얼굴 영역에만 변형 적용
+        expression_mesh_delta_u = expression_mesh_delta_u * blendshape_masks  # (V, 53, 3)
+
         face_details = self.face_details * 1e-1 # shape of 11248, 3
         # face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
         template_mesh_delta[:self.full_head_index] = template_mesh_delta[:self.full_head_index] + face_details

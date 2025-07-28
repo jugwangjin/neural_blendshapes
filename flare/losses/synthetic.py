@@ -25,22 +25,23 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
     with torch.no_grad():
         random_facs = torch.zeros(batch_size, 53, device=device)
         for b in range(batch_size):
-            weights = torch.tensor([1/(i+1) for i in range(1, 53)])
+            weights = torch.tensor([1/(i*2) for i in range(1, 53)])
             random_integer = torch.multinomial(weights, 1).item() + 1
             random_indices = torch.randint(0, 53, (random_integer,))
-            if torch.rand(1) > 0.25:
+            if torch.rand(1) > 0.5:
                 random_indices = torch.cat([random_indices, torch.tensor([10])])
-            if torch.rand(1) > 0.25:
+            if torch.rand(1) > 0.5:
                 random_indices = torch.cat([random_indices, torch.tensor([11])])
             random_indices = random_indices.unique()
             # sample 0 to 1 for each indices
             random_facs[b, random_indices] = torch.rand_like(random_facs[b, random_indices])
 
         random_rotation = torch.randn(batch_size, 3, device=device)
+        random_rotation[:, 2] *= 0.5
         # Normalize so that sum of absolute values equals half pi
         abs_sum = torch.sum(torch.abs(random_rotation), dim=1, keepdim=True)
-        degrees = torch.rand(2, device=device)
-        random_rotation = random_rotation / abs_sum * HALF_PI * degrees[:, None]
+        degrees = torch.rand(2, device=device) 
+        random_rotation = random_rotation / abs_sum * HALF_PI * degrees[:, None] * 0.9
 
         # x range in [-0.1, 0.1], y and z range in [-0.05, 0.05]
         random_translation = torch.rand(batch_size, 3, device=device)
@@ -50,9 +51,9 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
 
         # half for the random global translation
         random_global_translation = torch.rand(batch_size, 3, device=device)
-        random_global_translation[..., 0] = random_global_translation[..., 0] * 0.05 - 0.025
-        random_global_translation[..., 1] = random_global_translation[..., 1] * 0.025 - 0.0125
-        random_global_translation[..., 2] = random_global_translation[..., 2] * 0.025 - 0.0125
+        random_global_translation[..., 0] = random_global_translation[..., 0] * 0.1 - 0.05
+        random_global_translation[..., 1] = random_global_translation[..., 1] * 0.05 - 0.025
+        random_global_translation[..., 2] = random_global_translation[..., 2] * 0.05 - 0.025
 
 
 
@@ -153,6 +154,7 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
         views['mp_transform_matrix'] = mp_transform_matrix[None].to(device)
         views['landmark'] = landmark[None].to(device)
         views['img_deca'] = img_deca[None].to(device)
+        views['camera'] = views_subset['camera'][i:i+1]
         encoder_out = neural_blendshapes.encoder(views, synthetic=True)
 
         loss = torch.mean((encoder_out[:, :63] - random_features[i:i+1]) ** 2)

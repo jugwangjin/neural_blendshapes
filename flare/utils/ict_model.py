@@ -89,7 +89,7 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.right_eyeball_blendshape_indices = [self.expression_names.tolist().index('eyeLookUp_R'), self.expression_names.tolist().index('eyeLookDown_R'),
                                                 self.expression_names.tolist().index('eyeLookIn_R'), self.expression_names.tolist().index('eyeLookOut_R'), ]
 
-        self.register_buffer('expression_shape_modes_norm', expression_shape_modes_norm.clamp(1e-4, 1).pow(0.5))
+        self.register_buffer('expression_shape_modes_norm', expression_shape_modes_norm.clamp(1e-8, 1).pow(0.5))
 
         jaw_index = self.expression_names.tolist().index('jawOpen')
         self.jaw_index = jaw_index

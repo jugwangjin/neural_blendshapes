@@ -120,10 +120,10 @@ def quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blend
     
     # if there are same number of images in images_eval_save_path / "rgb", which ends with .png with the length of dataloader_validate, then skip
 
-    num_images = len(list(images_eval_save_path.glob("rgb/*.png")))
-    if num_images == len(dataloader_validate):
-        print("All images already exist")
-        return
+    # num_images = len(list(images_eval_save_path.glob("rgb/*.png")))
+    # if num_images == len(dataloader_validate):
+    #     print("All images already exist")
+    #     return
 
     for it, views in tqdm.tqdm(enumerate(dataloader_validate)):
         with torch.no_grad():

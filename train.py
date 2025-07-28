@@ -76,7 +76,7 @@ import sys
 
 
 def clip_grad(neural_blendshapes, shader, norm=1.0):
-    return
+    # return
     torch.nn.utils.clip_grad_norm_(neural_blendshapes.parameters(), norm)
     # torch.nn.utils.clip_grad_norm_(shader.parameters(), norm)
 
@@ -351,7 +351,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     # stage_iterations contain the number of iterations for each stage
     milestones = [args.stage_iterations[0]]
     for i in range(1, len(stage_iterations)):
-        milestones.append(milestones[-1] + stage_iterations[i])
+        milestones.append(milestones[-1] + stage_iterations[i]+1)
 
 
     # milestones should be a list of integers, length of 6
@@ -376,28 +376,28 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
     args.finetune_color = False
 
-    # with torch.no_grad():
-    #     verts = FLAMEServer.canonical_verts.squeeze(0)
-    #     faces = FLAMEServer.faces_tensor
+    with torch.no_grad():
+        verts = FLAMEServer.canonical_verts.squeeze(0)
+        faces = FLAMEServer.faces_tensor
 
-    #     flame_canonical_mesh: Mesh = None
-    #     flame_canonical_mesh = Mesh(verts, faces, device=device)
-    #     flame_canonical_mesh.compute_connectivity()
+        flame_canonical_mesh: Mesh = None
+        flame_canonical_mesh = Mesh(verts, faces, device=device)
+        flame_canonical_mesh.compute_connectivity()
 
-    #     channels_gbuffer = ['mask', 'position', 'normal', "canonical_position",]
-    #     return_dict = neural_blendshapes(debug_views['img'], debug_views)
+        channels_gbuffer = ['mask', 'position', 'normal', "canonical_position",]
+        return_dict = neural_blendshapes(debug_views['img'], debug_views)
 
-    #     vertices, _, _  = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
+        vertices, _, _  = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
         
-    #     # print(vertices.min(), vertices.max(), 
+        # print(vertices.min(), vertices.max(), 
 
-    #     debug_gbuffer = renderer.render_batch(debug_views['flame_camera'], vertices.contiguous(), flame_canonical_mesh.fetch_all_normals(vertices, flame_canonical_mesh),
-    #                             channels=channels_gbuffer, with_antialiasing=True, 
-    #                             canonical_v=flame_canonical_mesh.vertices, canonical_idx=flame_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-    #                             mesh=flame_canonical_mesh
-    #                             )
-    #     debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, debug_views, flame_canonical_mesh, args.finetune_color, lgt)
-    #     visualize_training_no_lm(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, 0, ict_facekit=ict_facekit, save_name='flame_init')
+        debug_gbuffer = renderer.render_batch(debug_views['flame_camera'], vertices.contiguous(), flame_canonical_mesh.fetch_all_normals(vertices, flame_canonical_mesh),
+                                channels=channels_gbuffer, with_antialiasing=True, 
+                                canonical_v=flame_canonical_mesh.vertices, canonical_idx=flame_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                mesh=flame_canonical_mesh
+                                )
+        debug_rgb_pred, debug_cbuffers, _ = shader.shade(debug_gbuffer, debug_views, flame_canonical_mesh, args.finetune_color, lgt)
+        visualize_training_no_lm(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, 0, ict_facekit=ict_facekit, save_name='flame_init')
 
     iteration = 0
     for epoch in range(epochs):
@@ -434,17 +434,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             if iteration == milestones[0]: # on stage 1 -> update the optimizer to fix encoder
                 print("\nUpdating the optimizer to only template\n")
                 # now only update the expression parameters
-                optimizer_neural_blendshapes.zero_grad(set_to_none=True)
-                optimizer_neural_blendshapes = None
-                optimizer_neural_blendshapes = torch.optim.Adam([
-                                                    {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer * 1e-1, },
-                                                    {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e-1},
-                                                    {'params': neural_blendshapes_detail_params, 'lr': args.lr_jacobian * 1e-2},
-                                                    {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian * 1e-1},
-                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
-                                                    {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
-                                                    ],
-                                                )
+
                 # Create a warm-up scheduler
                 from torch.optim.lr_scheduler import LinearLR
                 num_warmup_steps = 50  # Adjust this value based on your needs
@@ -456,6 +446,19 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 )
 
             if iteration == milestones[1]: # on stage 2 -> update the optimizer to only expression 
+
+                optimizer_neural_blendshapes.zero_grad(set_to_none=True)
+                optimizer_neural_blendshapes = None
+                optimizer_neural_blendshapes = torch.optim.Adam([
+                                                    {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer , },
+                                                    {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e-1},
+                                                    {'params': neural_blendshapes_detail_params, 'lr': args.lr_jacobian * 1e-2},
+                                                    {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian * 1e-1},
+                                                    {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian},
+                                                    {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian},
+                                                    ],
+                                                )
+
                 # print("\nUpdating the optimizer to only expression\n")
                 # # now only update the expression parameters
                 # optimizer_neural_blendshapes.zero_grad(set_to_none=True)
@@ -520,7 +523,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes = torch.optim.Adam([
                                                     {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer * 1e-1, },
                                                     {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e-2},
-                                                    {'params': neural_blendshapes_detail_params, 'lr': args.lr_jacobian * 1e-2},
+                                                    {'params': neural_blendshapes_detail_params, 'lr': args.lr_jacobian * 1e-3},
                                                     {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian * 1e-2},
                                                     {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian * 1e-2},
                                                     {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian * 1e-2},
@@ -582,17 +585,17 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             if iteration > args.only_flame_iterations:
 
                 # For only the face segmentation
-                features = return_dict['features'].detach()
-                return_dict_no_encoder = neural_blendshapes(input_image, views_subset, features=features)
+                # features = return_dict['features'].detach()
+                # return_dict_no_encoder = neural_blendshapes(input_image, views_subset, features=features)
                     
-                deformed_vertices_no_encoder = return_dict_no_encoder[deformed_vertices_key+'_posed']
-                d_normals_no_encoder = mesh.fetch_all_normals(deformed_vertices_no_encoder, mesh)
+                # deformed_vertices_no_encoder = return_dict_no_encoder[deformed_vertices_key+'_posed']
+                # d_normals_no_encoder = mesh.fetch_all_normals(deformed_vertices_no_encoder, mesh)
 
-                gbuffers_no_encoder = renderer.render_batch(views_subset['flame_camera'], deformed_vertices_no_encoder.contiguous(), d_normals_no_encoder,
-                                        channels=['segmentation'], with_antialiasing=True, 
-                                        canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
-                                        mesh=mesh, target_resolution=target_res
-                                        )
+                # # gbuffers_no_encoder = renderer.render_batch(views_subset['flame_camera'], deformed_vertices_no_encoder.contiguous(), d_normals_no_encoder,
+                #                         channels=['segmentation'], with_antialiasing=True, 
+                #                         canonical_v=mesh.vertices, canonical_idx=mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                #                         mesh=mesh, target_resolution=target_res
+                #                         )
 
                 left_eye_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 3:4], None, (512, 512))
                 right_eye_segmentation_gt = downsample_upsample(views_subset["skin_mask"][..., 4:5], None, (512, 512))
@@ -616,7 +619,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 segmentation_loss = segmentation_loss_function(left_eye_segmentation_gt, gbuffers['left_eye']) * 1e-1 +\
                                     segmentation_loss_function(right_eye_segmentation_gt, gbuffers['right_eye']) * 1e-1 +\
                                     segmentation_loss_function(mouth_segmentation_gt, gbuffers['mouth']) * 1e-1 +\
-                                    segmentation_loss_function(face_segmentation_gt, gbuffers_no_encoder['face']) * 1e-1 +\
+                                    segmentation_loss_function(face_segmentation_gt, gbuffers['face']) * 1e-1 +\
                                     eyes_closed_left_eye_seg_loss * 1e-1 +\
                                     eyes_closed_right_eye_seg_loss * 1e-1
 
@@ -644,19 +647,20 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     mult = 500 - to_milestone_3
                     mult = max(0, min(1, mult / 500))
                     
-                    losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration, mult=mult)
-                losses['white_lgt_regularization'] = white_light(cbuffers)
-                losses['roughness_regularization'] = roughness_regularization(cbuffers["roughness"], views_subset["skin_mask"], views_subset["mask"], r_mean=args.r_mean)
-                losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
-                # losses['normal_laplacian'] = normal_laplacian_loss
+                #     losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration, mult=mult)
+                # losses['white_lgt_regularization'] = white_light(cbuffers)
+                # losses['roughness_regularization'] = roughness_regularization(cbuffers["roughness"], views_subset["skin_mask"], views_subset["mask"], r_mean=args.r_mean)
+                # losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
                 losses['normal_laplacian'] = normal_laplacian_loss
-                # losses['inverted_normal'] = inverted_normal_loss
                 
                 # if iteration > milestones[0] // 2:
                 #     eyeball_normal_loss *= 1e1
 
                 losses['eyeball_normal']    = eyeball_normal_loss
 
+                batch_size = views_subset['img'].size(0)
+                synthetic_encoder_regularization = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, batch_size, deformed_vertices_key, lgt, device, save_debug=iteration % 100 == 0)
+                losses['synthetic_encoder_regularization'] = synthetic_encoder_regularization
 
             # if stage < 3:
             '''
@@ -680,7 +684,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             if stage > 0:
                 losses['flame_regularization'] = losses['flame_regularization'] * 1e-1
-                flame_loss_template *= 1e-2
+                flame_loss_template *= 1e-1
             
             losses['flame_regularization'] = losses['flame_regularization'] + flame_loss_template
 
@@ -700,7 +704,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             expression_delta_random = neural_blendshapes.get_expression_delta()
 
-            expression_linearity_regularization = expression_delta_random.pow(2).mean()   if stage == 2 else 0
+            expression_linearity_regularization = expression_delta_random.pow(2).mean()   
             detail_linearity_regularization = neural_blendshapes.face_details.pow(2).mean() * 1e2
 
             template_geometric_regularization = (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean() 
@@ -712,11 +716,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['linearity_regularization'] = expression_linearity_regularization + detail_linearity_regularization 
 
 
-            if stage > 1:
-
-                batch_size = views_subset['img'].size(0)
-                synthetic_encoder_regularization = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, batch_size, deformed_vertices_key, lgt, device, save_debug=iteration % 100 == 0)
-                losses['synthetic_encoder_regularization'] = synthetic_encoder_regularization
+            # if stage > 1:
 
             loss = torch.tensor(0., device=device) 
             for k, v in losses.items():
@@ -777,15 +777,16 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 warmup_scheduler.step()
                 num_warmup_steps = num_warmup_steps - 1
 
-            clip_grad(neural_blendshapes, shader, norm=10.0)
+
+            clip_grad(neural_blendshapes, shader, norm=5.0)
 
             if optimizer_neural_blendshapes is not None:
                 optimizer_neural_blendshapes.step() 
 
 
             ### increase the gradients of positional encoding following tinycudnn
-            if stage==3:
-                shader.fourier_feature_transform.params.grad /= 8.0
+            # if stage==3:
+            #     shader.fourier_feature_transform.params.grad /= 8.0
 
             optimizer_shader.step()
 
@@ -808,6 +809,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 with torch.no_grad():
                     neural_blendshapes.eval()
                     shader.eval()
+
+
 
                     return_dict_ = neural_blendshapes(views_subset['img'], views_subset)
                     
@@ -842,6 +845,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     visualize_specific_traininig('ict_mesh_w_temp', return_dict_, renderer, shader, ict_facekit, debug_views, mesh, 'ict_w_temp', images_save_path, iteration, lgt)
 
                     debug_gbuffer = visualize_specific_traininig('expression_mesh', return_dict_, renderer, shader, ict_facekit, debug_views, mesh, 'expression', images_save_path, iteration, lgt)
+
+
+
+
 
                     for ith in range(debug_views['img'].shape[0]):
                         seg = debug_gbuffer['segmentation'][ith, ..., 0]
@@ -883,6 +890,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                     neural_blendshapes.train()
                     shader.train()
+
 
             if iteration == 1 or iteration % (args.visualization_frequency * 10) == 0:
                 print(images_save_path / "grid" / f'grid_{iteration}.png')
