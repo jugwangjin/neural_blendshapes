@@ -28,93 +28,35 @@ class DECAEncoder(nn.Module):
             nn.Linear(1024, outsize)
         )
 
-        self.layers_prefix = nn.Sequential(
-            nn.Linear(feature_size + 53 + 12 + 3, 512),
-            nn.LayerNorm(512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
+        self.layers_tail = nn.Sequential(
+            nn.Linear(outsize + 53 + 3, 256),
             nn.LayerNorm(256),
             nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.LayerNorm(256),
             nn.Linear(256, 128),
-            nn.LayerNorm(128),
-        )
-
-        self.bshapes_tail = nn.Sequential(
-            nn.Linear(128, 128),
             nn.LayerNorm(128),
             nn.ReLU(),
             nn.Linear(128, 53 + 10)
         )
 
-        self.rotation_tail = nn.Sequential(
-            nn.Linear(18 + 3 + 3, 32),
-            nn.LayerNorm(32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.LayerNorm(32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.LayerNorm(32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.LayerNorm(32),
-            nn.ReLU(),
-            nn.Linear(32, 10),
-            # nn.LayerNorm(10),
-            # nn.ReLU(),
-            # nn.Linear(64, 64),
-            # nn.LayerNorm(64),
-            # nn.ReLU(),
-            # nn.Linear(64, 9, bias=False)
-        )
-
-
-        self.rotation_tail = nn.Sequential(
-            nn.Linear(18 + 3, 16),
-            nn.ReLU(),
-            nn.Linear(16, 3),
-            # nn.LayerNorm(10),
-            # nn.ReLU(),
-            # nn.Linear(64, 64),
-            # nn.LayerNorm(64),
-            # nn.ReLU(),
-            # nn.Linear(64, 9, bias=False)
-        )
-
-        # self.translation_tail = nn.Sequential(
-        #     nn.Linear(15, 32),
-        #     nn.LayerNorm(32),
-        #     nn.ReLU(),
-        #     nn.Linear(32, 32),
-        #     nn.LayerNorm(32),
-        #     nn.ReLU(),
-        #     nn.Linear(32, 32),
-        #     nn.LayerNorm(32),
-        #     nn.ReLU(),
-        #     nn.Linear(32, 32),
-        #     nn.LayerNorm(32),
-        #     nn.ReLU(),
-        #     nn.Linear(32, 6, bias=False)
-        # )
-
-        
         # multiply by 0.1 to the last layers of rotation_tail and translation_tail
         # keep the weights, zero bias for all layers
         
-        for lin in self.layers_prefix:
-            if isinstance(lin, nn.Linear):
-                if lin.bias is not None:
-                    torch.nn.init.constant_(lin.bias, 0.0)
-                torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(lin.weight.size(0)))
-        for lin in self.bshapes_tail:
+        for lin in self.layers_tail:
             if isinstance(lin, nn.Linear):
                 if lin.bias is not None:
                     torch.nn.init.constant_(lin.bias, 0.0)
                 torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(lin.weight.size(0)))
 
 
-        self.bshapes_tail[-1].weight.data *= 0.1
-        self.rotation_tail[-1].weight.data *= 0.1
+        self.layers_tail[-1].weight.data *= 0.1
 
 
         # self.translation_tail[-1].weight.data *= 0.1
@@ -123,8 +65,8 @@ class DECAEncoder(nn.Module):
 
         for param in self.encoder.parameters():
             param.requires_grad = False  # Freeze all encoder parameters initially
-        for param in self.layers.parameters():
-            param.requires_grad = False
+        # for param in self.layers.parameters():
+            # param.requires_grad = False
 
         def freeze_gradients_hook(module, inputs):
             for param in module.parameters():
@@ -136,7 +78,7 @@ class DECAEncoder(nn.Module):
 
         # Register the hook on the encoder to ensure it stays frozen
         self.encoder.apply(lambda m: m.register_forward_pre_hook(freeze_gradients_hook))
-        self.layers.apply(lambda m: m.register_forward_pre_hook(freeze_gradients_hook))
+        # self.layers.apply(lambda m: m.register_forward_pre_hook(freeze_gradients_hook))
 
         self.sigmoid = nn.Sigmoid()
     
@@ -148,7 +90,7 @@ class DECAEncoder(nn.Module):
     def train(self, mode=True):
         super().train(mode)
         self.encoder.eval()
-        self.layers.eval()
+        # self.layers.eval()
 
 
     def forward(self, inputs, bshapes, mp_translation, landmark, rotation, synthetic=False):
@@ -162,6 +104,7 @@ class DECAEncoder(nn.Module):
                     if img_path[b] not in self.extracted_features:
                         img = inputs['img_deca'][b:b+1]
                         feature = self.encoder(img)
+                        feature = self.layers(feature)
                         self.extracted_features[img_path[b]] = feature
                     else:
                         feature = self.extracted_features[img_path[b]]
@@ -172,6 +115,7 @@ class DECAEncoder(nn.Module):
                 features = []
                 for b in range(inputs['img_deca'].shape[0]):
                     feature = self.encoder(inputs['img_deca'][b:b+1])
+                    feature = self.layers(feature)
                     features.append(feature)
                 encoder_features = torch.cat(features, dim=0)
 
@@ -187,23 +131,15 @@ class DECAEncoder(nn.Module):
             encoder_features = encoder_features.data.detach()
             # pose_features = pose_features.data.detach()
 
-        layers_features = self.layers_prefix(torch.cat([encoder_features, landmark, bshapes, rotation], dim=-1))
-
-        bshapes_out = self.bshapes_tail(torch.cat([layers_features], dim=-1))
         
+
+        bshapes_out = self.layers_tail(torch.cat([encoder_features, bshapes, rotation], dim=-1))
+
         rotation_out = bshapes_out[:, -10:]
         bshapes_out = bshapes_out[:, :-10]
-        # rotation_out = self.rotation_tail(torch.cat([landmark, rotation, mp_translation], dim=-1))
 
-        # bshapes_additional_features = self.blendshapes_prefix(bshapes)
-        
-        # bshapes_out = self.bshapes_tail(torch.cat([encoder_features, bshapes_additional_features], dim=-1))
-        # rotation_out = self.rotation_tail(pose_features)
-        # rotation_out[..., :3] += rotation
         rotation_out[..., :3] += rotation
-        # rotation_out[..., 3:] *= 0.1
-        # translation_out = self.translation_tail(pose_features)
-
+        
         bshapes_tail_out = bshapes_out
 
         if not self.additive:
@@ -254,8 +190,8 @@ class ResnetEncoder(nn.Module):
         self.blendshapes_offset = torch.nn.Parameter(torch.zeros(53))
         self.softplus = torch.nn.Softplus(beta=4)
 
-        # self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0, -0.28]))
-        self.register_buffer('transform_origin', torch.tensor([0., -0, -0.28]))
+        self.transform_origin = torch.nn.Parameter(torch.tensor([0., -0, -0.28]))
+        # self.register_buffer('transform_origin', torch.tensor([0., -0, -0.28]))
         self.register_buffer('global_translation', (torch.zeros(3)))
         # self.global_translation = torch.nn.Parameter(torch.zeros(3))
 
@@ -308,17 +244,20 @@ class ResnetEncoder(nn.Module):
             detected_landmarks = torch.einsum('bij, jk  -> bik', detected_landmarks, R)
             
 
-            fixed_indices = [36, 45, 31, 35] # right eye corner, left eye corner, right nose corner, left nose corner
+            fixed_indices = [36, 45, 31, 35, 16, 0, 8] # right eye corner, left eye corner, right nose corner, left nose corner
+            landmark_input = detected_landmarks[:, fixed_indices, :3].reshape(-1, 21)
+            
             x_axis_indices = [16, 0, 45, 36]
+            z_axis_indices = [27, 31, 35]
 
-            landmark = detected_landmarks[:, fixed_indices, :3]
-            landmark_input = detected_landmarks[:, fixed_indices, :3].reshape(-1, 12)
 
             # y_axis = landmark[:, 0] + landmark[:, 1] - landmark[:, 2] - landmark[:, 3]
             # y_axis = y_axis / torch.norm(y_axis, dim=-1, keepdim=True)
 
+            z_axis_landmarks = detected_landmarks[:, z_axis_indices, :3]
+
             # right nose corner - left eye corner   cross  left nose corner - right eye corner
-            z_axis = torch.cross(landmark[:, 2] - landmark[:, 1], landmark[:, 3] - landmark[:, 0], dim=1)
+            z_axis = torch.cross(z_axis_landmarks[:, 0] - z_axis_landmarks[:, 1], z_axis_landmarks[:, 0] - z_axis_landmarks[:, 2], dim=1)
             z_axis = z_axis / torch.norm(z_axis, dim=-1, keepdim=True)
 
             # x_axis = torch.cross(y_axis, z_axis, dim=1)
@@ -389,10 +328,10 @@ class ResnetEncoder(nn.Module):
         translation = features[:, 56:59]
         
 
-        # global_translation = self.global_translation.unsqueeze(0).expand(translation.shape[0], -1)
+        global_translation = self.global_translation.unsqueeze(0).expand(translation.shape[0], -1)
 
         # scale = self.elu(features[:, 59:60]) + 1
-        global_translation = features[:, 60:63]
+        # global_translation = features[:, 60:63]
 
         scale = torch.ones_like(translation[:, -1:]) * (self.elu(self.scale) + 1)
 

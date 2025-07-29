@@ -41,11 +41,11 @@ def feature_regularization_loss(feature, gt_facs, neural_blendshapes, bshape_mod
     facs_reg += feature[:, 63:].pow(2).mean() * 1e-2
     # facs_reg += bshapes_out.pow(2).mean() + feature[:, 63:].pow(2).mean() * 1e-2
 
-    # translation_reg = (torch.pow(translation, 2).mean()) * 1e-2 + (torch.pow(global_translation, 2).mean()) * 1e-2 + (torch.pow(scale, 2).mean()) * 1e-2
+    translation_reg = (torch.pow(translation, 2).mean()) * 1e-2 + (torch.pow(global_translation, 2).mean()) * 1e-2 + (torch.pow(scale, 2).mean()) * 1e-2
 
 
-    loss =  facs_reg 
-    # loss =  facs_reg + translation_reg
+    # loss =  facs_reg 
+    loss =  facs_reg + translation_reg
     
     # 
     return loss

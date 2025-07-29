@@ -137,9 +137,9 @@ def quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blend
 
                 saved_image_name = images_eval_save_path / "rgb" / f'{id:05d}.png'
 
-                if saved_image_name.exists():
-                    print(f"Image {id} already exists")
-                    continue
+                # if saved_image_name.exists():
+                #     print(f"Image {id} already exists")
+                #     continue
 
 
                 neural_blendshapes.eval()

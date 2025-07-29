@@ -34,9 +34,9 @@ weight_normal_laplacian = 1e-1
 weight_landmark = 1
 weight_closure = 1
 
-weight_linearity_regularization = 1e-4
+weight_linearity_regularization = 1e-2
 
-weight_flame_regularization = 5
+weight_flame_regularization = 1
 
 weight_synthetic_encoder_regularization = 1e-1
 

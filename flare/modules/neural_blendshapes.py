@@ -47,19 +47,19 @@ class MLPTemplate(nn.Module):
     def __init__(self, inp_dim):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(inp_dim, 128),
-            # nn.LayerNorm(64),
+            nn.Linear(inp_dim, 64),
+            nn.LayerNorm(64),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            # nn.LayerNorm(64),
+            nn.Linear(64, 64),
+            nn.LayerNorm(64),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            # nn.LayerNorm(64),
+            nn.Linear(64, 64),
+            nn.LayerNorm(64),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            # nn.LayerNorm(64),
+            nn.Linear(64, 64),
+            nn.LayerNorm(64),
             nn.Softplus(beta=100),
-            nn.Linear(128, 3, bias=False)
+            nn.Linear(64, 3, bias=False)
         )
 
     def forward(self, x):
@@ -106,16 +106,16 @@ class NeuralBlendshapes(nn.Module):
 
         self.expression_deformer = nn.Sequential(
             nn.Linear(3, 128),
-            # nn.LayerNorm(128),
+            nn.LayerNorm(128),
             nn.Softplus(beta=100),
             nn.Linear(128, 128),
-            # nn.LayerNorm(128),
+            nn.LayerNorm(128),
             nn.Softplus(beta=100),
             nn.Linear(128, 128),
-            # nn.LayerNorm(128),
+            nn.LayerNorm(128),
             nn.Softplus(beta=100),
             nn.Linear(128, 128),
-            # nn.LayerNorm(128),
+            nn.LayerNorm(128),
             nn.Softplus(beta=100),
             nn.Linear(128, 53*3, bias=False)
         )
@@ -182,13 +182,13 @@ class NeuralBlendshapes(nn.Module):
                 
 
         self.pose_weight = nn.Sequential(
-                    nn.Linear(3 + 6, 16),
+                    nn.Linear(3 + 6 + 53, 32),
                     nn.Softplus(beta=100),
-                    nn.Linear(16, 16),
+                    nn.Linear(32, 32),
                     nn.Softplus(beta=100),
-                    nn.Linear(16, 16),
+                    nn.Linear(32, 32),
                     nn.Softplus(beta=100),
-                    nn.Linear(16,1),
+                    nn.Linear(32,1),
                     nn.Sigmoid()
         )
         
@@ -309,7 +309,7 @@ class NeuralBlendshapes(nn.Module):
         bsize = features.shape[0]
         template = self.ict_facekit.canonical[0]
         encoded_points = self.encode_position(template)
-        pose_weight_input = torch.cat([encoded_points.repeat(bsize, 1, 1), features[:, None, 53:59].repeat(1, template.shape[0], 1)], dim=-1)
+        pose_weight_input = torch.cat([encoded_points.repeat(bsize, 1, 1), features[:, None, :59].repeat(1, template.shape[0], 1)], dim=-1)
         pose_weight = self.pose_weight(pose_weight_input)  # shape of B, V, 2
 
         # encoded_points = torch.cat([self.encode_position(template)], dim=-1)
@@ -437,7 +437,7 @@ class NeuralBlendshapes(nn.Module):
         # encoded_points = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
         expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template.shape[0], 53, 3)
-        
+
         # expression_mesh_delta_u[9409:11248] = 0
         return expression_mesh_delta_u
 

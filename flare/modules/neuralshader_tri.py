@@ -47,6 +47,22 @@ def make_module(module):
     else:
         return module()
 
+def generate_planes():
+    """
+    Defines planes by the three vectors that form the "axes" of the
+    plane. Should work with arbitrary number of planes and planes of
+    arbitrary orientation.
+    """
+    return torch.tensor([[[1, 0, 0],
+                            [0, 1, 0],
+                            [0, 0, 1]],
+                            [[1, 0, 0],
+                            [0, 0, 1],
+                            [0, 1, 0]],
+                            [[0, 0, 1],
+                            [1, 0, 0],
+                            [0, 1, 0]]], dtype=torch.float32)
+
 class NeuralShader(torch.nn.Module):
 
     def __init__(self,
@@ -56,7 +72,9 @@ class NeuralShader(torch.nn.Module):
                  disentangle_network_params=None,
                  bsdf='pbr',
                  aabb=None,
-                 device='cpu'):
+                 device='cpu',
+                 canonical_v = None,
+                 ):
 
         super().__init__()
         self.device = device
@@ -66,55 +84,28 @@ class NeuralShader(torch.nn.Module):
         # PE
         # ==============================================================================================
         if fourier_features == 'positional':
-            print("STAGE 1: Using positional encoding (NeRF) for intrinsic materials")
-            self.fourier_feature_transform, channels = get_embedder(multires=9)
-            self.inp_size = channels
+            print("Stage 1: ")
+            self.grid_size = 128
+            self.grid_dim = 16
         elif fourier_features == 'hashgrid':
+            self.grid_size = 512
+            self.grid_dim = 64
             print("STAGE 2: Using hashgrid (tinycudann) for intrinsic materials")
-            # ==============================================================================================
-            # used for 2nd stage training
-            # ==============================================================================================
-            # Setup positional encoding, see https://github.com/NVlabs/tiny-cuda-nn for details
-            desired_resolution = 4096
-            base_grid_resolution = 16
-            num_levels = 16
-            per_level_scale = np.exp(np.log(desired_resolution / base_grid_resolution) / (num_levels-1))
-            enc_cfg =  {
-                "otype": "HashGrid",
-                "n_levels": num_levels,
-                "n_features_per_level": 2,
-                "log2_hashmap_size": 19,
-                "base_resolution": base_grid_resolution,
-                "per_level_scale" : per_level_scale
-            }
 
-            gradient_scaling = 64.0
-            self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to(device)
-            self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / gradient_scaling if grad_i[0] is not None else None, ))
-            self.inp_size = self.fourier_feature_transform.n_output_dims
 
-        # ==============================================================================================
-        # create MLP
-        # ==============================================================================================
-        
-        self.dir_enc_func_multires, channels = get_embedder(multires=2)
-        self.view_size = channels
-
-        self.material_mlp_ch = disentangle_network_params['material_mlp_ch']
-        self.material_mlp_1 = FC(self.inp_size, 64, [64, 64], activation, None).to(device) #sigmoid
-        self.material_mlp_2 = FC(64 + self.view_size, 3, [64], activation, last_activation).to(device) #sigmoid
-        
-        self.light_mlp = FC(38, 3, disentangle_network_params["light_mlp_dims"], activation=activation, last_activation=None, bias=True).to(device) 
-        self.dir_enc_func = generate_ide_fn(deg_view=3, device=self.device)
-        self.dir_enc_func_normals = generate_ide_fn(deg_view=3, device=self.device)
-        
+        # self.view_embedder, channels = get_embedder(multires=2)
+        self.view_size = 3
         # self.view_size = channels
 
-        print(disentangle_network_params)
+        # define triplane
+        self.planes = torch.nn.Parameter(torch.randn(3, self.grid_dim, self.grid_size, self.grid_size).to(device))
 
-        if fourier_features == "hashgrid":
-            self.material_mlp_1.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * gradient_scaling if grad_i[0] is not None else None, ))
-            self.material_mlp_2.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * gradient_scaling if grad_i[0] is not None else None, ))
+        # define color mlp
+        mlp_input_dim = self.grid_dim * 3 + self.view_size
+        hidden_dim = 128
+        self.color_mlp = FC(mlp_input_dim, 3, [hidden_dim, hidden_dim], activation, last_activation).to(device)
+
+        self.plane_axes = generate_planes().to(device)
 
         # Store the config
         self._config = {
@@ -125,6 +116,9 @@ class NeuralShader(torch.nn.Module):
             "bsdf":bsdf,
             "aabb":aabb,
         }
+
+    def view_embedder(self, x):
+        return x
 
     def custom_forward(self, position):
         position = np.expand_dims(position, axis=0)
@@ -145,22 +139,63 @@ class NeuralShader(torch.nn.Module):
 
         return kd, kr, ko
 
+
+    def project_onto_planes(self, planes, coordinates):
+        """
+        Does a projection of a 3D point onto a batch of 2D planes,
+        returning 2D plane coordinates.
+
+        Takes plane axes of shape n_planes, 3, 3
+        # Takes coordinates of shape B, H, W, 3
+        # returns projections of shape B*n_planes, H, W, 2
+        """
+        B, H, W, C = coordinates.shape
+        n_planes, _, _ = planes.shape
+
+        coordinates = coordinates.unsqueeze(1).expand(-1, n_planes, -1, -1, -1).reshape(B*n_planes, H, W, 3)
+        inv_planes = torch.linalg.inv(planes).repeat(B, 1, 1).reshape(B*n_planes, 3, 3)
+        projections = torch.einsum('nhwi, nij -> nhwj', coordinates, inv_planes)
+        return projections[..., :2] 
+
+
+    def sample_from_planes(self, coordinates, mode='bilinear', padding_mode='zeros', box_warp=None):
+        '''
+        plane_axis : self.plane_axes
+        plane_features : self.planes
+        coordinates : input, shape of (B, H, W, 3)
+
+        outputs: B, H, W, grid_dim*3
+        '''
+        assert padding_mode == 'zeros'
+        n_planes, C, H, W = self.planes.shape
+        B, H, W, C = coordinates.shape
+
+        coordinates = self.apply_aabb(coordinates).view(B, H, W, 3) * 2 - 1 # normalize to -1, 1
+
+        projected_coordinates = self.project_onto_planes(self.plane_axes, coordinates) # shape of (B*n_planes, H, W, 2)
+        output_features = torch.nn.functional.grid_sample(self.planes.repeat(B,1,1,1), projected_coordinates.float(), mode=mode, padding_mode=padding_mode, align_corners=False).view(B, 3, self.grid_dim, H, W).permute(0, 3, 4, 1, 2).view(B, H, W, self.grid_dim*3)
+
+        
+        return output_features
+
+
     def forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None):
         bz, h, w, ch = position.shape
-        pe_input = self.apply_pe(position=position).view(-1, self.inp_size)
+        
 
         view_dir = view_direction[:, None, None, :]
         normal_bend = self.get_shading_normals(deformed_position, view_dir, gbuffer, mesh).view(-1, 3)
-        normal_encoded = self.dir_enc_func_multires(normal_bend)
+        normal_bend_encoded = self.view_embedder(normal_bend)
+        # normal_encoded = self.dir_enc_func(normal_bend, torch.ones_like(normal_bend[:, 0:1]) * 0.5)
+        plane_features = self.sample_from_planes(position) # shape of B, H, W, grid_dim*3
 
+        mlp_input = torch.cat([plane_features.reshape(-1, self.grid_dim*3), normal_bend_encoded], dim=-1)
 
         # view_dirs = gbuffer["position"].view(-1, 3) - view_direction[:, None, None, :].repeat(1, h, w, 1).view(-1, 3)
 
         # normal_encoded = self.dir_enc_func(normal_bend, torch.ones_like(normal_bend[:, 0:1]) * 0.1)
 
-        material_1_output = self.material_mlp_1(pe_input)
-        material_2_input = torch.cat([material_1_output, normal_encoded], dim=-1)
-        color = self.material_mlp_2(material_2_input).view(bz, h, w, -1)
+        color = self.color_mlp(mlp_input).view(bz, h, w, -1)
 
         # material_input = torch.cat([pe_input, normal_bend], dim=-1)
         # color = self.material_mlp(material_input).view(bz, h, w, -1)
@@ -219,6 +254,11 @@ class NeuralShader(torch.nn.Module):
         position = torch.clamp(position, min=0, max=1)
         pe_input = self.fourier_feature_transform(position.contiguous()).to(torch.float32)
         return pe_input
+
+    def apply_aabb(self, position):
+        position = (position.view(-1, 3) - self.aabb[0][None, ...]) / (self.aabb[1][None, ...] - self.aabb[0][None, ...])
+        position = torch.clamp(position, min=0, max=1)
+        return position
 
     @classmethod
     def load(cls, path, device='cpu'):

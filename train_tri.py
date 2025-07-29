@@ -388,6 +388,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
         return_dict = neural_blendshapes(debug_views['img'], debug_views)
 
         vertices, _, _  = FLAMEServer(debug_views['flame_expression'], debug_views['flame_pose'])
+        
         # print(vertices.min(), vertices.max(), 
 
         debug_gbuffer = renderer.render_batch(debug_views['flame_camera'], vertices.contiguous(), flame_canonical_mesh.fetch_all_normals(vertices, flame_canonical_mesh),
@@ -487,6 +488,8 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
                 args.material_mlp_dims = [64, 64]
                 args.light_mlp_dims = [64, 64]
+
+
 
                 lgt = light.create_env_rnd()    
                 disentangle_network_params = {
@@ -654,7 +657,6 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 #     eyeball_normal_loss *= 1e1
 
                 losses['eyeball_normal']    = eyeball_normal_loss
-
 
                 if iteration > milestones[2] + 500:
                     batch_size = views_subset['img'].size(0)

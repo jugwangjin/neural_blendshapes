@@ -34,6 +34,14 @@ class Camera:
     def P(self):
         return self.K @ torch.cat([self.R, self.t.unsqueeze(-1)], dim=-1)
 
+    def __str__(self):
+        """String representation of the camera showing internal parameters."""
+        return f"Camera(device={self.device})\n" \
+               f"Intrinsic Matrix K:\n{self.K}\n" \
+               f"Rotation Matrix R:\n{self.R}\n" \
+               f"Translation Vector t:\n{self.t}\n" \
+               f"Camera Center:\n{self.center}"
+
     def project(self, points, depth_as_distance=False):
         """ Project points to the view's image plane according to the equation x = K*(R*X + t).
 
@@ -53,3 +61,5 @@ class Camera:
         pixels = pixels[..., :2] / pixels[..., 2:]
         depths = points_c[..., 2:] if not depth_as_distance else torch.norm(points_c, p=2, dim=-1, keepdim=True)
         return torch.cat([pixels, depths], dim=-1)
+
+        
