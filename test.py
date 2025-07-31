@@ -145,12 +145,12 @@ def quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blend
                 neural_blendshapes.eval()
                 shader.eval()
 
-            rgb_pred, gbuffer, cbuffer = run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, 
-                    channels_gbuffer, lgt=lgt)
+                rgb_pred, gbuffer, cbuffer = run(args, mesh, views, ict_facekit, neural_blendshapes, shader, renderer, device, 
+                        channels_gbuffer, lgt=lgt)
 
-        rgb_pred = rgb_pred * gbuffer["mask"]
-        if save_each:
-            save_individual_img(rgb_pred, views, gbuffer["normal"], gbuffer["mask"], cbuffer, images_eval_save_path)
+                rgb_pred = rgb_pred * gbuffer["mask"]
+                if save_each:
+                    save_individual_img(rgb_pred, views, gbuffer["normal"], gbuffer["mask"], cbuffer, images_eval_save_path)
 
     ## ============== metrics ==============================
     gt_dir = Path(args.input_dir)

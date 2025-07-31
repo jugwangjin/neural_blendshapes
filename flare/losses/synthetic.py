@@ -25,7 +25,7 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
     with torch.no_grad():
         random_facs = torch.zeros(batch_size, 53, device=device)
         for b in range(batch_size):
-            weights = torch.tensor([1/(i*2) for i in range(1, 53)])
+            weights = torch.tensor([1/(i**2) for i in range(1, 53)])
             random_integer = torch.multinomial(weights, 1).item() + 1
             random_indices = torch.randint(0, 53, (random_integer,))
             if torch.rand(1) > 0.5:
@@ -34,7 +34,7 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
                 random_indices = torch.cat([random_indices, torch.tensor([11])])
             random_indices = random_indices.unique()
             # sample 0 to 1 for each indices
-            random_facs[b, random_indices] = torch.rand_like(random_facs[b, random_indices])
+            random_facs[b, random_indices] = torch.rand_like(random_facs[b, random_indices]).pow(2)
 
         random_rotation = torch.randn(batch_size, 3, device=device)
         random_rotation[:, 2] *= 0.5
@@ -55,10 +55,7 @@ def synthetic_loss(views_subset, neural_blendshapes, renderer, shader, mediapipe
         random_global_translation[..., 1] = random_global_translation[..., 1] * 0.05 - 0.025
         random_global_translation[..., 2] = random_global_translation[..., 2] * 0.05 - 0.025
 
-
-
                 # get the scale from neural_blendshapes.encoder
-
 
         scale = torch.ones_like(random_translation[:, -1:]) * (elu(neural_blendshapes.encoder.scale) + 1)
 

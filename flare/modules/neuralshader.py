@@ -67,7 +67,7 @@ class NeuralShader(torch.nn.Module):
         # ==============================================================================================
         if fourier_features == 'positional':
             print("STAGE 1: Using positional encoding (NeRF) for intrinsic materials")
-            self.fourier_feature_transform, channels = get_embedder(multires=9)
+            self.fourier_feature_transform, channels = get_embedder(multires=4)
             self.inp_size = channels
         elif fourier_features == 'hashgrid':
             print("STAGE 2: Using hashgrid (tinycudann) for intrinsic materials")
@@ -82,7 +82,7 @@ class NeuralShader(torch.nn.Module):
             enc_cfg =  {
                 "otype": "HashGrid",
                 "n_levels": num_levels,
-                "n_features_per_level": 2,
+                "n_features_per_level": 4,
                 "log2_hashmap_size": 19,
                 "base_resolution": base_grid_resolution,
                 "per_level_scale" : per_level_scale
@@ -90,19 +90,19 @@ class NeuralShader(torch.nn.Module):
 
             gradient_scaling = 64.0
             self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to(device)
-            self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / gradient_scaling if grad_i[0] is not None else None, ))
+            # self.fourier_feature_transform.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] / gradient_scaling if grad_i[0] is not None else None, ))
             self.inp_size = self.fourier_feature_transform.n_output_dims
 
         # ==============================================================================================
         # create MLP
         # ==============================================================================================
         
-        self.dir_enc_func_multires, channels = get_embedder(multires=2)
+        self.dir_enc_func_multires, channels = get_embedder(multires=1)
         self.view_size = channels
 
         self.material_mlp_ch = disentangle_network_params['material_mlp_ch']
-        self.material_mlp_1 = FC(self.inp_size, 64, [64, 64], activation, None).to(device) #sigmoid
-        self.material_mlp_2 = FC(64 + self.view_size, 3, [64], activation, last_activation).to(device) #sigmoid
+        self.material_mlp_1 = FC(self.inp_size + self.view_size, 3, [64, 64], activation, None).to(device) #sigmoid
+        # self.material_mlp_2 = FC(64 + self.view_size, 3, [64, 64], activation, last_activation).to(device) #sigmoid
         
         self.light_mlp = FC(38, 3, disentangle_network_params["light_mlp_dims"], activation=activation, last_activation=None, bias=True).to(device) 
         self.dir_enc_func = generate_ide_fn(deg_view=3, device=self.device)
@@ -112,9 +112,9 @@ class NeuralShader(torch.nn.Module):
 
         print(disentangle_network_params)
 
-        if fourier_features == "hashgrid":
-            self.material_mlp_1.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * gradient_scaling if grad_i[0] is not None else None, ))
-            self.material_mlp_2.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * gradient_scaling if grad_i[0] is not None else None, ))
+        # if fourier_features == "hashgrid":
+        #     self.material_mlp_1.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * gradient_scaling if grad_i[0] is not None else None, ))
+        #     self.material_mlp_2.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * gradient_scaling if grad_i[0] is not None else None, ))
 
         # Store the config
         self._config = {
@@ -145,7 +145,7 @@ class NeuralShader(torch.nn.Module):
 
         return kd, kr, ko
 
-    def forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None):
+    def forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None,):
         bz, h, w, ch = position.shape
         pe_input = self.apply_pe(position=position).view(-1, self.inp_size)
 
@@ -158,9 +158,10 @@ class NeuralShader(torch.nn.Module):
 
         # normal_encoded = self.dir_enc_func(normal_bend, torch.ones_like(normal_bend[:, 0:1]) * 0.1)
 
-        material_1_output = self.material_mlp_1(pe_input)
-        material_2_input = torch.cat([material_1_output, normal_encoded], dim=-1)
-        color = self.material_mlp_2(material_2_input).view(bz, h, w, -1)
+        material_1_output = self.material_mlp_1(torch.cat([pe_input, normal_encoded], dim=-1))
+        # material_2_input = torch.cat([material_1_output, normal_encoded], dim=-1)
+        color = material_1_output.view(bz, h, w, -1)
+        # color = self.material_mlp_2(material_2_input).view(bz, h, w, -1)
 
         # material_input = torch.cat([pe_input, normal_bend], dim=-1)
         # color = self.material_mlp(material_input).view(bz, h, w, -1)

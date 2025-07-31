@@ -7,7 +7,7 @@ import pytorch3d.ops as pt3o
 
 import open3d as o3d
 
-
+import os
 
 class ICTFaceKitTorch(torch.nn.Module):
     def __init__(self, npy_dir = './assets/ict_facekit_torch.npy', canonical = None, mediapipe_name_to_ict = './assets/mediapipe_name_to_indices.pkl'):
@@ -90,6 +90,31 @@ class ICTFaceKitTorch(torch.nn.Module):
                                                 self.expression_names.tolist().index('eyeLookIn_R'), self.expression_names.tolist().index('eyeLookOut_R'), ]
 
         self.register_buffer('expression_shape_modes_norm', expression_shape_modes_norm)
+
+        # print(self.expression_shape_modes_norm.shape)
+
+        # using open3d, color red for high norm, and grey for low norm.
+        # For every expression, make a colored mesh in open3d. 
+        os.makedirs('debug/expression_norms', exist_ok=True)
+        for i in range(self.expression_shape_modes_norm.shape[0]):
+            mesh = o3d.geometry.TriangleMesh()
+            mesh.vertices = o3d.utility.Vector3dVector(self.neutral_mesh[0].cpu().numpy())
+            mesh.triangles = o3d.utility.Vector3iVector(self.faces.cpu().numpy())
+            colors = np.zeros((self.neutral_mesh[0].shape[0], 3), dtype=np.float32) 
+            colors[:, 0] = self.expression_shape_modes_norm[i]
+            mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+            o3d.io.write_triangle_mesh(f'debug/expression_norms/{i}_{self.expression_names[i]}.obj', mesh)
+
+        # Now, get the maximum norm expression for every vertex.
+        mesh = o3d.geometry.TriangleMesh()
+        mesh.vertices = o3d.utility.Vector3dVector(self.neutral_mesh[0].cpu().numpy())
+        mesh.triangles = o3d.utility.Vector3iVector(self.faces.cpu().numpy())
+        colors = np.zeros((self.neutral_mesh[0].shape[0], 3), dtype=np.float32)
+        colors[:, 0] = torch.amax(self.expression_shape_modes_norm, dim=0)
+        mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+        o3d.io.write_triangle_mesh(f'debug/expression_norms/max_norm.obj', mesh)
+
+        # exit()
 
         jaw_index = self.expression_names.tolist().index('jawOpen')
         self.jaw_index = jaw_index

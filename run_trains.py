@@ -12,7 +12,7 @@ os.makedirs(error_dir, exist_ok=True)
 def worker(gpu_id, command_queue):
     while not command_queue.empty():
         command, directory = command_queue.get()
-        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_unit_wise/v1/'
+        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_unit_wise/v2/'
         os.makedirs(OUTPUT_DIR_ROOT, exist_ok=True)
         for subd in os.listdir(OUTPUT_DIR_ROOT):
             if os.path.exists(os.path.join(OUTPUT_DIR_ROOT, subd)):
@@ -21,7 +21,7 @@ def worker(gpu_id, command_queue):
         # print(f"Running on GPU {gpu_id}: {command}")
         print(os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')), os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')))
 
-        if not os.path.exists(os.path.join('/Bean/log/gwangjin/2025/nbshapes_unit_wise/v1/', directory, 'final_eval.txt')) and not os.path.exists(os.path.join('/Bean/log/gwangjin/2025/nbshapes_unit_wise/v1/', directory, 'stage_1', 'network_weights', 'neural_blendshapes_latest.pt')):
+        if not os.path.exists(os.path.join('/Bean/log/gwangjin/2025/nbshapes_unit_wise/v2/', directory, 'final_eval.txt')) and not os.path.exists(os.path.join('/Bean/log/gwangjin/2025/nbshapes_unit_wise/v2/', directory, 'stage_1', 'network_weights', 'neural_blendshapes_latest.pt')):
         # if not os.path.exists(os.path.join('/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v14/', directory, 'final_eval.txt')) and not os.path.exists(os.path.join('/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v10/', directory, 'final_eval.txt')):
 
             if not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')) and not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')):
@@ -88,7 +88,7 @@ def run_trackings(gpu_ids):
     
         
     INPUT_DIR_ROOT = '/Bean/data/gwangjin/2024/nbshapes/flare_2/'
-    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_unit_wise/v1/'
+    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_unit_wise/v2/'
     
     directories = os.listdir(INPUT_DIR_ROOT)
     # reverse the order
@@ -200,7 +200,9 @@ def run_trackings(gpu_ids):
 
 
 def remove_all_currently_training_txts():
-    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_unit_wise/v1/'
+
+    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_unit_wise/v2/'
+    os.makedirs(OUTPUT_DIR_ROOT, exist_ok=True)
     for directory in os.listdir(OUTPUT_DIR_ROOT):
         if os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')):
             print(f"Removing {os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')}")

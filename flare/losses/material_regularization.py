@@ -61,6 +61,35 @@ def albedo_regularization(_adaptive, shader, mesh, device, displacements, iterat
         return loss * mult
 
 
+
+def viewdep_regularization(shader, mesh, device):
+    position = mesh.vertices
+    
+    direction_1 = torch.randn(position.shape[0], 3, device=device)
+    direction_1 = shader.dir_enc_func_multires(safe_normalize(direction_1))
+
+    direction_2 = torch.randn(position.shape[0], 3, device=device)
+    direction_2 = shader.dir_enc_func_multires(safe_normalize(direction_2))
+
+    mat_1_input = shader.apply_pe(position=position)
+    mat_1_output = shader.material_mlp_1(mat_1_input)
+    mat_1_output = mat_1_output.view(position.shape[0], -1)
+
+    mat_2_input_1 = torch.cat([mat_1_output, direction_1], dim=-1)
+    mat_2_input_2 = torch.cat([mat_1_output, direction_2], dim=-1)
+
+    mat_2_output_1 = shader.material_mlp_2(mat_2_input_1)
+    mat_2_output_2 = shader.material_mlp_2(mat_2_input_2)
+
+    mat_2_output_1 = mat_2_output_1.view(position.shape[0], -1)
+    mat_2_output_2 = mat_2_output_2.view(position.shape[0], -1)
+
+    reg_loss = torch.mean(torch.pow(mat_2_output_1 - mat_2_output_2, 2))
+    
+    return reg_loss
+
+
+
 def white_light(cbuffers):
     loss = 0.0
 

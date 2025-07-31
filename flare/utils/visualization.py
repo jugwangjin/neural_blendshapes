@@ -308,7 +308,7 @@ def save_relit_intrinsic_materials(relit_imgs, views, gbuffer_mask, buffers, ima
             imageio.imsave(images_save_path / f"env_map_{i}" / f'{id:05d}.png', convert_uint_wo_mask(relit_imgs[i][j])) 
 
 
-def save_individual_img(rgb_pred, views, normals, gbuffer_mask, buffers, images_save_path):
+def save_individual_img(rgb_pred, views, normals, gbuffer_mask, buffers, images_save_path,):
     convert_uint = lambda x: np.clip(np.rint(dataset_util.rgb_to_srgb(x).numpy() * 255.0), 0, 255).astype(np.uint8) 
     convert_uint_255 = lambda x: (x * 255).to(torch.uint8)
 

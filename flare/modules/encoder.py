@@ -40,10 +40,11 @@ class DECAEncoder(nn.Module):
             nn.ReLU(),
             nn.Linear(256, 256),
             nn.LayerNorm(256),
-            nn.Linear(256, 128),
-            nn.LayerNorm(128),
             nn.ReLU(),
-            nn.Linear(128, 53 + 10)
+            nn.Linear(256, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Linear(256, 53 + 10)
         )
 
         # multiply by 0.1 to the last layers of rotation_tail and translation_tail
@@ -53,10 +54,8 @@ class DECAEncoder(nn.Module):
             if isinstance(lin, nn.Linear):
                 if lin.bias is not None:
                     torch.nn.init.constant_(lin.bias, 0.0)
-                torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(lin.weight.size(0)))
+                torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(1) / np.sqrt(lin.weight.size(0)))
 
-
-        self.layers_tail[-1].weight.data *= 0.1
 
 
         # self.translation_tail[-1].weight.data *= 0.1
@@ -79,6 +78,9 @@ class DECAEncoder(nn.Module):
         # Register the hook on the encoder to ensure it stays frozen
         self.encoder.apply(lambda m: m.register_forward_pre_hook(freeze_gradients_hook))
         # self.layers.apply(lambda m: m.register_forward_pre_hook(freeze_gradients_hook))
+
+        # register backward hook to self.layer, scale down gradient by 10 
+        self.layers.apply(lambda m: m.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * 1e-1 if grad_i[0] is not None else None, )))
 
         self.sigmoid = nn.Sigmoid()
     
@@ -104,7 +106,6 @@ class DECAEncoder(nn.Module):
                     if img_path[b] not in self.extracted_features:
                         img = inputs['img_deca'][b:b+1]
                         feature = self.encoder(img)
-                        feature = self.layers(feature)
                         self.extracted_features[img_path[b]] = feature
                     else:
                         feature = self.extracted_features[img_path[b]]
@@ -115,7 +116,6 @@ class DECAEncoder(nn.Module):
                 features = []
                 for b in range(inputs['img_deca'].shape[0]):
                     feature = self.encoder(inputs['img_deca'][b:b+1])
-                    feature = self.layers(feature)
                     features.append(feature)
                 encoder_features = torch.cat(features, dim=0)
 
@@ -131,7 +131,8 @@ class DECAEncoder(nn.Module):
             encoder_features = encoder_features.data.detach()
             # pose_features = pose_features.data.detach()
 
-        
+
+        encoder_features = self.layers(encoder_features)    
 
         bshapes_out = self.layers_tail(torch.cat([encoder_features, bshapes, rotation], dim=-1))
 
@@ -195,6 +196,12 @@ class ResnetEncoder(nn.Module):
         self.register_buffer('global_translation', (torch.zeros(3)))
         # self.global_translation = torch.nn.Parameter(torch.zeros(3))
 
+        # register gradient hook for transform origin and global translation
+        # For nn.Parameter objects, we need to register hooks on the parameter itself
+        self.transform_origin.register_hook(lambda grad: grad * 1e-1 if grad is not None else None)
+        # self.global_translation.register_hook(lambda grad: grad * 1e-1 if grad is not None else None)
+        self.scale.register_hook(lambda grad: grad * 1e-1 if grad is not None else None)
+
         self.fix_bshapes = fix_bshapes
 
         self.disable_pose = disable_pose
@@ -210,7 +217,6 @@ class ResnetEncoder(nn.Module):
         print(layers_state_dict.keys())
         self.encoder.layers.load_state_dict(layers_state_dict, strict=True)
         
-    
 
     def forward(self, views, synthetic=False):
         with torch.no_grad():
@@ -235,8 +241,6 @@ class ResnetEncoder(nn.Module):
             mean_z_detected_landmarks = detected_landmarks[..., 2].mean(dim=-1, keepdim=True)[0]
             detected_landmarks[..., 2] = detected_landmarks[..., 2] - mean_z_detected_landmarks
 
-            # camera = views["camera"] # list of cameras. 
-            # camera = torch.stack([c.R.T for c in camera], dim=0).to(detected_landmarks.device)
 
             R = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], device=detected_landmarks.device, dtype=detected_landmarks.dtype)
 
@@ -249,10 +253,6 @@ class ResnetEncoder(nn.Module):
             
             x_axis_indices = [16, 0, 45, 36]
             z_axis_indices = [27, 31, 35]
-
-
-            # y_axis = landmark[:, 0] + landmark[:, 1] - landmark[:, 2] - landmark[:, 3]
-            # y_axis = y_axis / torch.norm(y_axis, dim=-1, keepdim=True)
 
             z_axis_landmarks = detected_landmarks[:, z_axis_indices, :3]
 
@@ -269,47 +269,9 @@ class ResnetEncoder(nn.Module):
 
             y_axis = torch.cross(x_axis, -z_axis, dim=1)
 
-            # z_axis = torch.cross(y_axis, -x_axis, dim=1)
 
             quad_rotation_matrix = torch.stack([x_axis, y_axis, z_axis], dim=-1)  # [B, 3, 3]
 
-            # # print(landmark)
-            # # exit()
-
-            # z_axis_indices = [36, 31, 35, 45]  # right eye corner, right nose corner, left nose corner, left eye corner
-            # # Define a quad, find the normal direction: That represents the direction of the face
-            # quad_points = detected_landmarks[..., z_axis_indices, :3]
-            # quad_points = quad_points.reshape(-1, 4, 3)
-        
-            # # z_axis = torch.cross(quad_points[:, 1] - quad_points[:, 3], quad_points[:, 2] - quad_points[:, 0], dim=1)
-            # # z_axis = z_axis / torch.norm(z_axis, dim=-1, keepdim=True)
-        
-
-            # y_axis_indices = [27, 31, 35] # top of the nose, left of the nose, right of the nose
-
-
-            
-            # triangle_points = detected_landmarks[..., y_axis_indices, :3]
-
-
-            # z_axis = torch.cross(triangle_points[:, 1] - triangle_points[:, 0], triangle_points[:, 2] - triangle_points[:, 0], dim=1)
-            # z_axis = z_axis / torch.norm(z_axis, dim=-1, keepdim=True)
-            
-
-            # y_axis = 2 * triangle_points[:, 0] - triangle_points[:, 1] - triangle_points[:, 2]
-            # y_axis = y_axis / torch.norm(y_axis, dim=-1, keepdim=True)
-            
-            # x_axis = torch.cross(y_axis, z_axis, dim=1)
-            # x_axis = x_axis / torch.norm(x_axis, dim=-1, keepdim=True)
-
-            # # Construct rotation matrix from quad normals
-            # quad_rotation_matrix = torch.stack([x_axis, y_axis, z_axis], dim=-1)  # [B, 3, 3]
-        
-
-            # R = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], device=quad_rotation_matrix.device, dtype=torch.float32)
-
-            # Apply same transformations as the existing rotation matrix
-            # quad_rotation_matrix = quad_rotation_matrix.permute(0, 2, 1)  # Transpose to match convention
             landmark_rotation = p3dt.matrix_to_euler_angles(quad_rotation_matrix, convention='XYZ')
 
 

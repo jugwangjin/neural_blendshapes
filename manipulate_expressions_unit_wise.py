@@ -217,7 +217,7 @@ def main(args, device):
         # Apply expression components with 0.5 intensity
         for component in expr_components:
             idx = bshapes_names.index(component)
-            current_facs[:, idx] = 0.7  # Half intensity
+            current_facs[:, idx] = 0.6  # Half intensity
 
         # Update features
         features[:, :53] = current_facs
@@ -242,6 +242,149 @@ def main(args, device):
         file_name = os.path.join(output_dir, f'{args.run_name}_{expr_name}.png')
         save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
 
+
+    happiness = ['cheekSquint_L', 'cheekSquint_R', 'mouthSmile_L', 'mouthSmile_R']
+    surprise = ['browInnerUp_L', 'browInnerUp_R', 'browOuterUp_L', 'browOuterUp_R', 'jawOpen']
+
+    # sequential, happiness 
+    expressions = []
+    current_stack = []
+    for i in range(len(happiness)):
+        current_stack.append(happiness[i])
+        expressions.append((f"happiness_{i}", [n for n in current_stack]))
+
+    print(expressions)
+
+    for expr_name, expr_components in expressions:
+        # Reset to neutral
+        current_facs = torch.zeros_like(facs)
+        
+        # Apply expression components with 0.5 intensity
+        for component in expr_components:
+            idx = bshapes_names.index(component)
+            if 'brow' in component:
+                current_facs[:, idx] = 0.6  # Half intensity
+            else:
+                current_facs[:, idx] = 0.4  # Half intensity
+
+
+        # Update features
+        features[:, :53] = current_facs
+        features[:, 53:56] = rotation
+        features[:, 56:59] = translation
+        features[:, 60:63] = global_translation
+
+        # Generate and render mesh
+        return_dict = neural_blendshapes(features=features)
+        deformed_vertices = return_dict['expression_mesh_posed']
+        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
+
+        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
+                                    channels=channels_gbuffer, with_antialiasing=True, 
+                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                    mesh=ict_canonical_mesh
+                                    )
+        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
+
+        # Save rendered image
+        os.makedirs(output_dir, exist_ok=True)
+        file_name = os.path.join(output_dir, f'{args.run_name}_{expr_name}.png')
+        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
+
+    expressions = [
+        ("surprise_0", []),
+        ("surprise_1", ["browInnerUp_L", "browOuterUp_L",]),
+        ("surprise_2", ["browInnerUp_L", "browOuterUp_L", "browInnerUp_R", "browOuterUp_R"]),
+        ("surprise_3", ["browInnerUp_L", "browOuterUp_L", "browInnerUp_R", "browOuterUp_R", "jawOpen"]),
+    ]
+
+
+    # seuqeintail, surprise
+    # expressions = []
+    # current_stack = []
+    # for i in range(len(surprise)):
+    #     current_stack.append(surprise[i])
+    #     expressions.append((f"surprise_{i}", [n for n in current_stack]))
+
+    for expr_name, expr_components in expressions:
+        # Reset to neutral
+        current_facs = torch.zeros_like(facs)
+        
+        # Apply expression components with 0.5 intensity
+        for component in expr_components:
+            idx = bshapes_names.index(component)
+            if 'brow' in component:
+                current_facs[:, idx] = 0.4  # Half intensity
+            else:
+                current_facs[:, idx] = 0.4  # Half intensity
+
+        # Update features
+        features[:, :53] = current_facs
+        features[:, 53:56] = rotation
+        features[:, 56:59] = translation
+        features[:, 60:63] = global_translation
+
+        # Generate and render mesh
+        return_dict = neural_blendshapes(features=features)
+        deformed_vertices = return_dict['expression_mesh_posed']
+        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
+
+        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
+                                    channels=channels_gbuffer, with_antialiasing=True, 
+                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                    mesh=ict_canonical_mesh
+                                    )
+        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
+
+        # Save rendered image
+        os.makedirs(output_dir, exist_ok=True)
+        file_name = os.path.join(output_dir, f'{args.run_name}_{expr_name}.png')
+        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
+
+    disgust = ['noseSneer_L', 'noseSneer_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
+
+    # sequential, disgust
+    expressions = []
+    current_stack = []
+    for i in range(len(disgust)):
+        current_stack.append(disgust[i])
+        expressions.append((f"disgust_{i}", [n for n in current_stack]))
+
+    for expr_name, expr_components in expressions:
+        # Reset to neutral
+        current_facs = torch.zeros_like(facs)
+        
+        # Apply expression components with 0.5 intensity
+        for component in expr_components:
+            idx = bshapes_names.index(component)
+            if 'brow' in component:
+                current_facs[:, idx] = 0.6    # Half intensity
+            else:
+                current_facs[:, idx] = 0.4  # Half intensity
+
+
+        # Update features
+        features[:, :53] = current_facs
+        features[:, 53:56] = rotation
+        features[:, 56:59] = translation
+        features[:, 60:63] = global_translation
+
+        # Generate and render mesh
+        return_dict = neural_blendshapes(features=features)
+        deformed_vertices = return_dict['expression_mesh_posed']
+        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
+
+        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
+                                    channels=channels_gbuffer, with_antialiasing=True, 
+                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                    mesh=ict_canonical_mesh
+                                    )
+        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
+
+        # Save rendered image
+        os.makedirs(output_dir, exist_ok=True)
+        file_name = os.path.join(output_dir, f'{args.run_name}_{expr_name}.png')
+        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
 
 def parse_index(input_list):
     result = []

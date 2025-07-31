@@ -48,16 +48,16 @@ class MLPTemplate(nn.Module):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(inp_dim, 64),
-            nn.LayerNorm(64),
+            # nn.LayerNorm(64),
             nn.Softplus(beta=100),
             nn.Linear(64, 64),
-            nn.LayerNorm(64),
+            # nn.LayerNorm(64),
             nn.Softplus(beta=100),
             nn.Linear(64, 64),
-            nn.LayerNorm(64),
+            # nn.LayerNorm(64),
             nn.Softplus(beta=100),
             nn.Linear(64, 64),
-            nn.LayerNorm(64),
+            # nn.LayerNorm(64),
             nn.Softplus(beta=100),
             nn.Linear(64, 3, bias=False)
         )
@@ -90,34 +90,38 @@ class NeuralBlendshapes(nn.Module):
             "per_level_scale" : per_level_scale
         }
 
-        self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to('cuda')
-        self.inp_size = self.fourier_feature_transform.n_output_dims
+        # self.fourier_feature_transform = tcnn.Encoding(3, enc_cfg).to('cuda')
+        # self.inp_size = self.fourier_feature_transform.n_output_dims
 
+
+        self.fourier_feature_transform, channels = get_embedder(multires=6)
+        self.inp_size = channels
 
         self.include_identity_on_encoding = True
 
         if self.include_identity_on_encoding:
             self.inp_size += 3
 
+        self.inp_size=3
         # self.inp_size = 3
 
         # multires=9
         # self.embed_fn, input_ch = get_embedder(multires)
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(3, 128),
-            nn.LayerNorm(128),
+            nn.Linear(self.inp_size, 256),
+            # nn.LayerNorm(128),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            nn.LayerNorm(128),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(128),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            nn.LayerNorm(128),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(128),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
-            nn.LayerNorm(128),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(128),
             nn.Softplus(beta=100),
-            nn.Linear(128, 53*3, bias=False)
+            nn.Linear(256, 53*3, bias=False)
         )
 
 
@@ -139,24 +143,24 @@ class NeuralBlendshapes(nn.Module):
                 if lin.bias is not None:
                     torch.nn.init.constant_(lin.bias, 0.0)
                 # torch.nn.init.constant_(lin.bias, 0.0)
-                torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(out_dim))
+                torch.nn.init.normal_(lin.weight, 0.0, 1 / np.sqrt(out_dim))
 
         for lin in self.template_deformer.mlp:
             if isinstance(lin, nn.Linear):
                 out_dim = lin.weight.size(0)
                 if lin.bias is not None:
                     torch.nn.init.constant_(lin.bias, 0.0)
-                torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(out_dim))
+                torch.nn.init.normal_(lin.weight, 0.0, 1 / np.sqrt(out_dim))
         
-        lin = self.expression_deformer[-1]
-        torch.nn.init.constant_(lin.weight, 0.0)
+        # lin = self.expression_deformer[-1]
+        # torch.nn.init.constant_(lin.weight, 0.0)
 
-        lin = self.template_deformer.mlp[-1]
-        torch.nn.init.constant_(lin.weight, 0.0)
+        # lin = self.template_deformer.mlp[-1]
+        # torch.nn.init.constant_(lin.weight, 0.0)
 
-        if zero_init:
-            self.expression_deformer[-1].weight.data.zero_()
-            self.template_deformer.mlp[-1].weight.data.zero_()
+        # if zero_init:
+        #     self.expression_deformer[-1].weight.data.zero_()
+        #     self.template_deformer.mlp[-1].weight.data.zero_()
 
         # initialize last layer of template deformer with low weights
         # torch.nn.init.normal_(self.template_deformer.mlp[-1].weight, mean=0.0, std=1.0 / 512)
@@ -182,7 +186,7 @@ class NeuralBlendshapes(nn.Module):
                 
 
         self.pose_weight = nn.Sequential(
-                    nn.Linear(3 + 6 + 53, 32),
+                    nn.Linear(3 + 6 , 32),
                     nn.Softplus(beta=100),
                     nn.Linear(32, 32),
                     nn.Softplus(beta=100),
@@ -197,12 +201,19 @@ class NeuralBlendshapes(nn.Module):
         self.pose_weight[-2].weight.data.zero_()
         self.pose_weight[-2].bias.data[0] = 3.
 
+        self.template_blendshapes_for_time_measure = None
+        self.expression_blendshapes_for_time_measure = None
+
 
     def encode_position(self, coords):
 
         coords = (coords - self.aabb[0][None, ...]) / (self.aabb[1][None, ...] - self.aabb[0][None, ...])
         coords = coords * 2 - 1
-
+        return coords
+        if self.include_identity_on_encoding:
+            coords = torch.cat([self.fourier_feature_transform(coords), coords], dim=-1)
+        else:
+            coords = self.fourier_feature_transform(coords)
         # it normalize the coordinates to -1, 1
 
         return coords
@@ -309,7 +320,7 @@ class NeuralBlendshapes(nn.Module):
         bsize = features.shape[0]
         template = self.ict_facekit.canonical[0]
         encoded_points = self.encode_position(template)
-        pose_weight_input = torch.cat([encoded_points.repeat(bsize, 1, 1), features[:, None, :59].repeat(1, template.shape[0], 1)], dim=-1)
+        pose_weight_input = torch.cat([template[None].repeat(bsize, 1, 1), features[:, None, 53:59].repeat(1, template.shape[0], 1)], dim=-1)
         pose_weight = self.pose_weight(pose_weight_input)  # shape of B, V, 2
 
         # encoded_points = torch.cat([self.encode_position(template)], dim=-1)
@@ -317,7 +328,7 @@ class NeuralBlendshapes(nn.Module):
         # encoded_points2 = self.encode_position(template)
         # encoded_points2 = torch.cat([self.encode_position(template, sec=True)], dim=-1)
 
-        template_mesh_delta = self.template_deformer(encoded_points)
+        template_mesh_delta = self.template_deformer(template)
 
         
         face_details = self.face_details * 1e-1 # shape of 11248, 3
@@ -360,8 +371,9 @@ class NeuralBlendshapes(nn.Module):
 
         feat = features[:, :53].clamp(0, 1)
 
+        # print(torch.amin(blendshape_masks), torch.amax(blendshape_masks), torch.amin(feat), torch.amax(feat))
+
         expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
-        
         # self.tight_face_details have shape of 6705, 53
         # feat has shape of B, 53
         # einsum and multiplying it with tight_face_normals will have shape of B, 6705, 3
@@ -391,7 +403,7 @@ class NeuralBlendshapes(nn.Module):
         template = self.ict_facekit.canonical[0]
         encoded_points = self.encode_position(template)
 
-        template_mesh_delta = self.template_deformer(encoded_points)
+        template_mesh_delta = self.template_deformer(template)
 
         face_details = self.face_details * 1e-1 # shape of 11248, 3
         # face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
@@ -515,26 +527,36 @@ class NeuralBlendshapes(nn.Module):
 
         return_dict['features'] = features
         
-        encoded_points = self.encode_position(template)
-        encoded_points2 = self.encode_position(template)
         bsize = features.shape[0]
         template = self.ict_facekit.canonical[0]
         pose_weight_input = torch.cat([encoded_points.repeat(bsize, 1, 1), features[:, None, 53:59].repeat(1, template.shape[0], 1)], dim=-1)
 
         blendshapes_start = time.time()
-        pose_weight = self.pose_weight(pose_weight_input)  # shape of B, V, 2
-        template_mesh_delta = self.template_deformer(encoded_points)
-        expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
-        # ICT 모델의 블렌드쉐이프 영향력 마스크 가져오기
-        blendshape_masks = self.ict_facekit.expression_shape_modes_norm.permute(1, 0).unsqueeze(-1)  # (V, 53, 1    )
-        
-        # 신경망 출력을 해당 블렌드쉐이프의 유효 영역으로 제한
-        # 각 블렌드쉐이프가 해당하는 얼굴 영역에만 변형 적용
-        expression_mesh_delta_u = expression_mesh_delta_u * blendshape_masks  # (V, 53, 3)
 
-        face_details = self.face_details * 1e-1 # shape of 11248, 3
-        # face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
-        template_mesh_delta[:self.full_head_index] = template_mesh_delta[:self.full_head_index] + face_details
+        pose_weight = self.pose_weight(pose_weight_input)  # shape of B, V, 2
+        if self.template_blendshapes_for_time_measure is None:
+            encoded_points = self.encode_position(template)
+            self.template_blendshapes_for_time_measure = self.template_deformer(template)
+            face_details = self.face_details * 1e-1 # shape of 11248, 3
+            # face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
+            self.template_blendshapes_for_time_measure[:self.full_head_index] = self.template_blendshapes_for_time_measure[:self.full_head_index] + face_details
+
+        if self.expression_blendshapes_for_time_measure is None:    
+            encoded_points2 = self.encode_position(template)
+            expression_deformer_out = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
+
+            expression_mesh_delta_u = self.expression_blendshapes_for_time_measure
+
+            expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
+            # ICT 모델의 블렌드쉐이프 영향력 마스크 가져오기
+            blendshape_masks = self.ict_facekit.expression_shape_modes_norm.permute(1, 0).unsqueeze(-1)  # (V, 53, 1    )
+            
+            # 신경망 출력을 해당 블렌드쉐이프의 유효 영역으로 제한
+            # 각 블렌드쉐이프가 해당하는 얼굴 영역에만 변형 적용
+            expression_mesh_delta_u = expression_mesh_delta_u * blendshape_masks  # (V, 53, 3)
+
+            self.expression_blendshapes_for_time_measure = expression_mesh_delta_u
+
 
         blendshapes_end = time.time()
 
@@ -546,13 +568,13 @@ class NeuralBlendshapes(nn.Module):
 
         ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(bsize, 1))
 
-        ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
+        ict_mesh_w_temp = ict_mesh + self.template_blendshapes_for_time_measure[None]
 
         # expression_mesh_delta_u[9409:11248] = 0
 
         feat = features[:, :53].clamp(0, 1)
 
-        expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
+        expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, self.expression_blendshapes_for_time_measure)
         
         expression_mesh = ict_mesh_w_temp + expression_mesh_delta
 
