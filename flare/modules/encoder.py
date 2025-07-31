@@ -29,13 +29,10 @@ class DECAEncoder(nn.Module):
         )
 
         self.layers_tail = nn.Sequential(
-            nn.Linear(outsize + 53 + 3, 256),
-            nn.LayerNorm(256),
+            nn.Linear(outsize + 53, 512),
+            nn.LayerNorm(512),
             nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(512, 256),
             nn.LayerNorm(256),
             nn.ReLU(),
             nn.Linear(256, 256),
@@ -45,6 +42,23 @@ class DECAEncoder(nn.Module):
             nn.LayerNorm(256),
             nn.ReLU(),
             nn.Linear(256, 53 + 10)
+        )
+
+        
+        self.rotation_tail = nn.Sequential(
+            nn.Linear(15, 64),
+            # nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            # nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            # nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            # nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 9, bias=False)
         )
 
         # multiply by 0.1 to the last layers of rotation_tail and translation_tail
