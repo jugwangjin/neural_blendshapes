@@ -547,10 +547,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                 optimizer_neural_blendshapes.zero_grad(set_to_none=True)
                 optimizer_neural_blendshapes = None
                 optimizer_neural_blendshapes = torch.optim.Adam([
-                                                    {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer * 1e-1, },
-                                                    # {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e-2},
-                                                    # {'params': neural_blendshapes_detail_params, 'lr': args.lr_jacobian * 1e-3},
-                                                    # {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian * 1e-2},
+                                                    # {'params': neural_blendshapes_encoder_params, 'lr': args.lr_deformer * 1e-1, },
+                                                    {'params': neural_blendshapes_template_params, 'lr': args.lr_jacobian * 1e-2},
+                                                    {'params': neural_blendshapes_detail_params, 'lr': args.lr_jacobian * 1e-3},
+                                                    {'params': neural_blendshapes_pose_weight_params, 'lr': args.lr_jacobian * 1e-2},
                                                     {'params': neural_blendshapes_expression_params, 'lr': args.lr_jacobian * 1e-3},
                                                     # {'params': neural_blendshapes_pe, 'lr': args.lr_jacobian * 1e-2},
                                                     ],
@@ -761,15 +761,15 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             losses['linearity_regularization'] = expression_linearity_regularization + detail_linearity_regularization 
 
 
-            if stage == 3:
-                batch_size = views_subset['img'].size(0)
-                synthetic_encoder_regularization = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, batch_size, deformed_vertices_key, lgt, device, save_debug=iteration % 100 == 0)
-                losses['synthetic_encoder_regularization'] = synthetic_encoder_regularization
+            # if stage == 3:
+            #     batch_size = views_subset['img'].size(0)
+            #     synthetic_encoder_regularization = synthetic_loss(views_subset, neural_blendshapes, renderer, shader, dataset_train.mediapipe, ict_facekit, ict_canonical_mesh, batch_size, deformed_vertices_key, lgt, device, save_debug=iteration % 100 == 0)
+            #     losses['synthetic_encoder_regularization'] = synthetic_encoder_regularization
 
-                with torch.no_grad():
-                    features_clone = encoder_clone(views_subset)
-                features_current = neural_blendshapes.encoder(views_subset)
-                losses['synthetic_encoder_regularization'] += (features_current - features_clone).pow(2).mean() * 10
+            #     with torch.no_grad():
+            #         features_clone = encoder_clone(views_subset)
+            #     features_current = neural_blendshapes.encoder(views_subset)
+            #     losses['synthetic_encoder_regularization'] += (features_current - features_clone).pow(2).mean() * 10
                     
 
 

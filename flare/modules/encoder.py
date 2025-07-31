@@ -21,6 +21,30 @@ class DECAEncoder(nn.Module):
         ### regressor
 
         outsize = 100 + 50 + 50 + 3 + 6 + 27
+#         cfg.model.param_list = ['shape', 'tex', 'exp', 'pose', 'cam', 'light']
+        # cfg.model.n_shape = 100
+        # cfg.model.n_tex = 50
+        # cfg.model.n_exp = 50
+        # cfg.model.n_cam = 3
+        # cfg.model.n_pose = 6
+        # cfg.model.n_light = 27
+
+
+
+    # def decompose_code(self, code, num_dict):
+    #     ''' Convert a flattened parameter vector to a dictionary of parameters
+    #     code_dict.keys() = ['shape', 'tex', 'exp', 'pose', 'cam', 'light']
+    #     '''
+    #     code_dict = {}
+    #     start = 0
+    #     for key in num_dict:
+    #         end = start+int(num_dict[key])
+    #         code_dict[key] = code[:, start:end]
+    #         start = end
+    #         if key == 'light':
+    #             code_dict[key] = code_dict[key].reshape(code_dict[key].shape[0], 9, 3)
+    #     return code_dict
+
 
         self.layers = nn.Sequential(
             nn.Linear(feature_size, 1024),
@@ -29,10 +53,10 @@ class DECAEncoder(nn.Module):
         )
 
         self.layers_tail = nn.Sequential(
-            nn.Linear(outsize + 53, 512),
-            nn.LayerNorm(512),
+            nn.Linear(56 + 53, 256),
+            nn.LayerNorm(256),
             nn.ReLU(),
-            nn.Linear(512, 256),
+            nn.Linear(256, 256),
             nn.LayerNorm(256),
             nn.ReLU(),
             nn.Linear(256, 256),
@@ -46,7 +70,7 @@ class DECAEncoder(nn.Module):
 
         
         self.rotation_tail = nn.Sequential(
-            nn.Linear(15, 64),
+            nn.Linear(15 + 3, 64),
             # nn.LayerNorm(64),
             nn.ReLU(),
             nn.Linear(64, 64),
@@ -58,21 +82,14 @@ class DECAEncoder(nn.Module):
             nn.Linear(64, 64),
             # nn.LayerNorm(64),
             nn.ReLU(),
-            nn.Linear(64, 9, bias=False)
+            nn.Linear(64, 10, bias=True)
         )
 
         # multiply by 0.1 to the last layers of rotation_tail and translation_tail
         # keep the weights, zero bias for all layers
         
-        for lin in self.layers_tail:
-            if isinstance(lin, nn.Linear):
-                if lin.bias is not None:
-                    torch.nn.init.constant_(lin.bias, 0.0)
-                torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(1) / np.sqrt(lin.weight.size(0)))
-
-
-
-        # self.translation_tail[-1].weight.data *= 0.1
+        self.layers_tail[-1].weight.data *= 0.1
+        self.rotation_tail[-1].weight.data *= 0.1
 
         self.last_op = last_op
 
@@ -94,7 +111,7 @@ class DECAEncoder(nn.Module):
         # self.layers.apply(lambda m: m.register_forward_pre_hook(freeze_gradients_hook))
 
         # register backward hook to self.layer, scale down gradient by 10 
-        self.layers.apply(lambda m: m.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * 1e-1 if grad_i[0] is not None else None, )))
+        # self.layers.apply(lambda m: m.register_full_backward_hook(lambda module, grad_i, grad_o: (grad_i[0] * 1e-1 if grad_i[0] is not None else None, )))
 
         self.sigmoid = nn.Sigmoid()
     
@@ -112,27 +129,21 @@ class DECAEncoder(nn.Module):
     def forward(self, inputs, bshapes, mp_translation, landmark, rotation, synthetic=False):
         with torch.no_grad():
 
-            if not synthetic:
-                idx = inputs['idx']
-                img_path = inputs['img_path']
-                features = []
-                for b in range(idx.shape[0]):
-                    if img_path[b] not in self.extracted_features:
-                        img = inputs['img_deca'][b:b+1]
-                        feature = self.encoder(img)
-                        self.extracted_features[img_path[b]] = feature
-                    else:
-                        feature = self.extracted_features[img_path[b]]
-                    features.append(feature)
-                encoder_features = torch.cat(features, dim=0)
+            idx = inputs['idx']
+            img_path = inputs['img_path']
+            features = []
+            for b in range(idx.shape[0]):
+                if img_path[b] not in self.extracted_features:
+                    img = inputs['img_deca'][b:b+1]
+                    feature = self.encoder(img)
+                    self.extracted_features[img_path[b]] = feature
+                else:
+                    feature = self.extracted_features[img_path[b]]
+                features.append(feature)
+            encoder_features = torch.cat(features, dim=0)
 
-            else:
-                features = []
-                for b in range(inputs['img_deca'].shape[0]):
-                    feature = self.encoder(inputs['img_deca'][b:b+1])
-                    features.append(feature)
-                encoder_features = torch.cat(features, dim=0)
 
+            pose_features = inputs['flame_pose']
             # shape tex exp pose cam 3 light 27
             # shape 100 # tex 50 # exp 50 # pose  6 
             # pose_features = inputs['flame_pose']
@@ -143,17 +154,22 @@ class DECAEncoder(nn.Module):
 
             # encoder_features = self.encoder(img)
             encoder_features = encoder_features.data.detach()
-            # pose_features = pose_features.data.detach()
+            pose_features = pose_features.data.detach()
 
 
-        encoder_features = self.layers(encoder_features)    
+        # extract only exp and pose from outputs of self.layers
+        encoder_features = self.layers(encoder_features)[:, 150:206]
+        # encoder_features = torch.cat([encoder_features[:, 150:200], encoder_features[:, 200:206]], dim=-1)
+        
+# encoder_features = torch.cat([encoder_features[:, 150:200], encoder_features[:, 200:206]], dim=-1)
+        bshapes_out = self.layers_tail(torch.cat([encoder_features, bshapes], dim=-1))
+        rotation_out = self.rotation_tail(torch.cat([pose_features, rotation], dim=-1))
 
-        bshapes_out = self.layers_tail(torch.cat([encoder_features, bshapes, rotation], dim=-1))
-
-        rotation_out = bshapes_out[:, -10:]
+        # rotation_out = bshapes_out[:, -10:]
         bshapes_out = bshapes_out[:, :-10]
 
         rotation_out[..., :3] += rotation
+        rotation_out[..., 3:] *= 0.1
         
         bshapes_tail_out = bshapes_out
 
@@ -212,9 +228,9 @@ class ResnetEncoder(nn.Module):
 
         # register gradient hook for transform origin and global translation
         # For nn.Parameter objects, we need to register hooks on the parameter itself
-        self.transform_origin.register_hook(lambda grad: grad * 1e-1 if grad is not None else None)
+        # self.transform_origin.register_hook(lambda grad: grad * 1e-1 if grad is not None else None)
         # self.global_translation.register_hook(lambda grad: grad * 1e-1 if grad is not None else None)
-        self.scale.register_hook(lambda grad: grad * 1e-1 if grad is not None else None)
+        # self.scale.register_hook(lambda grad: grad * 1e-1 if grad is not None else None)
 
         self.fix_bshapes = fix_bshapes
 

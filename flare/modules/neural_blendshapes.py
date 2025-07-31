@@ -102,7 +102,7 @@ class NeuralBlendshapes(nn.Module):
         if self.include_identity_on_encoding:
             self.inp_size += 3
 
-        self.inp_size=3
+        # self.inp_size=3
         # self.inp_size = 3
 
         # multires=9
@@ -152,11 +152,11 @@ class NeuralBlendshapes(nn.Module):
                     torch.nn.init.constant_(lin.bias, 0.0)
                 torch.nn.init.normal_(lin.weight, 0.0, 1 / np.sqrt(out_dim))
         
-        # lin = self.expression_deformer[-1]
-        # torch.nn.init.constant_(lin.weight, 0.0)
+        lin = self.expression_deformer[-1]
+        torch.nn.init.constant_(lin.weight, 0.0)
 
-        # lin = self.template_deformer.mlp[-1]
-        # torch.nn.init.constant_(lin.weight, 0.0)
+        lin = self.template_deformer.mlp[-1]
+        torch.nn.init.constant_(lin.weight, 0.0)
 
         # if zero_init:
         #     self.expression_deformer[-1].weight.data.zero_()
@@ -208,8 +208,8 @@ class NeuralBlendshapes(nn.Module):
     def encode_position(self, coords):
 
         coords = (coords - self.aabb[0][None, ...]) / (self.aabb[1][None, ...] - self.aabb[0][None, ...])
-        coords = coords * 2 - 1
-        return coords
+        # coords = coords * 2 - 1
+        # return coords
         if self.include_identity_on_encoding:
             coords = torch.cat([self.fourier_feature_transform(coords), coords], dim=-1)
         else:
