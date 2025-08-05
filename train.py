@@ -653,10 +653,10 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
                     mult = 500 - to_milestone_3
                     mult = max(0, min(1, mult / 500))
                     
-                    losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration, mult=mult)
-                losses['white_lgt_regularization'] = white_light(cbuffers)
-                losses['roughness_regularization'] = roughness_regularization(cbuffers["roughness"], views_subset["skin_mask"], views_subset["mask"], r_mean=args.r_mean)
-                losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
+                    # losses['albedo_regularization'] = albedo_regularization(_adaptive, shader, mesh, device, None, iteration, mult=mult)
+                # losses['white_lgt_regularization'] = white_light(cbuffers)
+                # losses['roughness_regularization'] = roughness_regularization(cbuffers["roughness"], views_subset["skin_mask"], views_subset["mask"], r_mean=args.r_mean)
+                # losses["fresnel_coeff"] = spec_intensity_regularization(cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"])
                 # losses['normal_laplacian'] = normal_laplacian_loss
                 losses['normal_laplacian'] = normal_laplacian_loss
                 # losses['inverted_normal'] = inverted_normal_loss
@@ -706,7 +706,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
             # random_bshapes = torch.rand_like(return_dict['features'][:, :53]) 
             expression_delta_random = neural_blendshapes.get_expression_delta()
 
-            expression_linearity_regularization = expression_delta_random.pow(2).mean()   if stage == 2 else 0
+            expression_linearity_regularization = expression_delta_random.pow(2).mean() * 3e3
             # expression_linearity_regularization = expression_delta_random.abs().mean() * 1e1  if stage == 2 else 0
             detail_linearity_regularization = neural_blendshapes.face_details.pow(2).mean() * 1e2
 

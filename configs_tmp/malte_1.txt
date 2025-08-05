@@ -1,10 +1,10 @@
 run_name = malte_1
 
-input_dir = /Bean/data/gwangjin/2024/nbshapes/flare/malte_1/malte_1
+input_dir = /Bean/data/gwangjin/2024/nbshapes/flare_2/malte_1/malte_1
 train_dir = ["train"]
 eval_dir = ["test"]
 working_dir = .
-output_dir = /Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v14/
+output_dir = /Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/
 
 batch_size = 2
 sample_idx_ratio = 1

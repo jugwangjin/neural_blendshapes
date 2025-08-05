@@ -4,11 +4,12 @@ import multiprocessing
 from queue import Queue
 import argparse
 import shutil
+import time
 
 def worker(gpu_id, command_queue):
     while not command_queue.empty():
         command, directory = command_queue.get()
-        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v14/'
+        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/'
         os.makedirs(OUTPUT_DIR_ROOT, exist_ok=True)
         for subd in os.listdir(OUTPUT_DIR_ROOT):
             if os.path.exists(os.path.join(OUTPUT_DIR_ROOT, subd)):
@@ -17,7 +18,7 @@ def worker(gpu_id, command_queue):
         # print(f"Running on GPU {gpu_id}: {command}")
         print(os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')), os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')))
 
-        if not os.path.exists(os.path.join('/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v14/', directory, 'final_eval.txt')) and not os.path.exists(os.path.join('/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v14/', directory, 'stage_1', 'network_weights', 'neural_blendshapes_latest.pt')):
+        if not os.path.exists(os.path.join('/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/', directory, 'final_eval.txt')) and not os.path.exists(os.path.join('/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/', directory, 'stage_1', 'network_weights', 'neural_blendshapes_latest.pt')):
         # if not os.path.exists(os.path.join('/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v14/', directory, 'final_eval.txt')) and not os.path.exists(os.path.join('/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v10/', directory, 'final_eval.txt')):
 
             if not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')) and not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')):
@@ -27,6 +28,8 @@ def worker(gpu_id, command_queue):
                 with open(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'), 'w') as f:
                     f.write('')
                 
+                start_time = time.time()
+
                 try:
                     command = command.format(gpu_id)
                     print(f"Running on GPU {gpu_id}: {command}")
@@ -35,10 +38,32 @@ def worker(gpu_id, command_queue):
                     print(e)
                     print(f"Failed to run on GPU {gpu_id}: {command}")
                     # remove the currently_training.txt file
+                    # dump the error to a file
+                    with open(os.path.join(OUTPUT_DIR_ROOT, directory, 'error.txt'), 'w') as f:
+                        f.write(str(e))
+
+                    # dump error to a file, in error_dir, as well as running time, currnt time, start time, and arguments, and so on.
+                    
+                    current_time = time.time()
+                    with open(os.path.join(error_dir, f'{directory}.txt'), 'w') as f:
+                        f.write(f'Error: {e}\n')
+                        f.write(f'Running time: {current_time - start_time}\n')
+                        f.write(f'Current time: {current_time}\n')  
+                        f.write(f'Start time: {start_time}\n')
+                        f.write(f'Arguments: {command}\n')
+                        f.write(f'GPU: {gpu_id}\n')
+                        f.write(f'Directory: {directory}\n')
+                        f.write(f'Command: {command}\n')
+                        f.write(f'Error: {e}\n')
+                        f.write(f'Running time: {current_time - start_time}\n')
+                        f.write(f'Current time: {current_time}\n')  
+                        f.write(f'Start time: {start_time}\n')  
+
                 finally:
                     if os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')):
                         os.remove(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'))
         command_queue.task_done()
+
 
 def run_trackings(gpu_ids):
     commands = []
@@ -60,8 +85,8 @@ def run_trackings(gpu_ids):
 # output_dir = /Bean/log/gwangjin/2024/neural_blendshapes
     
         
-    INPUT_DIR_ROOT = '/Bean/data/gwangjin/2024/nbshapes/flare/'
-    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v14/'
+    INPUT_DIR_ROOT = '/Bean/data/gwangjin/2024/nbshapes/flare_2/'
+    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/'
     
     directories = os.listdir(INPUT_DIR_ROOT)
     # reverse the order
@@ -169,8 +194,26 @@ def run_trackings(gpu_ids):
             p.join()
 
 
+
+def remove_all_currently_training_txts():
+
+    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/'
+    os.makedirs(OUTPUT_DIR_ROOT, exist_ok=True)
+    for directory in os.listdir(OUTPUT_DIR_ROOT):
+        if os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')):
+            print(f"Removing {os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')}")
+            os.remove(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt'))
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu_ids', type=int, nargs='+', required=True)
     args = parser.parse_args()
-    run_trackings(args.gpu_ids)
+    # remove_all_currently_training_txts()
+    try:
+        run_trackings(args.gpu_ids)
+    except Exception as e:
+        print(e)
+    finally:
+        remove_all_currently_training_txts()
+
+

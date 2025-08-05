@@ -341,8 +341,6 @@ if __name__ == '__main__':
 
     # dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=1, collate_fn=dataset_val.collate)
 
-    # measure_fps(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, experiment_dir
-    #                 , images_eval_save_path / "qualitative_results", lgt=lgt, save_each=True)
 
 
 
@@ -350,6 +348,8 @@ if __name__ == '__main__':
 
     dataloader_validate = torch.utils.data.DataLoader(dataset_val, batch_size=1, collate_fn=dataset_val.collate)
 
+    measure_fps(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, experiment_dir
+                    , images_eval_save_path / "qualitative_results", lgt=lgt, save_each=True)
     quantitative_eval(args, mesh, dataloader_validate, ict_facekit, neural_blendshapes, shader, renderer, device, channels_gbuffer, experiment_dir
                     , images_eval_save_path / "qualitative_results", lgt=lgt, save_each=True)
 

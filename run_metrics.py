@@ -5,7 +5,7 @@ import multiprocessing
 
 def main():
 
-    data_dir = '/Bean/data/gwangjin/2024/nbshapes/flare'
+    data_dir = '/Bean/data/gwangjin/2024/nbshapes/flare_2'
     exps_dir = os.path.join('/Bean/log/gwangjin/2024/nbshapes_comparisons/')
     save_dir = 'figures/metrics'
     # get flare image directories

@@ -1,10 +1,10 @@
 run_name = marcel
 
-input_dir = /Bean/data/gwangjin/2024/nbshapes/flare/marcel/marcel
+input_dir = /Bean/data/gwangjin/2024/nbshapes/flare_2/marcel/marcel
 train_dir = ["MVI_1797", "MVI_1801"]
 eval_dir = ["MVI_1802"]
 working_dir = .
-output_dir = /Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v14/
+output_dir = /Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/
 
 batch_size = 2
 sample_idx_ratio = 1

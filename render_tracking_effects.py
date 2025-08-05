@@ -180,6 +180,24 @@ def main(args, device, dataset_train2, dataset_train):
     #     # determine output image name. 
         shading_name = f'{args.run_name}_{args.video_name}_{views_subset["idx"][0]}_shading.png'
         save_shading(pred_color_masked, cbuffers, gbuffers, views_subset, Path(output_dir), 0, ict_facekit=ict_facekit, save_name=shading_name, transparency=True)
+
+
+        deformed_vertices = return_dict['ict_mesh_posed']
+        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
+        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
+                                    channels=channels_gbuffer, with_antialiasing=True, 
+                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                    mesh=ict_canonical_mesh
+                                    )
+        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
+
+        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{views_subset["idx"][0]}_ict.png')
+        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
+
+        shading_name = f'{args.run_name}_{args.video_name}_{views_subset["idx"][0]}_shading.png'
+        save_shading(pred_color_masked, cbuffers, gbuffers, views_subset, Path(output_dir), 0, ict_facekit=ict_facekit, save_name=shading_name, transparency=True)
+
+
 # 
     #     # also save the gt 
         gt_iamge = views_subset['img']
@@ -211,6 +229,26 @@ def main(args, device, dataset_train2, dataset_train):
         shading_name = f'{args.run_name}_{args.video_name}_{views_subset["idx"][0]}_shading_no_personalization.png'
         save_shading(pred_color_masked, cbuffers, gbuffers, views_subset, Path(output_dir), 0, ict_facekit=ict_facekit, save_name=shading_name, transparency=True)
 # 
+        
+
+
+        deformed_vertices = return_dict['ict_mesh_posed']
+        d_normals = ict_canonical_mesh.fetch_all_normals(deformed_vertices, ict_canonical_mesh)
+        gbuffers = renderer.render_batch(views_subset['flame_camera'], deformed_vertices.contiguous(), d_normals,
+                                    channels=channels_gbuffer, with_antialiasing=True, 
+                                    canonical_v=ict_canonical_mesh.vertices, canonical_idx=ict_canonical_mesh.indices, canonical_uv=ict_facekit.uv_neutral_mesh,
+                                    mesh=ict_canonical_mesh
+                                    )
+        pred_color_masked, cbuffers, gbuffer_mask = shader.shade(gbuffers, views_subset, ict_canonical_mesh, args.finetune_color, lgt)
+
+        file_name = os.path.join(output_dir, f'{args.run_name}_{args.video_name}_{views_subset["idx"][0]}_no_personalization_ict.png')
+        save_manipulation_image(pred_color_masked, views_subset, gbuffers["normal"], gbuffer_mask, file_name)
+
+    #     # determine output image name. 
+        shading_name = f'{args.run_name}_{args.video_name}_{views_subset["idx"][0]}_shading_no_personalization_ict.png'
+        save_shading(pred_color_masked, cbuffers, gbuffers, views_subset, Path(output_dir), 0, ict_facekit=ict_facekit, save_name=shading_name, transparency=True)
+# 
+
     #     # also save the gt 
         gt_iamge = views_subset['img']
         convert_uint = lambda x: np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().numpy() * 255.0), 0, 255).astype(np.uint8) 

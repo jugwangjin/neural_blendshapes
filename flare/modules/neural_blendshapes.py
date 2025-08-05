@@ -105,19 +105,19 @@ class NeuralBlendshapes(nn.Module):
         # self.embed_fn, input_ch = get_embedder(multires)
 
         self.expression_deformer = nn.Sequential(
-            nn.Linear(3, 128),
+            nn.Linear(3, 256),
             # nn.LayerNorm(128),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
+            nn.Linear(256, 256),
             # nn.LayerNorm(128),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
+            nn.Linear(256, 256),
             # nn.LayerNorm(128),
             nn.Softplus(beta=100),
-            nn.Linear(128, 128),
+            nn.Linear(256, 256),
             # nn.LayerNorm(128),
             nn.Softplus(beta=100),
-            nn.Linear(128, 53*3, bias=False)
+            nn.Linear(256, 53*3, bias=False)
         )
 
 
@@ -194,6 +194,9 @@ class NeuralBlendshapes(nn.Module):
         initialize_weights(self.pose_weight, gain=0.01)
         self.pose_weight[-2].weight.data.zero_()
         self.pose_weight[-2].bias.data[0] = 3.
+
+        self.template_mesh_delta_measure_time = None
+        self.expression_mesh_delta_u_measure_time = None
 
 
     def encode_position(self, coords):
@@ -347,6 +350,8 @@ class NeuralBlendshapes(nn.Module):
             return return_dict
 
         expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template.shape[0], 53, 3)
+        blendshape_masks = self.ict_facekit.expression_shape_modes_norm.permute(1, 0).unsqueeze(-1)  # (V, 53, 1    )
+        expression_mesh_delta_u = expression_mesh_delta_u * blendshape_masks  # (V, 53, 3)
         # expression_mesh_delta_u[9409:11248] = 0
 
         feat = features[:, :53].clamp(0, 1)
@@ -398,6 +403,8 @@ class NeuralBlendshapes(nn.Module):
 
         elif deformed_vertices_key == 'expression_mesh':
             expression_mesh_delta_u = self.expression_deformer(encoded_points).reshape(template_mesh.shape[0], 53, 3)
+            blendshape_masks = self.ict_facekit.expression_shape_modes_norm.permute(1, 0).unsqueeze(-1)  # (V, 53, 1    )
+            expression_mesh_delta_u = expression_mesh_delta_u * blendshape_masks  # (V, 53, 3)
             # expression_mesh_delta_u[9409:11248] = 0
 
             feat = random_features
@@ -499,19 +506,27 @@ class NeuralBlendshapes(nn.Module):
 
         return_dict['features'] = features
         
+        template = self.ict_facekit.canonical[0]
         encoded_points = self.encode_position(template)
         encoded_points2 = self.encode_position(template)
         bsize = features.shape[0]
-        template = self.ict_facekit.canonical[0]
         pose_weight_input = torch.cat([encoded_points.repeat(bsize, 1, 1), features[:, None, 53:59].repeat(1, template.shape[0], 1)], dim=-1)
 
         blendshapes_start = time.time()
         pose_weight = self.pose_weight(pose_weight_input)  # shape of B, V, 2
-        template_mesh_delta = self.template_deformer(encoded_points)
-        expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
-        face_details = self.face_details * 1e-1 # shape of 11248, 3
+
+        if self.template_mesh_delta_measure_time is None:
+            self.template_mesh_delta_measure_time = self.template_deformer(encoded_points)
+            face_details = self.face_details * 1e-1 # shape of 11248, 3
+            self.template_mesh_delta_measure_time[:self.full_head_index] = self.template_mesh_delta_measure_time[:self.full_head_index] + face_details
+        
+        if self.expression_mesh_delta_u_measure_time is None:
+            self.expression_mesh_delta_u_measure_time = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
+            self.expression_mesh_delta_u_measure_time = self.expression_mesh_delta_u_measure_time * self.ict_facekit.expression_shape_modes_norm.permute(1, 0).unsqueeze(-1)
+
+        # template_mesh_delta = self.template_deformer(encoded_points)
+        # expression_mesh_delta_u = self.expression_deformer(encoded_points2).reshape(template.shape[0], 53, 3)
         # face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
-        template_mesh_delta[:self.full_head_index] = template_mesh_delta[:self.full_head_index] + face_details
 
         blendshapes_end = time.time()
 
@@ -523,13 +538,13 @@ class NeuralBlendshapes(nn.Module):
 
         ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(bsize, 1))
 
-        ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
+        ict_mesh_w_temp = ict_mesh + self.template_mesh_delta_measure_time[None]
 
         # expression_mesh_delta_u[9409:11248] = 0
 
         feat = features[:, :53].clamp(0, 1)
 
-        expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, expression_mesh_delta_u)
+        expression_mesh_delta = torch.einsum('bn, mnd -> bmd', feat, self.expression_mesh_delta_u_measure_time)
         
         expression_mesh = ict_mesh_w_temp + expression_mesh_delta
 
