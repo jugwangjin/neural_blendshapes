@@ -249,48 +249,50 @@ class NeuralBlendshapes(nn.Module):
         face[..., 17039:21451, :] = 0
         return face
 
-    # @torch.no_grad()
-    # def precompute_networks(self):
-    #     # precompute the fixed mlps and return. 
-    #     template = self.ict_facekit.canonical[0]
-    #     pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
+    @torch.no_grad()
+    def precompute_networks(self):
+        # precompute the fixed mlps and return. 
+        template = self.ict_facekit.canonical[0]
+        # pose_weight = self.pose_weight(self.ict_facekit.canonical[0])
 
-    #     template_mesh_u_delta = self.template_deformer(template)
+        template_mesh_u_delta = self.template_deformer(template)
 
-    #     expression_mesh_delta_u = self.expression_deformer(template).reshape(template.shape[0], 53, 3)
+        expression_mesh_delta_u = self.expression_deformer(template).reshape(template.shape[0], 53, 3)
+        expression_mesh_delta_u = expression_mesh_delta_u * self.ict_facekit.expression_shape_modes_norm.permute(1, 0).unsqueeze(-1)
 
-    #     return {'template_mesh_u_delta': template_mesh_u_delta, 'expression_mesh_delta_u': expression_mesh_delta_u, 'pose_weight': pose_weight}
+
+        return {'template_mesh_u_delta': template_mesh_u_delta, 'expression_mesh_delta_u': expression_mesh_delta_u}
         
-    # @torch.no_grad()
-    # def deform_with_precomputed(self, features, precomputed):
-    #     template = self.ict_facekit.canonical[0]
-    #     pose_weight = precomputed['pose_weight']
+    @torch.no_grad()
+    def deform_with_precomputed(self, features, precomputed):
+        template = self.ict_facekit.canonical[0]
+        pose_weight = self.pose_weight(torch.cat([self.encode_position(template), features[:, None, 53:59].repeat(1, template.shape[0], 1)], dim=-1))
 
-    #     template_mesh_delta = precomputed['template_mesh_u_delta']
+        template_mesh_delta = precomputed['template_mesh_u_delta']
 
-    #     face_details = self.face_details[..., None] * self.face_normals # shape of 11248, 3
+        # face_details = precomputed['face_details']
 
-    #     template_mesh_delta[:self.full_head_index] += face_details
+        # template_mesh_delta[:self.full_head_index] += face_details
 
-    #     expression_mesh_delta_u = precomputed['expression_mesh_delta_u']
-    #     # expression_mesh_delta_u[9409:11248] = 0
-    #     expression_mesh_delta = torch.einsum('bn, mnd -> bmd', features[..., :53], expression_mesh_delta_u[:, :53])
+        template_mesh_delta[:self.full_head_index] += self.face_details * 1e-1
+
+        expression_mesh_delta_u = precomputed['expression_mesh_delta_u']
+        # expression_mesh_delta_u[9409:11248] = 0
+        expression_mesh_delta = torch.einsum('bn, mnd -> bmd', features[..., :53], expression_mesh_delta_u[:, :53])
 
 
-    #     template_mesh_delta = template_mesh_delta + expression_mesh_delta_u[:, -1]
+        template_mesh_delta = template_mesh_delta + expression_mesh_delta_u[:, -1]
 
-    #     ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(features.shape[0], 1))
+        ict_mesh = self.ict_facekit(expression_weights = features[..., :53], identity_weights = self.encoder.identity_weights[None].repeat(features.shape[0], 1))
 
-    #     ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
+        ict_mesh_w_temp = ict_mesh + template_mesh_delta[None]
 
-    #     return_dict = {}
-    #     expression_mesh = ict_mesh_w_temp + expression_mesh_delta
-    #     expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
-    #     return_dict['expression_mesh_posed'] = self.remove_teeth(expression_mesh_posed)
+        return_dict = {}
+        expression_mesh = ict_mesh_w_temp + expression_mesh_delta
+        expression_mesh_posed = self.apply_deformation(expression_mesh, features, pose_weight)
+        return_dict['expression_mesh_posed'] = self.remove_teeth(expression_mesh_posed)
 
-    #     return return_dict
-        
-
+        return return_dict
     def forward(self, image=None, views=None, features=None, image_input=True, pretrain=False):
         if features is None:
             bshape=None

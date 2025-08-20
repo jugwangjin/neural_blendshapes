@@ -10,18 +10,11 @@ import random
 import numpy as np
 import torch.nn.functional as F
 import pytorch3d.transforms as pt3d
+import time
+import cv2
 
 from arguments import config_parser
 from pathlib import Path
-from flare.core import Mesh
-from flare.utils.ict_model import ICTFaceKitTorch
-from flare.core.camera import Camera
-from flare.modules import NeuralShader, get_neural_blendshapes
-from flare.core.renderer import Renderer
-import time
-import nvdiffrec.render.light as light
-from flare.dataset.dataset_real import DatasetLoader  # Import the DatasetLoader
-
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -29,11 +22,7 @@ def set_seed(seed):
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-from flare.utils import (
-    AABB, read_mesh, write_mesh,
-    visualize_training, visualize_training_no_lm,
-    make_dirs, set_defaults_finetune, copy_sources
-)
+import sys
 set_seed(20202464)
 os.environ["GLOG_minloglevel"] = "2"
 
@@ -49,17 +38,17 @@ def load_model(args):
     aabb = AABB(ict_canonical_mesh.vertices.cpu().numpy())
     ict_mesh_aabb = [torch.min(ict_canonical_mesh.vertices, dim=0).values, torch.max(ict_canonical_mesh.vertices, dim=0).values]
 
-    # Load Neural Blendshapes
-    neural_blendshapes = get_neural_blendshapes(
-        model_path=args.model_path,
-        vertex_parts=ict_facekit.vertex_parts, 
-        ict_facekit=ict_facekit, 
-        exp_dir = None, 
-        lambda_=args.lambda_, 
-        aabb = ict_mesh_aabb, 
-        device=device
-    )
-    neural_blendshapes.eval()
+    # neural blendshapes
+    try:
+        model_path = os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'neural_blendshapes_latest.pt')
+    except:
+        model_path = os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'neural_blendshapes.pt')
+
+    print("Training Deformer")
+    face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.neutral_mesh_canonical[0])[0]
+    neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, face_normals=face_normals,device=device) 
+    
+    neural_blendshapes = neural_blendshapes.to(device)
 
 
     lgt = light.create_env_rnd()    
@@ -73,29 +62,13 @@ def load_model(args):
     }
 
 
-    load_shader = Path(args.shader_path)
-
+    # shader
+    lgt = light.create_env_rnd()    
     try:
-        shader = NeuralShader(fourier_features='hashgrid',
-            activation=args.activation,
-            last_activation=torch.nn.Sigmoid(), 
-            disentangle_network_params=disentangle_network_params,
-            bsdf=args.bsdf,
-            aabb=ict_mesh_aabb,
-            device=device)
-        shader = NeuralShader.load(load_shader, device=device)
-        shader.eval()
-
+        shader = NeuralShader.load(os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'shader_latest.pt'), device=device)
     except:
-        shader = NeuralShader(fourier_features='positional',
-                            activation=args.activation,
-                            last_activation=torch.nn.Sigmoid(), 
-                            disentangle_network_params=disentangle_network_params,
-                            bsdf=args.bsdf,
-                            aabb=ict_mesh_aabb,
-                            device=device)
-        shader = NeuralShader.load(load_shader, device=device)
-        shader.eval()
+        shader = NeuralShader.load(os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'shader.pt'), device=device)
+
 
     # Load Renderer
     renderer = Renderer(device=device)
@@ -107,7 +80,7 @@ def get_flame_camera(args):
     # Build a temporary dataset to get 'flame_camera'
     dataset = DatasetLoader(
         args=args,
-        train_dir=args.train_dir,
+        train_dir=args.eval_dir,
         sample_ratio=100,
         pre_load=False,
         train=False,
@@ -124,6 +97,54 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    original_dir = os.getcwd()
+    # Add the path to the 'flare' directory
+    flare_path = os.path.join(args.output_dir, args.run_name, 'sources')
+    
+    sys.path.insert(0, flare_path)
+
+
+    from flame.FLAME import FLAME
+    from flare.core import (
+        Mesh, Renderer
+    )
+    from flare.modules import (
+        NeuralShader, get_neural_blendshapes
+    )
+    from flare.utils import (
+        AABB, read_mesh,
+        save_individual_img, make_dirs, save_relit_intrinsic_materials
+    )
+    import nvdiffrec.render.light as light
+    from flare.dataset import DatasetLoader
+    from flare.dataset import dataset_util
+    from flare.utils.ict_model import ICTFaceKitTorch
+
+
+    from flare.dataset import DatasetLoader
+
+    from flare.utils.ict_model import ICTFaceKitTorch
+    import nvdiffrec.render.light as light
+    from flare.core import (
+        Mesh, Renderer
+    )
+    from flare.modules import (
+        NeuralShader, get_neural_blendshapes
+    )
+    from flare.utils import (
+        AABB, 
+        save_manipulation_image
+    )
+
+
+
+
+    # Select the device
+    device = torch.device('cpu')
+    if torch.cuda.is_available() and args.device >= 0:
+        device = torch.device(f'cuda:{args.device}')
+    print(f"Using device {device}")
+
 
     model, ict_facekit, shader, lgt, renderer = load_model(args)
     model.eval()
@@ -139,17 +160,16 @@ if __name__ == "__main__":
     views_sample = get_flame_camera(args)
 
 
-    handle_values_expression = torch.zeros(3, device=device)
     handle_values = torch.zeros(53, device=device)
-    handle_values2 = torch.zeros(7, device=device)
+    handle_values2 = torch.zeros(10, device=device)
 
 
     # Initialize GUI
     app = gui.Application.instance
     app.initialize()
 
-    window_width = 512+500  # 512 for image, 300 for sliders
-    window_height = 600  # Adjust as needed
+    window_width = 768+500  # 512 for image, 300 for sliders
+    window_height = 768  # Adjust as needed
     window = gui.Application.instance.create_window("GUI", window_width, window_height)
 
     print('created window')
@@ -161,7 +181,7 @@ if __name__ == "__main__":
 
     # Create an ImageWidget to display rendered images
     image_widget = gui.ImageWidget()
-    image_widget.frame = gui.Rect(500, 0, 512, 512)
+    image_widget.frame = gui.Rect(500, 0, 768, 768)
     window.add_child(image_widget)
 
     # Create sliders panel
@@ -172,28 +192,87 @@ if __name__ == "__main__":
     with open('./assets/mediapipe_name_to_indices.pkl', 'rb') as f:
         MEDIAPIPE_BLENDSHAPES = pickle.load(f)
 
-    pose_names = ['rot_x', 'rot_y', 'rot_z', 'trans_x', 'trans_y', 'trans_z', 'scale']
+    pose_names = ['rot_x', 'rot_y', 'rot_z', 'trans_x', 'trans_y', 'trans_z', 'scale', 'global_trans_x', 'global_trans_y', 'global_trans_z']
 
 
     preset_facs = {}
     preset_facs['happiness'] = ['cheekSquint_L', 'cheekSquint_R', 'mouthSmile_L', 'mouthSmile_R']
     preset_facs['sadness'] = ['browInnerUp_L', 'browInnerUp_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
     preset_facs['disgust'] = ['noseSneer_L', 'noseSneer_R', 'browDown_L', 'browDown_R', 'mouthFrown_L', 'mouthFrown_R']
+    preset_facs['surprise'] = ['browOuterUp_L', 'browOuterUp_R', 'browInnerUp_L', 'browInnerUp_R', 'jawOpen']
+    preset_facs['left_wink'] = ['eyeBlink_L', 'mouthSmile_L']
+    preset_facs['right_wink'] = ['eyeBlink_R', 'mouthSmile_R']
+    preset_facs['smile2'] = ['browInnerUp_L',  'mouthSmile_R']
+
+    handle_values_expression = torch.zeros(len(preset_facs.keys()), device=device)
+    # 0: browDown_L
+    # 1: browDown_R
+    # 2: browInnerUp_L
+    # 3: browInnerUp_R
+    # 4: browOuterUp_L
+    # 5: browOuterUp_R
+    # 6: cheekPuff_L
+    # 7: cheekPuff_R
+    # 8: cheekSquint_L
+    # 9: cheekSquint_R
+    # 10: eyeBlink_L
+    # 11: eyeBlink_R
+    # 12: eyeLookDown_L
+    # 13: eyeLookDown_R
+    # 14: eyeLookIn_L
+    # 15: eyeLookIn_R
+    # 16: eyeLookOut_L
+    # 17: eyeLookOut_R
+    # 18: eyeLookUp_L
+    # 19: eyeLookUp_R
+    # 20: eyeSquint_L
+    # 21: eyeSquint_R
+    # 22: eyeWide_L
+    # 23: eyeWide_R
+    # 24: jawForward
+    # 25: jawLeft
+    # 26: jawOpen
+    # 27: jawRight
+    # 28: mouthClose
+    # 29: mouthDimple_L
+    # 30: mouthDimple_R
+    # 31: mouthFrown_L
+    # 32: mouthFrown_R
+    # 33: mouthFunnel
+    # 34: mouthLeft
+    # 35: mouthLowerDown_L
+    # 36: mouthLowerDown_R
+    # 37: mouthPress_L
+    # 38: mouthPress_R
+    # 39: mouthPucker
+    # 40: mouthRight
+    # 41: mouthRollLower
+    # 42: mouthRollUpper
+    # 43: mouthShrugLower
+    # 44: mouthShrugUpper
+    # 45: mouthSmile_L
+    # 46: mouthSmile_R
+    # 47: mouthStretch_L
+    # 48: mouthStretch_R
+    # 49: mouthUpperUp_L
+    # 50: mouthUpperUp_R
+    # 51: noseSneer_L
+    # 52: noseSneer_R
 
     preset_names = list(preset_facs.keys())
 
     labels_expression = [gui.Label(exp) for exp in preset_facs.keys()]
-    sliders_expression = [gui.Slider(gui.Slider.DOUBLE) for _ in range(3)]
+    sliders_expression = [gui.Slider(gui.Slider.DOUBLE) for _ in range(len(preset_facs.keys()))]
 
     labels = [gui.Label(ict_facekit.expression_names[i]) for i in range(53)]
-    labels2 = [gui.Label(pose_names[i]) for i in range(7)]
+    labels2 = [gui.Label(pose_names[i]) for i in range(10)]
     sliders = [gui.Slider(gui.Slider.DOUBLE) for _ in range(53)]
-    sliders2 = [gui.Slider(gui.Slider.DOUBLE) for _ in range(7)]
+    sliders2 = [gui.Slider(gui.Slider.DOUBLE) for _ in range(10)]
 
 
     def update_image():
         features = torch.cat([handle_values, handle_values2], dim=0).unsqueeze(0).to(device)  # Shape: [1, 62]
-
+        print(features)
         with torch.no_grad():
             # Measure time for model forward pass
             start_time = time.time()
@@ -222,11 +301,13 @@ if __name__ == "__main__":
             shader_time = time.time() - start_time
 
             # Convert the rendered image to a numpy array
-            rendered_image = rgb_pred.squeeze(0).cpu().numpy()  # Shape: [H, W, 3]
+            rendered_image = dataset_util.rgb_to_srgb(rgb_pred.squeeze(0)).cpu().numpy()  # Shape: [H, W, 3]
             rendered_image = (np.clip(rendered_image, 0, 1) * 255).astype(np.uint8)
 
             # Ensure the numpy array is contiguous
             rendered_image = np.ascontiguousarray(rendered_image)
+
+            rendered_image = cv2.resize(rendered_image, (768, 768))
 
             # Create an Open3D Image
             o3d_image = o3d.geometry.Image(rendered_image)
@@ -252,16 +333,23 @@ if __name__ == "__main__":
     
     def create_fun3(i):
         def fun(value):
+            print("call")
             handle_values_expression[i] = value
             # get related expression names
             # expression name
+            print("VALUE", value)
+
             expression_name = preset_names[i]
+            print("EXPRESSION NAME", expression_name)
             related_facs = preset_facs[expression_name]
+            print("RELATED FACS", related_facs)
             related_facs_indices = [ict_facekit.expression_names.tolist().index(fac) for fac in related_facs]
+            print("RELATED FACS INDICES", related_facs_indices)
 
             for n in range(len(sliders_expression)):
                 if n != i:
                     sliders_expression[n].double_value = 0.0
+            print("INIT expression sliders to 0")
 
             for n in range(handle_values.shape[0]):
                 if n in related_facs_indices:
@@ -270,6 +358,7 @@ if __name__ == "__main__":
                 else:
                     sliders[n].double_value = 0.0
                     handle_values[n] = 0.0
+            print("UPDATE expression sliders")
             update_image()
         return fun
 
@@ -290,8 +379,8 @@ if __name__ == "__main__":
         slider.double_value = 0.0
         slider.set_on_value_changed(create_fun3(i))
 
-    sliders2[-1].set_limits(0.5, 1.5)
-    sliders2[-1].double_value = 1.0
+    sliders2[-4].set_limits(0, 2)
+    sliders2[-4].double_value = 1
 
     for label, slider in zip(labels_expression, sliders_expression):
         fixed_prop_grid.add_child(label)

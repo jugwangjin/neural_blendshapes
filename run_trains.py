@@ -9,7 +9,7 @@ import time
 def worker(gpu_id, command_queue):
     while not command_queue.empty():
         command, directory = command_queue.get()
-        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/'
+        OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise/'
         os.makedirs(OUTPUT_DIR_ROOT, exist_ok=True)
         for subd in os.listdir(OUTPUT_DIR_ROOT):
             if os.path.exists(os.path.join(OUTPUT_DIR_ROOT, subd)):
@@ -18,7 +18,7 @@ def worker(gpu_id, command_queue):
         # print(f"Running on GPU {gpu_id}: {command}")
         print(os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')), os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')))
 
-        if not os.path.exists(os.path.join('/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/', directory, 'final_eval.txt')) and not os.path.exists(os.path.join('/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/', directory, 'stage_1', 'network_weights', 'neural_blendshapes_latest.pt')):
+        if not os.path.exists(os.path.join('/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise/', directory, 'final_eval.txt')) and not os.path.exists(os.path.join('/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise/', directory, 'stage_1', 'network_weights', 'neural_blendshapes_latest.pt')):
         # if not os.path.exists(os.path.join('/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v14/', directory, 'final_eval.txt')) and not os.path.exists(os.path.join('/Bean/log/gwangjin/2024/nbshapes_comparisons/ours_enc_v10/', directory, 'final_eval.txt')):
 
             if not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')) and not os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'final_eval.txt')):
@@ -86,7 +86,7 @@ def run_trackings(gpu_ids):
     
         
     INPUT_DIR_ROOT = '/Bean/data/gwangjin/2024/nbshapes/flare_2/'
-    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/'
+    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise/'
     
     directories = os.listdir(INPUT_DIR_ROOT)
     # reverse the order
@@ -147,7 +147,7 @@ def run_trackings(gpu_ids):
         command = (f"CUDA_VISIBLE_DEVICES={{}} python train.py --config {conf_file} --compute_mode --skip_wandb", directory)
         commands.append(command)
 
-
+    exit()
     # Create a queue for each GPU
     gpu_queues = {gpu_id: Queue() for gpu_id in gpu_ids}
 
@@ -197,7 +197,7 @@ def run_trackings(gpu_ids):
 
 def remove_all_currently_training_txts():
 
-    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/'
+    OUTPUT_DIR_ROOT = '/Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise/'
     os.makedirs(OUTPUT_DIR_ROOT, exist_ok=True)
     for directory in os.listdir(OUTPUT_DIR_ROOT):
         if os.path.exists(os.path.join(OUTPUT_DIR_ROOT, directory, 'currently_training.txt')):

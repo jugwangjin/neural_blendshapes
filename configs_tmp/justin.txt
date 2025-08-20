@@ -4,7 +4,7 @@ input_dir = /Bean/data/gwangjin/2024/nbshapes/flare_2/justin/justin
 train_dir = ["train"]
 eval_dir = ["test"]
 working_dir = .
-output_dir = /Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise_higher_linear/
+output_dir = /Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise/
 
 batch_size = 2
 sample_idx_ratio = 1
