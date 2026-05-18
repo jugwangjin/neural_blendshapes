@@ -3,18 +3,21 @@
 ## Head face Gaussians
 
 - No per-expression Gaussian delta; follow mesh deformation.
-- Semantic init from ICT `vertex_parts` via `face_idx` + barycentric mix (`gaussian_semantics.py`).
+- Semantic init from ICT `vertex_parts` via `face_idx` + barycentric mix (`rendering/gaussian_semantics.py`).
 - Hybrid labels: **skin/lip/eye/iris anchored**; hair/accessory learnable.
 - `w_sem_anchor` weak CE toward init labels on frozen dims.
 
 ## Eye texture Gaussians
 
 - **Fixed** semantic one-hot: iris control points → `iris`, rest → `eye` (sclera).
-- **Gaze** only via tracker MLP → `set_gaze_from_tracker(gaze_uv_left, gaze_uv_right)`.
-- Not driven by `expression_deformer` or ICT `gaze_from_expression` in training loop.
+- Texture mesh = `vertex_parts` **6 / 7 only** (eyeball), not eye sockets 3/4.
+- **Gaze**: `base_gaze_from_mediapipe(eyeLook*)` + small MLP residual → `GaussianAvatar.forward(..., gaze_uv_left, gaze_uv_right)`.
+- ICT `apply_eyeball_rotation=False` by default.
 
 ```text
-MP → tracker MLP → gaze_uv → uv_eff = uv + gaze_uv
+MP eyeLook → GazeCalibrator → base gaze
+tracker MLP → gaze residual
+→ uv_eff = uv + gaze_uv
 ```
 
 ## gsplat semantic pass

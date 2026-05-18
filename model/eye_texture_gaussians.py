@@ -1,15 +1,13 @@
 """
-Per-eye ICT texture-space Gaussians: UV slide on separate atlases, h=0 on eyeball.
-
-Gaze: base offset from eyeLook* (clamped to gaze_uv_range) + learnable refine.
+Per-eye ICT texture-space Gaussians: h=0, UV slide via gaze_uv from tracker (not expression deformer).
 """
 
 import torch
 import torch.nn as nn
 
-from gaussian_splatting.gaussian_semantics import eye_fixed_semantic_probs
+from rendering.gaussian_semantics import eye_fixed_semantic_probs
 from model.uvh_gaussians import UVHGaussians
-from utils.gaze_uv import apply_gaze_refine, gaze_uv_from_expression
+from utils.gaze_uv import apply_gaze_refine, combine_gaze
 from utils.uv_mesh import UVMesh, surface_points_from_uvh
 
 LEFT_IRIS_MP = [468, 469, 470, 471, 472]
@@ -36,12 +34,14 @@ class EyeTextureGaussians(nn.Module):
         gaze_uv_range=0.12,
         learn_gaze_refine=True,
         n_semantic_classes=7,
+        reproject_uv_every=50,
     ):
         super().__init__()
         self.n_per_eye = n_per_eye
         self.n_iris_control = min(n_iris_control, n_per_eye)
         self.gaze_uv_range = gaze_uv_range
         self.n_semantic_classes = n_semantic_classes
+        self.reproject_uv_every = reproject_uv_every
 
         eye_sem = None
         if n_semantic_classes > 0:
@@ -54,6 +54,7 @@ class EyeTextureGaussians(nn.Module):
             fixed_h=0.0,
             n_semantic_classes=n_semantic_classes,
             fixed_semantic_probs=eye_sem,
+            reproject_uv_every=reproject_uv_every,
         )
         self.right = UVHGaussians(
             n_per_eye,
@@ -61,6 +62,7 @@ class EyeTextureGaussians(nn.Module):
             fixed_h=0.0,
             n_semantic_classes=n_semantic_classes,
             fixed_semantic_probs=eye_sem,
+            reproject_uv_every=reproject_uv_every,
         )
 
         with torch.no_grad():
@@ -74,45 +76,19 @@ class EyeTextureGaussians(nn.Module):
             self.gaze_refine_left = None
             self.gaze_refine_right = None
 
-        self._gaze_base_left = None
-        self._gaze_base_right = None
-
-    def set_gaze_from_tracker(self, gaze_uv_left, gaze_uv_right):
-        """
-        Primary gaze path: tracker MLP outputs (MediaPipe iris / eyeLook corrected).
-        Separate from mesh expression_deformer.
-        """
-        self._gaze_base_left = gaze_uv_left.reshape(-1)[:2]
-        self._gaze_base_right = gaze_uv_right.reshape(-1)[:2]
-
-    def set_gaze_base(self, left, right):
-        """Alias for tracker gaze UV."""
-        self.set_gaze_from_tracker(left, right)
-
-    def gaze_from_expression(self, expression_weights, expression_names):
-        self._gaze_base_left = gaze_uv_from_expression(
-            expression_weights, expression_names, "L", self.gaze_uv_range
-        )
-        self._gaze_base_right = gaze_uv_from_expression(
-            expression_weights, expression_names, "R", self.gaze_uv_range
-        )
-
-    def _effective_gaze(self, side):
-        if side == "L":
-            base = self._gaze_base_left
-            refine = self.gaze_refine_left
-        else:
-            base = self._gaze_base_right
-            refine = self.gaze_refine_right
-        if base is None:
-            base = torch.zeros(2, device=self.left.uv.device)
-        offset = apply_gaze_refine(base, refine)
-        return offset.clamp(-self.gaze_uv_range, self.gaze_uv_range)
+    def _apply_gaze_refine(self, gaze_uv, side):
+        refine = self.gaze_refine_left if side == "L" else self.gaze_refine_right
+        if refine is None:
+            return gaze_uv
+        if gaze_uv.ndim == 1:
+            gaze_uv = gaze_uv.unsqueeze(0)
+        out = combine_gaze(gaze_uv, refine.unsqueeze(0), self.gaze_uv_range)
+        return out.squeeze(0) if out.shape[0] == 1 else out
 
     def _forward_one(self, module: UVHGaussians, uv_mesh: UVMesh, verts, faces, gaze_offset):
         uv_eff = module.uv + gaze_offset.unsqueeze(0)
         h = torch.zeros_like(module.h)
-        xyz, face_idx, bary, normals = surface_points_from_uvh(uv_eff, h, uv_mesh)
+        xyz, face_idx, bary, normals = surface_points_from_uvh(uv_eff, h, uv_mesh, module)
         scale = torch.exp(module.log_scale).clamp(max=0.02)
         opacity = torch.sigmoid(module.opacity)
         out = {
@@ -133,9 +109,27 @@ class EyeTextureGaussians(nn.Module):
             out["sem_prob"] = torch.softmax(module.sem_logits, dim=-1)
         return out
 
-    def forward(self, left_uv_mesh: UVMesh, right_uv_mesh: UVMesh, verts, faces):
-        gaze_l = self._effective_gaze("L")
-        gaze_r = self._effective_gaze("R")
+    def forward(
+        self,
+        left_uv_mesh: UVMesh,
+        right_uv_mesh: UVMesh,
+        verts,
+        faces,
+        gaze_uv_left=None,
+        gaze_uv_right=None,
+    ):
+        device = self.left.uv.device
+        if gaze_uv_left is None:
+            gaze_uv_left = torch.zeros(2, device=device)
+        if gaze_uv_right is None:
+            gaze_uv_right = torch.zeros(2, device=device)
+
+        if gaze_uv_left.ndim == 2:
+            gaze_l = self._apply_gaze_refine(gaze_uv_left[0], "L")
+            gaze_r = self._apply_gaze_refine(gaze_uv_right[0], "R")
+        else:
+            gaze_l = self._apply_gaze_refine(gaze_uv_left, "L")
+            gaze_r = self._apply_gaze_refine(gaze_uv_right, "R")
 
         out_l = self._forward_one(self.left, left_uv_mesh, verts, faces, gaze_l)
         out_r = self._forward_one(self.right, right_uv_mesh, verts, faces, gaze_r)
@@ -143,8 +137,8 @@ class EyeTextureGaussians(nn.Module):
         n = self.n_per_eye
         iris_idx = torch.cat(
             [
-                torch.arange(self.n_iris_control, device=out_l["xyz"].device),
-                torch.arange(n, n + self.n_iris_control, device=out_l["xyz"].device),
+                torch.arange(self.n_iris_control, device=device),
+                torch.arange(n, n + self.n_iris_control, device=device),
             ]
         )
 
@@ -158,3 +152,10 @@ class EyeTextureGaussians(nn.Module):
             "opacity": torch.cat([out_l["opacity"], out_r["opacity"]], dim=0),
             "color": torch.cat([out_l["color"], out_r["color"]], dim=0),
             "h": torch.cat([out_l["h"], out_r["h"]], dim=0),
+            "iris_control_xyz": xyz[iris_idx],
+            "is_eyeball_surface": torch.ones(xyz.shape[0], dtype=torch.bool, device=device),
+            "texture_space": ("left_eye", "right_eye"),
+        }
+        if out_l.get("sem_prob") is not None:
+            out["sem_prob"] = torch.cat([out_l["sem_prob"], out_r["sem_prob"]], dim=0)
+        return out

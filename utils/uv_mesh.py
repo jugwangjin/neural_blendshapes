@@ -79,15 +79,35 @@ def uv_to_face_bary(uv_points, uv_mesh: UVMesh, eps=1e-4):
     return face_idx, bary
 
 
-def surface_points_from_uvh(uv, h, uv_mesh: UVMesh):
+def _lookup_face_bary(uv, uv_mesh, uvh_module):
+    if uvh_module is None:
+        return uv_to_face_bary(uv, uv_mesh)
+
+    reproject = uvh_module.cached_face_idx is None
+    if uvh_module.cached_face_idx is not None and uvh_module.training:
+        uvh_module._uv_lookup_step += 1
+        if uvh_module._uv_lookup_step % uvh_module.reproject_uv_every == 0:
+            reproject = True
+
+    if reproject:
+        fi, br = uv_to_face_bary(uv, uv_mesh)
+        uvh_module.cached_face_idx = fi
+        uvh_module.cached_bary = br
+        return fi, br
+
+    return uvh_module.cached_face_idx, uvh_module.cached_bary
+
+
+def surface_points_from_uvh(uv, h, uv_mesh: UVMesh, uvh_module=None):
     """
     uv: [G, 2], h: [G, 1]
     X = S(u,v) + h * N(u,v)   (h=0 for eyeball texture spaces)
+    uvh_module: optional UVHGaussians — caches face_idx/bary between steps.
     """
     from utils.barycentric import sample_normals, sample_surface
     from utils.mesh_ops import compute_vertex_normals
 
-    face_idx, bary = uv_to_face_bary(uv, uv_mesh)
+    face_idx, bary = _lookup_face_bary(uv, uv_mesh, uvh_module)
     v_normals = compute_vertex_normals(uv_mesh.verts, uv_mesh.faces)
     p = sample_surface(uv_mesh.verts, uv_mesh.faces, face_idx, bary)
     n = sample_normals(v_normals, uv_mesh.faces, face_idx, bary)

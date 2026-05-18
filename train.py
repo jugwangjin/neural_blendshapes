@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from config import Config
 from dataset.video_dataset import VideoDataset, collate_batch
-from gaussian_splatting.renderer import GaussianRenderer
+from rendering import GaussianRenderer
 from losses.train_losses import compute_losses
 from model.expr_regions import build_expr_region_weight
 from model.expression_deform_mlp import SupportGatedExpressionDeformer
@@ -74,6 +74,7 @@ def main():
         n_blendshapes=cfg.num_mp_blendshapes,
         gamma_min=cfg.gamma_min,
         gamma_max=cfg.gamma_max,
+        gaze_uv_range=cfg.gaze_uv_range,
     ).to(device)
 
     deformer = ICTDeformer(ict).to(device)
@@ -146,18 +147,15 @@ def main():
                     expr_delta=expr_delta,
                 )
 
-                avatar.eyes.set_gaze_from_tracker(
-                    corr["gaze_uv_left"][0], corr["gaze_uv_right"][0]
-                )
                 avatar_out = avatar(
                     verts_out["verts_posed"][0],
                     ict.faces,
-                    expression_weights=verts_out["expression_weights"],
-                    expression_names=ict.expression_names,
+                    gaze_uv_left=corr["gaze_uv_left"],
+                    gaze_uv_right=corr["gaze_uv_right"],
                 )
                 avatar_out["mesh_xyz"] = verts_out["verts_posed"]
 
-                render_semantic = spec.w_seg > 0 and getattr(renderer, "uses_gsplat", False)
+                render_semantic = spec.w_seg > 0
                 render = renderer(
                     avatar_out,
                     camera,
@@ -219,4 +217,8 @@ def main():
 
         current_spec = spec
 
-    print(f"\nDone. Total steps: {global_step}. Last stage: {current_spec.name if current_spec else 'n/
+    print(f"\nDone. Total steps: {global_step}. Last stage: {current_spec.name if current_spec else 'n/a'}")
+
+
+if __name__ == "__main__":
+    main()

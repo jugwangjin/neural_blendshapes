@@ -1,25 +1,29 @@
 """
-ICT multi texture-space meshes from vertex_parts.
+ICT texture-space meshes from vertex_parts.
 
-parts_split (ict_facekit_to_npy.py):
-  0: 0-9408       face skin
-  1: 9409-11247    mouth socket
-  2: 11248-13293   ...
-  3: 13294-13677   left eye socket
-  4: 13678-14061   right eye socket
-  5: 14062-17038   ...
-  6: 21451-23020   left eyeball
-  7: 23021-24590   right eyeball
+Eye texture slide uses eyeball parts only (6, 7), not eye sockets (3, 4).
+Vertex index ranges may differ after triangulation; vertex_parts ids are authoritative.
 """
 
 import torch
 
 from utils.uv_mesh import UVMesh
 
-# ICT vertex_parts ids per texture atlas / material island
+# vertex_parts ids (ict_facekit_to_npy)
+PART_FACE_SKIN = (0,)
+PART_HEAD_NECK = (1,)
+PART_MOUTH_SOCKET = (2,)
+PART_EYE_SOCKET_L = (3,)
+PART_EYE_SOCKET_R = (4,)
+PART_GUM_TONGUE = (5,)
+PART_EYEBALL_L = (6,)
+PART_EYEBALL_R = (7,)
+
 PART_FACE = (0, 1, 2, 5)
-PART_LEFT_EYE = (3, 6)
-PART_RIGHT_EYE = (4, 7)
+PART_LEFT_EYE_TEXTURE = (6,)
+PART_RIGHT_EYE_TEXTURE = (7,)
+PART_LEFT_EYE = PART_LEFT_EYE_TEXTURE
+PART_RIGHT_EYE = PART_RIGHT_EYE_TEXTURE
 PART_EYEBALL = (6, 7)
 
 
@@ -30,7 +34,6 @@ def _vertex_parts_tensor(vertex_parts, device):
 
 
 def filter_face_indices(faces, vertex_parts, allowed_part_ids):
-    """Keep faces whose three corners all belong to allowed_part_ids."""
     allowed = set(allowed_part_ids)
     keep = []
     if torch.is_tensor(vertex_parts):
@@ -48,10 +51,6 @@ def filter_face_indices(faces, vertex_parts, allowed_part_ids):
 
 
 def build_texture_space_mesh(verts, faces, uvs, uv_faces, vertex_parts, allowed_part_ids, device):
-    """
-    Submesh UVMesh: same full verts/uvs, restricted face set for one texture space.
-    uv_to_face_bary only searches triangles in this space.
-    """
     face_idx = filter_face_indices(faces, vertex_parts, allowed_part_ids)
     return UVMesh(
         verts=verts.to(device),
@@ -62,8 +61,6 @@ def build_texture_space_mesh(verts, faces, uvs, uv_faces, vertex_parts, allowed_
 
 
 class TextureSpaceMeshes:
-    """face / left_eye / right_eye UVMeshes + active face index lists."""
-
     def __init__(self, face, left_eye, right_eye, face_face_idx, left_eye_face_idx, right_eye_face_idx):
         self.face = face
         self.left_eye = left_eye
@@ -85,10 +82,10 @@ class TextureSpaceMeshes:
             verts, faces, uvs, uv_faces, vp, PART_FACE, device
         )
         left_mesh, left_fi = build_texture_space_mesh(
-            verts, faces, uvs, uv_faces, vp, PART_LEFT_EYE, device
+            verts, faces, uvs, uv_faces, vp, PART_LEFT_EYE_TEXTURE, device
         )
         right_mesh, right_fi = build_texture_space_mesh(
-            verts, faces, uvs, uv_faces, vp, PART_RIGHT_EYE, device
+            verts, faces, uvs, uv_faces, vp, PART_RIGHT_EYE_TEXTURE, device
         )
         face_mesh.active_face_idx = face_fi
         left_mesh.active_face_idx = left_fi

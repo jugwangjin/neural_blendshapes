@@ -1,9 +1,6 @@
 [submodule "face_normals"]
 	path = face_normals
 	url = https://github.com/boukhayma/face_normals
-[submodule "gaussian_splatting"]
-	path = gaussian_splatting
-	url = https://github.com/graphdeco-inria/gaussian-splatting.git
 [submodule "gsplat"]
 	path = gsplat
 	url = https://github.com/nerfstudio-project/gsplat.git

@@ -1,14 +1,22 @@
-# gsplat renderer + semantic segmentation
+# gsplat avatar renderer + semantic segmentation
 
-## Backend
+## Layout
 
-`GaussianRenderer` prefers **gsplat** (`config.renderer_backend = "gsplat"`).
-Falls back to `diff_gaussian_rasterization` if gsplat is not installed.
+Avatar rasterization lives in **`rendering/`** (repo root). **gsplat is required** — module top-level `from gsplat import rasterization`. No INRIA / `gaussian_splatting` fallback. The **`gsplat/` git submodule is never modified**.
+
+| Module | Role |
+|--------|------|
+| `rendering/avatar_renderer.py` | `AvatarRenderer` / `GaussianRenderer` — RGB + semantic two-pass |
+| `rendering/pack.py` | Pack `GaussianAvatar` tensors for gsplat |
+| `rendering/gsplat_camera.py` | `FixedCamera` → OpenCV `viewmats` + `K` |
+| `rendering/semantic.py` | Class names + per-class h priors |
+| `rendering/gaussian_semantics.py` | ICT `vertex_parts` → Gaussian `sem_logits` init |
 
 Install (WSL/docker):
 
 ```bash
 pip install gsplat
+# or: git submodule update --init gsplat && pip install -e gsplat
 ```
 
 ## Two-pass rendering
@@ -18,20 +26,20 @@ pip install gsplat
 | RGB | sigmoid(rgb) `[G,3]` | `None` | `render["rgb"]` `[1,3,H,W]` |
 | Semantic | `sem_prob` `[G,K]` | `None` | `render["semantic"]` `[1,K,H,W]` |
 
-Entry points in `gaussian_splatting/gsplat_renderer.py`:
+Entry points in `rendering/avatar_renderer.py`:
 
 - `render_rgb()`
 - `render_features()` — N-D features, `backgrounds=[1,K]`
 - `render_depth()` — `render_mode="ED"` etc.
 - `forward()` — RGB + optional semantic pass
 
-Camera: `gsplat_camera.fixed_camera_to_gsplat()` — OpenCV w2c + `K`, **no GL bridge** (unlike INRIA path).
+Camera: `rendering/gsplat_camera.fixed_camera_to_gsplat()` — OpenCV w2c + `K`.
 
 ## Gaussian semantic logits
 
 Per-Gaussian `sem_logits [G,K]` → `softmax` → composited in pass 2.
 
-Classes (`gaussian_splatting/semantic.py`):
+Classes (`rendering/semantic.py`):
 
 `skin, lip, eye, iris, hair, accessory, bg`
 
@@ -46,4 +54,4 @@ Dataset: `{frame}_seg.png` next to cache, or under `cfg.segmentation_dir`.
 
 ## Stage weights
 
-`w_seg` active from stage **2_gaussian_uvh** onward (`training/stages.py`).
+`w_seg` active from stage **2B_gaussian_detail** onward (`training/stages.py`).

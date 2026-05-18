@@ -1,17 +1,16 @@
-"""MediaPipe-only correction MLP (activation gate + gamma + pose/gaze residuals)."""
+"""MediaPipe correction: activation gate + gamma + pose + gaze (eyeLook base + residual)."""
 
 import torch
 import torch.nn as nn
 
+from utils.gaze_uv import GazeCalibrator, base_gaze_from_mediapipe, combine_gaze
 from utils.smoothstep import smoothstep
 
 
 class TrackerCorrectionMLP(nn.Module):
     """
-    MediaPipe activation pattern is preserved (detached gate).
-    Gamma personalizes intensity only on active AUs.
-
     C_eff = active(C_raw) * C_raw ** gamma
+    gaze = clamp( base_eyeLook(C_raw) + small_MLP_residual )
     """
 
     def __init__(
@@ -23,6 +22,7 @@ class TrackerCorrectionMLP(nn.Module):
         gamma_max=2.5,
         active_lo=0.02,
         active_hi=0.08,
+        gaze_uv_range=0.12,
         use_landmarks=False,
     ):
         super().__init__()
@@ -31,7 +31,9 @@ class TrackerCorrectionMLP(nn.Module):
         self.gamma_max = gamma_max
         self.active_lo = active_lo
         self.active_hi = active_hi
+        self.gaze_uv_range = gaze_uv_range
         self.use_landmarks = use_landmarks
+        self.gaze_calibrator = GazeCalibrator(uv_range=gaze_uv_range)
 
         in_dim = n_blendshapes + (478 * 2 if use_landmarks else 0) + pose_dim
         self.trunk = nn.Sequential(
@@ -75,13 +77,23 @@ class TrackerCorrectionMLP(nn.Module):
             gamma = torch.ones_like(gamma)
         coeffs_corr = active * c_raw.pow(gamma)
 
+        gaze_base_l, gaze_base_r = base_gaze_from_mediapipe(c_raw, self.gaze_calibrator)
+        gaze_res_l = self.head_gaze_l(h)
+        gaze_res_r = self.head_gaze_r(h)
+        gaze_uv_left = combine_gaze(gaze_base_l, gaze_res_l, self.gaze_uv_range)
+        gaze_uv_right = combine_gaze(gaze_base_r, gaze_res_r, self.gaze_uv_range)
+
         return {
             "gamma": gamma,
             "coeffs": coeffs_corr,
             "coeffs_raw": c_raw,
             "active": active,
+            "gaze_base_left": gaze_base_l,
+            "gaze_base_right": gaze_base_r,
+            "gaze_residual_left": gaze_res_l,
+            "gaze_residual_right": gaze_res_r,
+            "gaze_uv_left": gaze_uv_left,
+            "gaze_uv_right": gaze_uv_right,
             "pose_residual": self.head_pose(h),
             "translation_residual": self.head_trans(h),
-            "gaze_uv_left": self.head_gaze_l(h),
-            "gaze_uv_right": self.head_gaze_r(h),
         }

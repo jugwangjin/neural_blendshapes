@@ -71,7 +71,7 @@ class GaussianAvatar(nn.Module):
         return model
 
     def _init_face_semantics_from_ict(self, ict):
-        from gaussian_splatting.gaussian_semantics import init_face_gaussian_semantics
+        from rendering.gaussian_semantics import init_face_gaussian_semantics
 
         if self.face.n_semantic_classes == 0:
             return
@@ -87,7 +87,15 @@ class GaussianAvatar(nn.Module):
             ict.faces,
         )
 
-    def forward(self, verts, faces, expression_weights=None, expression_names=None):
+    def forward(
+        self,
+        verts,
+        faces,
+        gaze_uv_left=None,
+        gaze_uv_right=None,
+        expression_weights=None,
+        expression_names=None,
+    ):
         tm = self.texture_meshes
         face_mesh = tm.face
         left_mesh = tm.left_eye
@@ -104,7 +112,14 @@ class GaussianAvatar(nn.Module):
                 face_out["xyz"].shape[0], dtype=torch.bool, device=face_out["xyz"].device
             )
 
-        eye_out = self.eyes(left_mesh, right_mesh, verts, faces)
+        eye_out = self.eyes(
+            left_mesh,
+            right_mesh,
+            verts,
+            faces,
+            gaze_uv_left=gaze_uv_left,
+            gaze_uv_right=gaze_uv_right,
+        )
 
         is_anchor = torch.cat(
             [face_out["is_anchor_surface"], eye_out["is_eyeball_surface"]], dim=0
@@ -120,4 +135,12 @@ class GaussianAvatar(nn.Module):
             "opacity": torch.cat([face_out["opacity"], eye_out["opacity"]], dim=0),
             "color": torch.cat([face_out["color"], eye_out["color"]], dim=0),
             "h": torch.cat([face_out["h"], eye_out["h"]], dim=0),
-            "is_ancho
+            "is_anchor_surface": is_anchor,
+            "is_eyeball_surface": eye_out["is_eyeball_surface"],
+            "iris_control_xyz": eye_out["iris_control_xyz"],
+            "gaze_uv_left": eye_out["left"]["gaze_offset"],
+            "gaze_uv_right": eye_out["right"]["gaze_offset"],
+        }
+        if face_out.get("sem_prob") is not None:
+            out["sem_prob"] = torch.cat([face_out["sem_prob"], eye_out["sem_prob"]], dim=0)
+        return out

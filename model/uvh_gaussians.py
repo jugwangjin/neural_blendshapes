@@ -19,8 +19,13 @@ class UVHGaussians(nn.Module):
         fixed_h=None,
         n_semantic_classes=0,
         fixed_semantic_probs=None,
+        reproject_uv_every=50,
     ):
         super().__init__()
+        self.reproject_uv_every = reproject_uv_every
+        self._uv_lookup_step = 0
+        self.cached_face_idx = None
+        self.cached_bary = None
         if uv_init is None:
             uv_init = torch.rand(n_gaussians, 2)
         self.uv = nn.Parameter(uv_init.clone())
@@ -60,10 +65,27 @@ class UVHGaussians(nn.Module):
             uv = uv + uv_offset.unsqueeze(0)
 
         h = self.get_h()
-        xyz, face_idx, bary, normals = surface_points_from_uvh(uv, h, mesh)
+        xyz, face_idx, bary, normals = surface_points_from_uvh(uv, h, mesh, self)
         scale = torch.exp(self.log_scale).clamp(max=0.05)
         opacity = torch.sigmoid(self.opacity)
         out = {
             "xyz": xyz,
             "scale": scale,
-            "rotation": self.ro
+            "rotation": self.rotation,
+            "opacity": opacity,
+            "color": self.color,
+            "h": h,
+            "face_idx": face_idx,
+            "bary": bary,
+            "normals": normals,
+            "group": "face_uvh",
+        }
+        if self.sem_prob_fixed is not None:
+            out["sem_prob"] = self.sem_prob_fixed
+        elif self.sem_logits is not None:
+            from rendering.gaussian_semantics import semantic_probs_with_anchor
+
+            out["sem_prob"] = semantic_probs_with_anchor(
+                self.sem_logits, self.sem_anchor, self.sem_frozen_dims
+            )
+        return out

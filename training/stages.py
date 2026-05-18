@@ -42,6 +42,7 @@ class StageSpec:
     w_opacity: float = 0.0
     w_gamma_prior: float = 0.0
     w_pose_prior: float = 0.0
+    w_gaze_residual: float = 0.0
     w_expr_deform_reg: float = 0.0
     w_expr_neutral: float = 0.0
     w_expr_leak: float = 0.0
@@ -88,6 +89,7 @@ STAGE_SCHEDULE: list[StageSpec] = [
         w_h=0.5,
         w_gamma_prior=5.0,
         w_pose_prior=1.0,
+        w_gaze_residual=0.1,
         w_template_smooth=0.1,
     ),
     StageSpec(
@@ -167,4 +169,6 @@ def iter_stages(schedule=None):
     offset = 0
     for i, spec in enumerate(schedule):
         if spec.steps <= 0:
-            contin
+            continue
+        yield i, spec, offset, offset + spec.steps
+        offset += spec.steps

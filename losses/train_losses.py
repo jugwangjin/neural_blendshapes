@@ -130,7 +130,7 @@ def compute_losses(
         and getattr(face_mod, "sem_anchor", None) is not None
         and _get_w(cfg, "w_sem_anchor", 0.0) > 0
     ):
-        from gaussian_splatting.gaussian_semantics import loss_semantic_anchor
+        from rendering.gaussian_semantics import loss_semantic_anchor
 
         losses["sem_anchor"] = loss_semantic_anchor(
             face_mod.sem_logits, face_mod.sem_anchor, face_mod.sem_frozen_dims
@@ -143,6 +143,13 @@ def compute_losses(
         pr = corr["pose_residual"]
         tr = corr["translation_residual"]
         losses["pose_prior"] = pr.pow(2).mean() + tr.pow(2).mean()
+
+    if corr is not None and _get_w(cfg, "w_gaze_residual", 0.0) > 0:
+        from utils.gaze_uv import gaze_residual_prior_loss
+
+        losses["gaze_residual"] = gaze_residual_prior_loss(corr["gaze_residual_left"]) + gaze_residual_prior_loss(
+            corr["gaze_residual_right"]
+        )
 
     if expr_deform is not None and expr_delta is not None:
         c_raw = corr.get("coeffs_raw", corr["coeffs"])
@@ -176,6 +183,26 @@ def compute_losses(
         ("opacity", "w_opacity"),
         ("gamma_prior", "w_gamma_prior"),
         ("pose_prior", "w_pose_prior"),
+        ("gaze_residual", "w_gaze_residual"),
         ("expr_deform_reg", "w_expr_deform_reg"),
         ("expr_neutral", "w_expr_neutral"),
-        ("expr_lea
+        ("expr_leak", "w_expr_leak"),
+        ("expr_amp", "w_expr_amp"),
+        ("sem_anchor", "w_sem_anchor"),
+        ("template_smooth", None),
+        ("identity_smooth", "w_identity_smooth"),
+    ]
+    ref = avatar_out["xyz"]
+    total = torch.zeros((), device=ref.device, dtype=ref.dtype)
+    for key, wkey in terms:
+        if key not in losses:
+            continue
+        if key == "mask":
+            w = w_mask
+        elif key == "template_smooth":
+            w = w_tpl
+        else:
+            w = _get_w(cfg, wkey, 0.0)
+        total = total + w * losses[key]
+    losses["total"] = total
+    return losses

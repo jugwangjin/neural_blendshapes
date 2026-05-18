@@ -135,7 +135,7 @@ class ICTFaceKitTorch(torch.nn.Module):
         expression_weights=None,
         identity_weights=None,
         to_canonical=True,
-        apply_eyeball_rotation=True,
+        apply_eyeball_rotation=False,
     ):
         """
         Forward pass of the ICTFaceKitTorch model.

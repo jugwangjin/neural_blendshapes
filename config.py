@@ -57,10 +57,9 @@ class Config:
     w_scale: float = 0.001
     w_opacity: float = 0.001
 
-    # render
+    # render (gsplat only — see rendering/avatar_renderer.py)
     image_size: int = 512
-    renderer_backend: str = "gsplat"
     n_semantic_classes: int = 7
 
-    # vendor 3DGS (submodule at repo root; do not edit; legacy fallback)
-    gs_submodule: Path = Path("gaussian-splatting")
+    # gsplat: pip install gsplat OR git submodule at ./gsplat (do not edit submodule)
+    gsplat_submodule: Path = Path("gsplat")

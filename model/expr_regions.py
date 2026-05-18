@@ -45,4 +45,9 @@ def build_expr_region_weight(ict_facekit) -> torch.Tensor:
             torch.tensor(1.0),
         )
     if hasattr(ict_facekit, "eyeball_indices"):
-        w[ict_facekit.
+        w[ict_facekit.eyeball_indices] = 0.0
+    if hasattr(ict_facekit, "not_face_indices"):
+        w[ict_facekit.not_face_indices] = torch.minimum(
+            w[ict_facekit.not_face_indices], torch.tensor(0.2)
+        )
+    return w

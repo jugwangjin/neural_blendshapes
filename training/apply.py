@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import torch
 
-from gaussian_splatting.semantic import h_prior_tensors
+from rendering.semantic import h_prior_tensors
 from training.stages import StageSpec
 
 
@@ -23,6 +23,7 @@ def stage_loss_cfg(spec: StageSpec):
         w_opacity=spec.w_opacity,
         w_gamma_prior=spec.w_gamma_prior,
         w_pose_prior=spec.w_pose_prior,
+        w_gaze_residual=spec.w_gaze_residual,
         w_expr_deform_reg=spec.w_expr_deform_reg,
         w_expr_neutral=spec.w_expr_neutral,
         w_expr_leak=spec.w_expr_leak,
@@ -204,4 +205,7 @@ def build_optimizers(spec, tracker, deformer, avatar, expr_deform):
     return mesh_optim, gaussian_optim
 
 
-def init_training_state(ava
+def init_training_state(avatar, expr_deform):
+    with torch.no_grad():
+        if avatar.face.fixed_h is None:
+            avatar.face.h.zero_()

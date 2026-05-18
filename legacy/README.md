@@ -1,14 +1,7 @@
-# Legacy FLARE stack (quarantined)
+# Legacy experiments (not used by `train.py`)
 
-Do not import from training code. Kept for reference / offline tools only.
+- `eye_plane_gaussians.py` — local tangent-plane eye Gaussians (superseded by `model/eye_texture_gaussians.py`)
 
-Move or symlink here when cleaning up:
+Active training stack: `train.py` at repo root (MediaPipe → tracker → ICT → UVH/gsplat).
 
-- `flare/`
-- `nvdiffrec/`
-- `processing/flame/` (FLAME only for offline MP embedding bake)
-- `arguments.py`, `configs_tmp/`
-- `model/encoder.py`, `model/deformer.py` (`NeuralBlendshapes` + ResNet)
-- Root scripts: `test.py`, `track_video.py`, `draw_mediapipe.py`, etc.
-
-Active stack: `model/tracker_mlp.py`, `model/ict_deformer.py`, `model/gaussian_avatar.py`, `train.py`.
+FLARE/FLAME entry points remain in repo root scripts (`load_nbshapes.py`, etc.) for reference only.

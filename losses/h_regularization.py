@@ -4,7 +4,7 @@ h regularization: anchor surface (legacy) or semantic class-conditioned prior.
 
 import torch
 
-from gaussian_splatting.semantic import DEFAULT_H_SIGMA, h_prior_tensors
+from rendering.semantic import DEFAULT_H_SIGMA, h_prior_tensors
 
 
 def charbonnier(x, eps=1e-3):
