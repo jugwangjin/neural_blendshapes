@@ -1,17 +1,14 @@
 """
-Per-eye ICT texture-space Gaussians: h=0, UV slide via gaze_uv from tracker (not expression deformer).
+Per-eye ICT texture-space Gaussians: h=0, UV slide via gaze_uv from tracker.
 """
 
 import torch
 import torch.nn as nn
 
+from model.texture_space_gaussians import TextureSpaceGaussians
 from rendering.gaussian_semantics import eye_fixed_semantic_probs
-from model.uvh_gaussians import UVHGaussians
-from utils.gaze_uv import apply_gaze_refine, combine_gaze
+from utils.gaze_uv import combine_gaze
 from utils.uv_mesh import UVMesh, surface_points_from_uvh
-
-LEFT_IRIS_MP = [468, 469, 470, 471, 472]
-RIGHT_IRIS_MP = [473, 474, 475, 476, 477]
 
 IRIS_TEMPLATE_UV = torch.tensor(
     [
@@ -28,41 +25,37 @@ IRIS_TEMPLATE_UV = torch.tensor(
 class EyeTextureGaussians(nn.Module):
     def __init__(
         self,
-        n_per_eye=64,
+        n_per_eye=1024,
         sh_dim=3,
         n_iris_control=5,
         gaze_uv_range=0.12,
         learn_gaze_refine=True,
         n_semantic_classes=7,
-        reproject_uv_every=50,
     ):
         super().__init__()
         self.n_per_eye = n_per_eye
         self.n_iris_control = min(n_iris_control, n_per_eye)
         self.gaze_uv_range = gaze_uv_range
         self.n_semantic_classes = n_semantic_classes
-        self.reproject_uv_every = reproject_uv_every
 
         eye_sem = None
         if n_semantic_classes > 0:
             eye_sem = eye_fixed_semantic_probs(
                 n_per_eye, self.n_iris_control, n_semantic_classes, device="cpu"
             )
-        self.left = UVHGaussians(
+        self.left = TextureSpaceGaussians(
             n_per_eye,
             sh_dim=sh_dim,
             fixed_h=0.0,
             n_semantic_classes=n_semantic_classes,
             fixed_semantic_probs=eye_sem,
-            reproject_uv_every=reproject_uv_every,
         )
-        self.right = UVHGaussians(
+        self.right = TextureSpaceGaussians(
             n_per_eye,
             sh_dim=sh_dim,
             fixed_h=0.0,
             n_semantic_classes=n_semantic_classes,
             fixed_semantic_probs=eye_sem,
-            reproject_uv_every=reproject_uv_every,
         )
 
         with torch.no_grad():
@@ -85,7 +78,7 @@ class EyeTextureGaussians(nn.Module):
         out = combine_gaze(gaze_uv, refine.unsqueeze(0), self.gaze_uv_range)
         return out.squeeze(0) if out.shape[0] == 1 else out
 
-    def _forward_one(self, module: UVHGaussians, uv_mesh: UVMesh, verts, faces, gaze_offset):
+    def _forward_one(self, module: TextureSpaceGaussians, uv_mesh: UVMesh, verts, faces, gaze_offset):
         uv_eff = module.uv + gaze_offset.unsqueeze(0)
         h = torch.zeros_like(module.h)
         xyz, face_idx, bary, normals = surface_points_from_uvh(uv_eff, h, uv_mesh, module)
@@ -154,7 +147,6 @@ class EyeTextureGaussians(nn.Module):
             "h": torch.cat([out_l["h"], out_r["h"]], dim=0),
             "iris_control_xyz": xyz[iris_idx],
             "is_eyeball_surface": torch.ones(xyz.shape[0], dtype=torch.bool, device=device),
-            "texture_space": ("left_eye", "right_eye"),
         }
         if out_l.get("sem_prob") is not None:
             out["sem_prob"] = torch.cat([out_l["sem_prob"], out_r["sem_prob"]], dim=0)

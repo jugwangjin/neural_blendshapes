@@ -81,8 +81,9 @@ class ICTFaceKitTorch(torch.nn.Module):
         expression_shape_modes_norm = torch.norm(torch.tensor(expression_shape_modes, dtype=torch.float32), dim=-1) # shape of (num_expression, num_vertices)
         expression_shape_modes_norm = expression_shape_modes_norm / (torch.amax(expression_shape_modes_norm, dim=1, keepdim=True) + 1e-8) # shape of (num_expression, num_vertices)
 
-        self.register_buffer('left_eyeball_center', torch.mean(self.neutral_mesh[:, 13294:13678], dim=1).clone().detach())
-        self.register_buffer('right_eyeball_center', torch.mean(self.neutral_mesh[:, 13678:14062], dim=1).clone().detach())
+        # ICT topology: eyeball verts 21451:23021 (L), 23021:24591 (R) — not eye sockets 13294:14062
+        self.register_buffer('left_eyeball_center', torch.mean(self.neutral_mesh[:, 21451:23021], dim=1).clone().detach())
+        self.register_buffer('right_eyeball_center', torch.mean(self.neutral_mesh[:, 23021:24591], dim=1).clone().detach())
         
         self.left_eyeball_blendshape_indices = [self.expression_names.tolist().index('eyeLookUp_L'), self.expression_names.tolist().index('eyeLookDown_L'), 
                                                 self.expression_names.tolist().index('eyeLookIn_L'), self.expression_names.tolist().index('eyeLookOut_L'), ]
@@ -113,8 +114,8 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.register_buffer('neutral_mesh_canonical', self.to_canonical_space(self.neutral_mesh).clone().detach())
 
     def update_eyeball_centers(self, template_mesh):
-        self.register_buffer('left_eyeball_center', torch.mean(template_mesh[None, 13294:13678], dim=1).clone().detach())
-        self.register_buffer('right_eyeball_center', torch.mean(template_mesh[None, 13678:14062], dim=1).clone().detach())
+        self.register_buffer('left_eyeball_center', torch.mean(template_mesh[None, 21451:23021], dim=1).clone().detach())
+        self.register_buffer('right_eyeball_center', torch.mean(template_mesh[None, 23021:24591], dim=1).clone().detach())
         
 
     def to_canonical_space(self, mesh):
