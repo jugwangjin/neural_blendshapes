@@ -1,3 +1,5 @@
+# LEGACY: image/ResNet encoder — not used by train.py (MediaPipe-only stack).
+
 import torch
 from torch import nn
 import torchvision

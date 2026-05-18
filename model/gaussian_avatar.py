@@ -22,14 +22,21 @@ class GaussianAvatar(nn.Module):
         sh_dim=3,
         gaze_uv_range=0.12,
         learn_gaze_refine=True,
+        n_semantic_classes=7,
     ):
         super().__init__()
-        self.face = UVHGaussians(n_face_gaussians, sh_dim=sh_dim)
+        self.n_semantic_classes = n_semantic_classes
+        self.face = UVHGaussians(
+            n_face_gaussians,
+            sh_dim=sh_dim,
+            n_semantic_classes=n_semantic_classes,
+        )
         self.eyes = EyeTextureGaussians(
             n_per_eye=n_eye_per_side,
             sh_dim=sh_dim,
             gaze_uv_range=gaze_uv_range,
             learn_gaze_refine=learn_gaze_refine,
+            n_semantic_classes=n_semantic_classes,
         )
         self.texture_meshes = None
         self.anchor_vertex_ids = torch.tensor([], dtype=torch.long)
@@ -47,6 +54,7 @@ class GaussianAvatar(nn.Module):
         sh_dim=3,
         gaze_uv_range=0.12,
         learn_gaze_refine=True,
+        n_semantic_classes=7,
     ):
         model = cls(
             n_face_gaussians,
@@ -54,11 +62,30 @@ class GaussianAvatar(nn.Module):
             sh_dim=sh_dim,
             gaze_uv_range=gaze_uv_range,
             learn_gaze_refine=learn_gaze_refine,
+            n_semantic_classes=n_semantic_classes,
         )
         model.texture_meshes = TextureSpaceMeshes.from_ict(ict)
         model.set_anchor_vertices(ict.face_indices, ict.eyeball_indices)
+        model._init_face_semantics_from_ict(ict)
 
         return model
+
+    def _init_face_semantics_from_ict(self, ict):
+        from gaussian_splatting.gaussian_semantics import init_face_gaussian_semantics
+
+        if self.face.n_semantic_classes == 0:
+            return
+        tm = self.texture_meshes
+        verts = ict.neutral_mesh[0]
+        with torch.no_grad():
+            face_out = self.face(tm.face, verts=verts, faces=ict.faces)
+        init_face_gaussian_semantics(
+            self.face,
+            face_out["face_idx"],
+            face_out["bary"],
+            ict,
+            ict.faces,
+        )
 
     def forward(self, verts, faces, expression_weights=None, expression_names=None):
         tm = self.texture_meshes
@@ -77,16 +104,13 @@ class GaussianAvatar(nn.Module):
                 face_out["xyz"].shape[0], dtype=torch.bool, device=face_out["xyz"].device
             )
 
-        if expression_weights is not None and expression_names is not None:
-            self.eyes.gaze_from_expression(expression_weights, expression_names)
-
         eye_out = self.eyes(left_mesh, right_mesh, verts, faces)
 
         is_anchor = torch.cat(
             [face_out["is_anchor_surface"], eye_out["is_eyeball_surface"]], dim=0
         )
 
-        return {
+        out = {
             "face": face_out,
             "eyes": eye_out,
             "texture_meshes": tm,
@@ -96,9 +120,4 @@ class GaussianAvatar(nn.Module):
             "opacity": torch.cat([face_out["opacity"], eye_out["opacity"]], dim=0),
             "color": torch.cat([face_out["color"], eye_out["color"]], dim=0),
             "h": torch.cat([face_out["h"], eye_out["h"]], dim=0),
-            "is_anchor_surface": is_anchor,
-            "is_eyeball_surface": eye_out["is_eyeball_surface"],
-            "iris_control_xyz": eye_out["iris_control_xyz"],
-            "gaze_uv_left": eye_out["left"]["gaze_offset"],
-            "gaze_uv_right": eye_out["right"]["gaze_offset"],
-        }
+            "is_ancho

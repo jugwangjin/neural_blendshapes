@@ -70,3 +70,6 @@ def project_points(points_cam, cam: FixedCamera):
 
 def project_world_points(points, cam: FixedCamera):
     return project_points(world_to_camera(points, cam), cam)
+
+
+FixedCamera.project_world_points = lambda self, points: project_world_points(points, self)

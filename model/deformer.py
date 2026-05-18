@@ -1,3 +1,5 @@
+# LEGACY: NeuralBlendshapes + ResNet encoder. Use model/ict_deformer.py + model/tracker_mlp.py instead.
+
 import numpy as np
 import torch
 from torch import nn

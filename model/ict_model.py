@@ -130,7 +130,13 @@ class ICTFaceKitTorch(torch.nn.Module):
         mesh = self.s * (torch.einsum('bvd, bmd -> bvm', mesh, self.R)) + self.T
         return mesh
 
-    def forward(self, expression_weights=None, identity_weights=None, to_canonical=True):
+    def forward(
+        self,
+        expression_weights=None,
+        identity_weights=None,
+        to_canonical=True,
+        apply_eyeball_rotation=True,
+    ):
         """
         Forward pass of the ICTFaceKitTorch model.
 
@@ -156,6 +162,11 @@ class ICTFaceKitTorch(torch.nn.Module):
         deformed_mesh = self.neutral_mesh + \
                         torch.einsum('bn, bnmd -> bmd', expression_weights, self.expression_shape_modes.repeat(bsize, 1, 1, 1)) + \
                         torch.einsum('bn, bnmd -> bmd', identity_weights, self.identity_shape_modes.repeat(bsize, 1, 1, 1))
+
+        if not apply_eyeball_rotation:
+            if to_canonical:
+                return self.to_canonical_space(deformed_mesh)
+            return deformed_mesh
 
         # for eyeballs (left eyeball: from verts [21451:23021], right eyeball: from verts [23021:24591])
         # based on index eyeLookIn_L/R, eyeLookOut_L/R, eyeLookUp_L/R, eyeLookDown_L/R

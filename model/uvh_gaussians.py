@@ -11,11 +11,28 @@ from utils.uv_mesh import UVMesh, surface_points_from_uvh
 
 
 class UVHGaussians(nn.Module):
-    def __init__(self, n_gaussians, sh_dim=3, uv_init=None, fixed_h=None):
+    def __init__(
+        self,
+        n_gaussians,
+        sh_dim=3,
+        uv_init=None,
+        fixed_h=None,
+        n_semantic_classes=0,
+        fixed_semantic_probs=None,
+    ):
         super().__init__()
         if uv_init is None:
             uv_init = torch.rand(n_gaussians, 2)
         self.uv = nn.Parameter(uv_init.clone())
+        self.n_semantic_classes = n_semantic_classes
+        self.sem_logits = None
+        self.register_buffer("sem_prob_fixed", None)
+        self.register_buffer("sem_anchor", None)
+        self.register_buffer("sem_frozen_dims", None)
+        if fixed_semantic_probs is not None:
+            self.register_buffer("sem_prob_fixed", fixed_semantic_probs.clone())
+        elif n_semantic_classes > 0:
+            self.sem_logits = nn.Parameter(torch.zeros(n_gaussians, n_semantic_classes))
         self.fixed_h = fixed_h
         if fixed_h is None:
             self.h = nn.Parameter(torch.zeros(n_gaussians, 1))
@@ -46,15 +63,7 @@ class UVHGaussians(nn.Module):
         xyz, face_idx, bary, normals = surface_points_from_uvh(uv, h, mesh)
         scale = torch.exp(self.log_scale).clamp(max=0.05)
         opacity = torch.sigmoid(self.opacity)
-        return {
+        out = {
             "xyz": xyz,
             "scale": scale,
-            "rotation": self.rotation,
-            "opacity": opacity,
-            "color": self.color,
-            "h": h,
-            "face_idx": face_idx,
-            "bary": bary,
-            "normals": normals,
-            "group": "face_uvh",
-        }
+            "rotation": self.ro
