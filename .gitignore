@@ -20,17 +20,21 @@ quant
 # large files
 assets
 large-steps-pytorch
+processing/large-steps-pytorch
+processing/metrical-tracker
 flame
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-flame/FLAME2020/
-flame/__pycache__/
+processing/flame/FLAME2020/
+processing/flame/__pycache__/
 
 # C extensions
 *.so
+
+./docs
 
 # Distribution / packaging
 .Python
@@ -171,3 +175,6 @@ debug/
 
 videos/
 
+
+
+old/

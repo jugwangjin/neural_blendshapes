@@ -13,8 +13,16 @@
 # For commercial licensing contact, please contact ps-license@tuebingen.mpg.de
 
 import sys
-sys.path.append('..')
-# print(sys.path.pwd())
+from pathlib import Path
+
+_PROCESSING_ROOT = Path(__file__).resolve().parent
+_REPO_ROOT = _PROCESSING_ROOT.parent
+for _root in (_REPO_ROOT, _PROCESSING_ROOT):
+    _p = str(_root)
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from processing.paths import ICT_NPY
 from arguments import config_parser
 
 import random
@@ -59,7 +67,7 @@ from test import run, quantitative_eval
 
 import time
 
-from flare.utils.ict_model import ICTFaceKitTorch
+from model.ict_model import ICTFaceKitTorch
 import open3d as o3d
 import cv2
 
@@ -70,7 +78,7 @@ import matplotlib.pyplot as plt
 def main(args, device):
 
     ## ============== load ict facekit ==============================
-    ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
+    ict_facekit = ICTFaceKitTorch(npy_dir=str(ICT_NPY), canonical=Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
     ict_canonical_mesh = Mesh(ict_facekit.neutral_mesh_canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)

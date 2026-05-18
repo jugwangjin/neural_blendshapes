@@ -1,3 +1,15 @@
+import sys
+from pathlib import Path
+
+_PROCESSING_ROOT = Path(__file__).resolve().parent
+_REPO_ROOT = _PROCESSING_ROOT.parent
+for _root in (_REPO_ROOT, _PROCESSING_ROOT):
+    _p = str(_root)
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from processing.paths import ASSETS_DIR, REPO_ROOT
+
 from arguments import config_parser
 import torch
 
@@ -67,7 +79,7 @@ def remove_negative_triangles(triangle_mesh, triangle_uv):
 def main(args):
     # read quad mesh using openmesh
     # half edge representation
-    file_path = os.path.join('ICT_FaceKit/FaceXModel/generic_neutral_mesh.obj')
+    file_path = os.path.join(REPO_ROOT, 'ICT_FaceKit/FaceXModel/generic_neutral_mesh.obj')
     generic_neutral_mesh = om.read_polymesh(file_path, halfedge_tex_coord = True)
     faces = generic_neutral_mesh.face_vertex_indices()[:25304]
     vertices = generic_neutral_mesh.points()
@@ -119,7 +131,7 @@ def main(args):
     # trimesh_mesh.visual = trimesh.visual.TextureVisuals(uv=new_uvs)
     # trimesh_mesh.export('debug/cleaned_uv.obj')
 
-    ict_model = face_model_io.load_face_model('ICT_FaceKit/FaceXModel')
+    ict_model = face_model_io.load_face_model(str(REPO_ROOT / 'ICT_FaceKit/FaceXModel'))
 
     ict_num_expression = ict_model._num_expression_shapes
     ict_num_identity = ict_model._num_identity_shapes
@@ -206,7 +218,7 @@ def main(args):
     ict_model_dict['head_indices'] = head_indices
 
     # save as a numpy
-    np.save('./assets/ict_facekit_torch.npy', ict_model_dict)
+    np.save(str(ASSETS_DIR / 'ict_facekit_torch.npy'), ict_model_dict)
 
 
 if __name__ == '__main__':

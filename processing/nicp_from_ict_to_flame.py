@@ -5,26 +5,29 @@
 # import flame, ICT-FAcekit
 
 import os
+import sys
+from pathlib import Path
+
 # os.environ["PYOPENGL_PLATFORM"] = "osmesa"
 # os.environ['PYOPENGL_PLATFORM'] = 'egl'
+
+_PROCESSING_ROOT = Path(__file__).resolve().parent
+_REPO_ROOT = _PROCESSING_ROOT.parent
+for _root in (_REPO_ROOT, _PROCESSING_ROOT):
+    _p = str(_root)
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from processing.paths import ASSETS_DIR, FLAME_MODEL, FLAME_STATIC_EMBEDDING, FLAME_UV_MESH, ICT_NPY
 
 from flare.dataset import *
 from flame.FLAME import FLAME
 from arguments import config_parser
 import torch
-# from flame.FLAME import FLAME
-# from flare.dataset import *
-
-# from flare.dataset import dataset_util
 import numpy as np
 import pickle
-import os
 import chumpy as ch
-
-# from ICT_FaceKit.Scripts import face_model_io
-from flare.utils.ict_model import ICTFaceKitTorch
-
-from pathlib import Path
+from model.ict_model import ICTFaceKitTorch
 
 from pytorch3d import ops
 import pytorch3d.loss
@@ -91,7 +94,7 @@ def main(args):
     dataset_train    = DatasetLoader(args, train_dir=args.train_dir, sample_ratio=1, pre_load=False, train=True)
     # dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=16, collate_fn=dataset_train.collate, shuffle=True, drop_last=True)
 
-    flame_path = './flame/FLAME2020/generic_model.pkl'
+    flame_path = str(FLAME_MODEL)
     flame_shape = dataset_train.shape_params
     FLAMEServer = FLAME(flame_path, n_shape=100, n_exp=50, shape_params=flame_shape, use_processed_faces=False).to(device)
 
@@ -105,13 +108,13 @@ def main(args):
         FLAMEServer.canonical_transformations = torch.cat([torch.eye(4).unsqueeze(0).unsqueeze(0).float().to(device), FLAMEServer.canonical_transformations], 1)
     FLAMEServer.canonical_verts = FLAMEServer.canonical_verts.to(device)
 
-    load_embedding_path = './assets/flame_static_embedding.pkl'
+    load_embedding_path = str(FLAME_STATIC_EMBEDDING)
     lmk_face_idx, lmk_b_coords = load_embedding(load_embedding_path)
 
     print(lmk_face_idx.shape)
     print(lmk_face_idx)
 
-    ICTmodel = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy').to(device)
+    ICTmodel = ICTFaceKitTorch(npy_dir=str(ICT_NPY), canonical=Path(args.input_dir) / 'ict_identity.npy').to(device)
     ICTmodel.eval()
     print(ICTmodel.neutral_mesh.shape, ICTmodel.expression_shape_modes.shape, ICTmodel.identity_shape_modes.shape)
     print(ICTmodel.num_expression, ICTmodel.num_identity)
@@ -139,7 +142,7 @@ def main(args):
     # pbar = tqdm.tqdm(range(iterations))
 
     # load assets/flame_canonical.obj
-    flame_optimized_mesh = trimesh.load_mesh('./assets/flame_canonical.obj')
+    flame_optimized_mesh = trimesh.load_mesh(str(ASSETS_DIR / 'flame_canonical.obj'))
 
     print(flame_optimized_mesh)
 
@@ -166,7 +169,7 @@ def main(args):
     ict_landmark_indices = ICTmodel.landmark_indices
     
     # load assets/ict_canonical.obj
-    ict_optimized_mesh = trimesh.load_mesh('./assets/ict_canonical.obj')
+    ict_optimized_mesh = trimesh.load_mesh(str(ASSETS_DIR / 'ict_canonical.obj'))
 
     print(ict_optimized_mesh)
 
@@ -244,7 +247,7 @@ def main(args):
 
     # need to separate eyeball indices. 
 
-    mesh = o3d.io.read_triangle_mesh("assets/canonical_eye_smpl.obj")
+    mesh = o3d.io.read_triangle_mesh(str(FLAME_UV_MESH))
     # mesh = o3d.io.read_triangle_mesh("debug_view_gt_mesh_0.obj")
     print(mesh)
 
@@ -371,12 +374,12 @@ def main(args):
     o3d.io.write_line_set('debug/closest_vertex_indices.ply', line_set)
 
     # save the closest vertex indices as npy file 
-    np.save('assets/ict_to_flame_closest_indices.npy', closest_vertex_indices)
+    np.save(str(ASSETS_DIR / 'ict_to_flame_closest_indices.npy'), closest_vertex_indices)
     # np.save('assets/flame_to_ict_closest_indices.npy', flame_to_ict_closest_vertex_indices.cpu().data.numpy())
     closest_pair = np.array([closest_ict, closest_flame])
     print(closest_pair[0])
     print(closest_pair[1])
-    np.save('assets/ict_to_flame_closest_pair.npy', closest_pair)
+    np.save(str(ASSETS_DIR / 'ict_to_flame_closest_pair.npy'), closest_pair)
 
     
     # same thing for flame_to_ict_closest_indices.npy

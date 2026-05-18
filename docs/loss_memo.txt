@@ -1,0 +1,518 @@
+응, **loss 쪽은 지금 “학습 objective”라기보다 잡동사니 서랍**에 가깝다. RGB, segmentation, FLAME teacher, 68 landmark, normal prior, material prior, feature prior, temporal prior가 한 냄비에 들어가 있고, 네가 하려는 **3DGS + FLAME-free + MediaPipe-supervised** 방향과는 많이 충돌한다.
+
+## 현재 loss 구성
+
+`train.py` 기준 loss registry는 이렇다.
+
+```python
+loss_weights = {
+    "mask",
+    "segmentation",
+    "laplacian_regularization",
+    "shading",
+    "perceptual_loss",
+    "landmark",
+    "closure",
+    "feature_regularization",
+    "geometric_regularization",
+    "normal_laplacian",
+    "inverted_normal",
+    "eyeball_normal",
+    "linearity_regularization",
+    "flame_regularization",
+    "white_lgt_regularization",
+    "roughness_regularization",
+    "albedo_regularization",
+    "fresnel_coeff",
+    "temporal_regularization",
+}
+```
+
+이 loss들이 전부 `loss += v.mean() * loss_weights[k]` 방식으로 단일 scalar에 더해진다. 즉 loss graph가 목적별로 분리되어 있지 않고, stage별 gating도 코드 중간에 흩어져 있다. ([GitHub][1])
+
+---
+
+# 1. Photometric / rendering losses
+
+## `shading`
+
+현재 RGB reconstruction 담당이다.
+
+```python
+shading_loss, pred_color, tonemapped_colors = shading_loss_batch(...)
+```
+
+내부적으로는 rendered RGB와 GT image에 mask를 곱한 뒤, log tonemap + sRGB tonemap 후 L1을 건다. 3DGS로 갈 경우 이건 `loss_rgb`로 바꾸면 된다. 이름도 `shading`이 아니라 `rgb_recon`이 맞다. ([GitHub][1])
+
+**판정:** 살림.
+단, neural shader 기준 이름과 tonemap 로직은 정리.
+
+```python
+loss_rgb = l1_or_charbonnier(render_rgb * gt_mask, gt_rgb * gt_mask)
+```
+
+---
+
+## `perceptual_loss`
+
+VGG16 feature loss다. 그런데 forward에서 `loss *= min(1.0, 600/(iteration+1))`로 iteration이 커질수록 줄어드는 구조다. 즉 초반 stabilizer에 가깝다. ([GitHub][2])
+
+**판정:** 네 목적이면 제거.
+MediaPipe objective 중심으로 가려면 perceptual은 색/texture 편향을 강하게 넣는 외부 prior다.
+
+---
+
+# 2. Mask / segmentation losses
+
+## `mask`
+
+```python
+mask_loss_segmentation = mask_loss_function(views_subset["mask"], gbuffer_mask)
+```
+
+내부는 그냥 MSE다. 이름은 mask지만 사실 silhouette alpha consistency다. ([GitHub][1])
+
+**판정:** 3DGS에서는 필요.
+다만 기존 mask가 아니라 **MediaPipe-derived face mask**로 바꾸면 네 철학에 맞다.
+
+```python
+loss_mp_mask = l1(render_alpha, mp_face_mask)
+```
+
+---
+
+## `segmentation`
+
+현재 left eye, right eye, mouth, face segmentation을 따로 비교하고, eyes-closed random mesh까지 렌더해서 eye segmentation을 줄이는 이상한 보조항이 있다. ([GitHub][1])
+
+```python
+segmentation_loss =
+    left_eye * 1e-1
+  + right_eye * 1e-1
+  + mouth * 1e-1
+  + face * 1e-1
+  + eyes_closed_left_eye_seg_loss * 1e-1
+  + eyes_closed_right_eye_seg_loss * 1e-1
+```
+
+**판정:** 대부분 제거.
+필요하면 MediaPipe landmark polygon으로 만든 region mask만 남겨라.
+
+추천:
+
+```python
+loss_mp_face_mask
+loss_mp_lip_mask
+loss_mp_eye_region_mask  # optional
+```
+
+`eyes_closed_random_mesh`류는 삭제. 이건 loss가 아니라 부두인형이다.
+
+---
+
+# 3. Landmark / closure losses
+
+## `landmark`
+
+현재는 ICT 68 landmark를 gbuffer clip space에서 뽑고, dataset의 `views_subset['landmark']` 68개와 비교한다. 2D 좌표를 `[-1, 1]`로 바꾸고, jaw confidence를 0.1로 낮춘 뒤, point-wise loss + pairwise distance matrix loss를 더한다. ([GitHub][3])
+
+구조는 이렇다.
+
+```python
+landmark_loss =
+    pointwise_68_2d_loss
+  + cross_landmark_distance_loss
+```
+
+**판정:** 교체.
+68 landmark loss 자체는 나쁘지 않은데, 네가 이제 만든 `MP478 -> ICT barycentric`이 있으니까 완전히 대체하면 된다.
+
+추천:
+
+```python
+loss_mp_lmk_2d =
+    robust(project(sample_ict_mp478(ict_vertices)), target_mp478_2d)
+```
+
+추가로 pairwise distance loss는 선택사항이다. 쓰려면 478 전체에 쓰지 말고 region별로만 써라. 478×478 pairwise는 너무 둔탁한 쇠망치다.
+
+---
+
+## `closure`
+
+현재 mouth closure block만 살아 있다.
+
+```python
+closure_blocks = [list(range(60, 68))]
+```
+
+입술 landmark들 사이의 relative vector 차이를 비교한다. ([GitHub][3])
+
+**판정:** 형태는 살릴 만함.
+단, 기존 68 index 대신 MediaPipe lip subset으로 바꾸는 게 좋다.
+
+추천:
+
+```python
+loss_mp_lip_closure =
+    distance_upper_lower_lip(pred_mp_lip, target_mp_lip)
+```
+
+특히 3DGS avatar에서 입술/치아/구강은 RGB만으로 휘청이니까, lip closure는 꽤 유용하다.
+
+---
+
+# 4. FLAME-dependent losses
+
+## `flame_regularization`
+
+이게 제일 큰 덩어리다. 현재 `FLAME_loss_function`을 세 번 호출한다.
+
+```python
+flame_loss          # posed ICT vs posed FLAME
+flame_loss_no_pose  # no-pose ICT vs FLAME with jaw only
+flame_loss_template # template ICT vs neutral FLAME
+```
+
+그리고 `losses['flame_regularization'] = flame_loss + flame_loss_no_pose`, stage > 0이면 0.5배, 거기에 template loss를 더한다. ([GitHub][1])
+
+내부 `FLAME_loss_function`은 FLAME mesh를 만들고, 미리 저장된 `flame_pair_indices`, `ict_pair_indices` vertex correspondence로 ICT vertices와 FLAME vertices의 MSE를 계산한다. 좌표에 `*5` scale을 넣어 loss magnitude를 키운다. ([GitHub][4])
+
+**판정:** 최종 학습에서는 삭제.
+네 목표가 FLAME-free라면 이건 바로 잘라야 한다.
+
+대체:
+
+```python
+loss_mp_lmk_2d
+loss_mp_lmk_3d_or_canonical
+loss_mp_face_mask
+loss_lip_closure
+```
+
+FLAME은 offline baker에서만 쓰고, training loop에는 안 들어와야 한다.
+
+---
+
+# 5. Geometry priors
+
+## `laplacian_regularization`
+
+현재 template mesh의 Laplacian을 ICT neutral canonical과 맞춘다.
+
+```python
+template_mesh_laplacian_regularization =
+    laplacian_loss_two_meshes(
+        mesh,
+        ict_facekit.neutral_mesh_canonical[0],
+        return_dict['template_mesh'],
+        ict_canonical_mesh.laplacian
+    )
+```
+
+`laplacian_loss_two_meshes` 내부에서는 vertex 좌표에 `*10`을 하고 Laplacian 차이 MSE를 계산한다. ([GitHub][1])
+
+**판정:** 약하게 살릴 수 있음.
+하지만 “RGB 외에는 MediaPipe 기반 loss만”이라는 원칙이면 제거. 대신 네가 3DGS에서 mesh-embedded Gaussians를 쓸 거면, 최소한의 mesh smoothness는 생명보험처럼 남기는 편이 안전하다.
+
+추천 이름:
+
+```python
+loss_mesh_laplacian_prior
+```
+
+weight는 아주 작게.
+
+---
+
+## `geometric_regularization`
+
+```python
+template_geometric_regularization =
+    (ict_facekit.neutral_mesh_canonical[0] - return_dict['template_mesh']).pow(2).mean()
+```
+
+즉 template이 neutral ICT에서 멀어지지 못하게 묶는다. ([GitHub][1])
+
+**판정:** FLAME-free identity fitting을 할 거면 stage 0에서만 약하게.
+expression 학습까지 계속 걸면 표정이 무뎌진다.
+
+---
+
+## `normal_laplacian`
+
+GT normal map과 rendered normal의 Laplacian을 비교한다. normal을 camera frame으로 돌리고, skin/face mask에서 Laplacian 차이를 본다. ([GitHub][5])
+
+**판정:** 제거.
+MediaPipe-only supervision 철학과 안 맞고, 3DGS renderer로 가면 normal buffer 자체가 애매해질 수 있다.
+
+---
+
+## `eyeball_normal`
+
+렌더된 eye/mouth segmentation이 GT eye/mouth 영역 밖에 있으면 position을 normal 방향으로 밀어내는 식의 기묘한 loss다. ([GitHub][5])
+
+**판정:** 삭제.
+iris/eye는 너가 metrical-tracker 기반으로 mapping한 iris landmark loss로 처리하는 게 훨씬 깨끗하다.
+
+---
+
+## `inverted_normal`
+
+loss registry에는 있지만 train loop에서는 주석 처리되어 사실상 안 쓰인다. ([GitHub][1])
+
+**판정:** 삭제.
+
+---
+
+# 6. Feature / expression priors
+
+## `feature_regularization`
+
+현재 encoder output의 앞 53차원을 MediaPipe blendshape에서 ICT mapping한 값과 맞춘다.
+
+```python
+feature_regularization_loss(
+    return_dict['features'],
+    views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict],
+    ...
+)
+```
+
+내부적으로는 FACS/blendshape feature를 target MediaPipe blendshape에 맞추고, eyeball 관련 index는 50배 강하게 때린다. random feature를 넣어 bshape output이 커지지 않도록 하는 항도 있다. ([GitHub][1])
+
+**판정:** 구조는 살릴 수 있음.
+다만 이름과 역할을 분리해야 한다.
+
+추천:
+
+```python
+loss_mp_blendshape_code
+loss_expr_code_prior
+loss_eye_code_prior
+```
+
+네 새 구조에서는 MediaPipe blendshape를 **loss**로 쓰기보다 **conditioning input**으로 쓰는 게 더 좋다.
+
+```python
+deformer_input = mp_blendshape_52 + head_pose + maybe latent
+```
+
+그럼 `feature_regularization` 자체가 필요 없어질 수 있다.
+
+---
+
+## `linearity_regularization`
+
+현재는 두 덩어리다.
+
+```python
+expression_delta_random.pow(2).mean() if stage == 2 else 0
+neural_blendshapes.face_details.pow(2).mean() * 1e2
+```
+
+즉 expression delta와 face detail amplitude를 작게 묶는다. ([GitHub][1])
+
+**판정:** 이름이 틀렸다.
+이건 linearity가 아니라 amplitude prior다.
+
+추천:
+
+```python
+loss_expr_delta_l2
+loss_detail_l2
+```
+
+3DGS로 가면 detail은 Gaussian offset/scale 쪽 prior로 이동하는 게 맞다.
+
+---
+
+## `temporal_regularization`
+
+stage 0에서 현재 frame feature와 sequential frame feature를 맞춘다. feature 뒤쪽 53 이후 차원은 10배로 키운다. ([GitHub][1])
+
+**판정:** 선택.
+video avatar라면 temporal은 필요할 수 있지만, 네 원칙대로라면 첫 버전에서는 빼라. 나중에 jitter가 생기면 MediaPipe landmark temporal smoothness로 다시 넣는 게 낫다.
+
+---
+
+# 7. Material / shader priors
+
+현재 shader가 PBR-ish neural shader라서 이런 항들이 있다.
+
+```python
+albedo_regularization
+white_lgt_regularization
+roughness_regularization
+fresnel_coeff
+```
+
+`albedo_regularization`은 position jitter에 대해 material MLP output이 부드럽게 변하게 하고, `white_light`는 shading RGB가 흰색 조명처럼 되도록, roughness/specular는 skin 영역에서 z-score prior를 건다. ([GitHub][1])
+
+**판정:** 3DGS로 가면 전부 삭제.
+3DGS에는 albedo/roughness/fresnel 개념이 없거나 다르게 정의된다. 이걸 들고 가면 낡은 갑옷 입고 수영하는 꼴이다.
+
+대체한다면:
+
+```python
+loss_gaussian_opacity_reg
+loss_gaussian_scale_reg
+loss_gaussian_offset_reg
+loss_gaussian_sparsity
+```
+
+하지만 네가 “RGB + MediaPipe-based”로 가고 싶다면 이것도 최소화.
+
+---
+
+# 지금 loss들의 가장 큰 문제
+
+## 1. FLAME teacher가 너무 깊게 박혀 있음
+
+FLAME은 `train.py` 초반에 로드되고, canonical verts, expression, pose, ICT↔FLAME pair indices, target range까지 training loop의 핵심에 들어와 있다. ([GitHub][6])
+FLAME-free로 가려면 `flame_regularization` 하나만 끄는 게 아니라, dataset field와 model input에서도 `flame_expression`, `flame_pose`, `flame_camera` 이름을 걷어내야 한다.
+
+## 2. Loss 이름과 실제 의미가 안 맞음
+
+`shading`은 RGB loss고, `linearity`는 amplitude L2고, `normal_laplacian`은 image-space normal prior고, `feature_regularization`은 MediaPipe blendshape supervision + random feature prior가 섞인 것이다. 이름만 봐서는 독성을 알 수 없는 버섯밭이다.
+
+## 3. Renderer-specific loss가 많음
+
+현재 loss 상당수가 nvdiffrast gbuffer, NeuralShader cbuffers, segmentation channels에 의존한다. 3DGS로 바꾸면 이 중 절반 이상은 바로 깨진다.
+
+## 4. Objective가 너무 많음
+
+현재는 RGB reconstruction, mask, semantic mask, VGG, 68 landmark, closure, FLAME mesh teacher, Laplacian, normal, eye/mouth hack, blendshape code, temporal, material prior가 동시에 간다. 이러면 어느 loss가 geometry를 망치는지 추적이 힘들다.
+
+---
+
+# 네 목표용으로 정리한 새 loss set
+
+나는 이렇게 갈라.
+
+```python
+loss = (
+    w_rgb      * loss_rgb
+  + w_mp_lmk2d * loss_mp_landmark_2d
+  + w_mp_lmk3d * loss_mp_landmark_3d       # optional
+  + w_mp_mask  * loss_mp_face_mask
+  + w_lip      * loss_mp_lip_closure
+  + w_iris     * loss_mp_iris
+)
+```
+
+그리고 정말 필요한 안정화만 따로:
+
+```python
+loss += (
+    w_gs_scale   * loss_gaussian_scale_prior
+  + w_gs_opacity * loss_gaussian_opacity_prior
+  + w_mesh_smooth * loss_mesh_laplacian_prior  # optional
+)
+```
+
+## 1차 버전에서 남길 것
+
+```text
+남김:
+  rgb reconstruction
+  MediaPipe 478 landmark projection loss
+  MediaPipe-derived face mask loss
+  lip closure loss
+  iris loss
+  아주 약한 mesh/gaussian prior
+```
+
+## 바로 버릴 것
+
+```text
+삭제:
+  flame_regularization
+  perceptual_loss
+  normal_laplacian
+  inverted_normal
+  eyeball_normal
+  old 68 landmark loss
+  old segmentation hacks
+  albedo_regularization
+  white_lgt_regularization
+  roughness_regularization
+  fresnel_coeff
+```
+
+## 조건부로 남길 것
+
+```text
+조건부:
+  feature_regularization
+    -> MediaPipe blendshape를 conditioning으로 쓰면 삭제
+    -> encoder가 직접 feature를 예측한다면 mp_blendshape_code loss로 rename
+
+  laplacian_regularization / geometric_regularization
+    -> stage 0 template fitting에서만 약하게 사용
+    -> expression/3DGS detail stage에서는 끄기
+
+  temporal_regularization
+    -> 첫 버전에서는 끄기
+    -> jitter 생기면 MediaPipe landmark temporal loss로 재도입
+```
+
+---
+
+# 추천 파일 구조
+
+지금처럼 `train.py` 안에서 loss 요리를 하지 말고 이렇게 빼는 게 좋다.
+
+```text
+losses/
+  rgb.py
+  mediapipe_landmark.py
+  mediapipe_mask.py
+  lip_closure.py
+  gaussian_regularization.py
+  mesh_regularization.py
+```
+
+그리고 training loop에서는 이렇게만 보이게.
+
+```python
+loss_dict = {}
+
+render = gs_renderer(...)
+ict_mp = sample_ict_mediapipe_landmarks(
+    ict_vertices=deformed_vertices,
+    faces=ict_faces,
+    embedding=mp478_to_ict_embedding,
+)
+
+loss_dict["rgb"] = rgb_loss(render.rgb, gt_img, gt_or_mp_mask)
+
+loss_dict["mp_lmk2d"] = mp_landmark_2d_loss(
+    pred_points_3d=ict_mp.points,
+    target_points_2d=batch["mp_landmarks_2d"],
+    camera=batch["camera"],
+    visibility=batch["mp_visibility"],
+    weights=mp_region_weights,
+)
+
+loss_dict["mp_mask"] = mp_mask_loss(
+    render.alpha,
+    batch["mp_face_mask"],
+)
+
+loss_dict["lip_closure"] = lip_closure_loss(
+    ict_mp.points,
+    batch["mp_landmarks_2d"],
+)
+
+loss = weighted_sum(loss_dict, weights)
+```
+
+이 정도로 깎으면 loss가 마침내 “얼굴을 만들기 위한 지도”가 되고, 지금처럼 “얼굴한테 잔소리하는 합창단”이 아니게 된다.
+
+[1]: https://github.com/jugwangjin/neural_blendshapes/blob/master/train.py "neural_blendshapes/train.py at master · jugwangjin/neural_blendshapes · GitHub"
+[2]: https://raw.githubusercontent.com/jugwangjin/neural_blendshapes/master/flare/losses/perceptual_loss.py "raw.githubusercontent.com"
+[3]: https://raw.githubusercontent.com/jugwangjin/neural_blendshapes/master/flare/losses/landmark.py "raw.githubusercontent.com"
+[4]: https://raw.githubusercontent.com/jugwangjin/neural_blendshapes/master/flare/losses/geometry.py "raw.githubusercontent.com"
+[5]: https://raw.githubusercontent.com/jugwangjin/neural_blendshapes/master/flare/losses/normal.py "raw.githubusercontent.com"
+[6]: https://raw.githubusercontent.com/jugwangjin/neural_blendshapes/master/train.py?raw=1 "raw.githubusercontent.com"

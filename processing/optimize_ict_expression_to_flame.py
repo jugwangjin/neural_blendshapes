@@ -1,22 +1,27 @@
 import os
+import sys
+from pathlib import Path
+
 # os.environ["PYOPENGL_PLATFORM"] = "osmesa"
 # os.environ['PYOPENGL_PLATFORM'] = 'egl'
+
+_PROCESSING_ROOT = Path(__file__).resolve().parent
+_REPO_ROOT = _PROCESSING_ROOT.parent
+for _root in (_REPO_ROOT, _PROCESSING_ROOT):
+    _p = str(_root)
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from processing.paths import FLAME_MODEL, FLAME_STATIC_EMBEDDING, ICT_NPY
 
 from flare.dataset import *
 from flame.FLAME import FLAME
 from arguments import config_parser
 import torch
-# from flame.FLAME import FLAME
-# from flare.dataset import *
-
-# from flare.dataset import dataset_util
 import numpy as np
 import pickle
-import os
 import chumpy as ch
-
-# from ICT_FaceKit.Scripts import face_model_io
-from flare.utils.ict_model import ICTFaceKitTorch
+from model.ict_model import ICTFaceKitTorch
 
 from pathlib import Path
 
@@ -85,7 +90,7 @@ def main(args):
     dataset_train    = DatasetLoader(args, train_dir=args.train_dir, sample_ratio=1, pre_load=False, train=True)
     # dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=16, collate_fn=dataset_train.collate, shuffle=True, drop_last=True)
 
-    flame_path = './flame/FLAME2020/generic_model.pkl'
+    flame_path = str(FLAME_MODEL)
     flame_shape = dataset_train.shape_params
     FLAMEServer = FLAME(flame_path, n_shape=100, n_exp=50, shape_params=flame_shape, use_processed_faces=False).to(device)
 
@@ -99,12 +104,12 @@ def main(args):
         FLAMEServer.canonical_transformations = torch.cat([torch.eye(4).unsqueeze(0).unsqueeze(0).float().to(device), FLAMEServer.canonical_transformations], 1)
     FLAMEServer.canonical_verts = FLAMEServer.canonical_verts.to(device)
 
-    load_embedding_path = './assets/flame_static_embedding.pkl'
+    load_embedding_path = str(FLAME_STATIC_EMBEDDING)
     lmk_face_idx, lmk_b_coords = load_embedding(load_embedding_path)
 
     print(lmk_face_idx.shape)
 
-    ICTmodel = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy').to(device)
+    ICTmodel = ICTFaceKitTorch(npy_dir=str(ICT_NPY), canonical=Path(args.input_dir) / 'ict_identity.npy').to(device)
     ICTmodel.eval()
     print(ICTmodel.neutral_mesh.shape, ICTmodel.expression_shape_modes.shape, ICTmodel.identity_shape_modes.shape)
     print(ICTmodel.num_expression, ICTmodel.num_identity)
