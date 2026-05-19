@@ -1,7 +1,8 @@
-"""Training config for MediaPipe → ICT → UVH/3DGS stack (no FLAME/DECA at runtime)."""
+"""Training config for MediaPipe → ICT → surface/eye 3DGS stack."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 
 @dataclass
@@ -24,8 +25,16 @@ class Config:
     # model
     num_mp_blendshapes: int = 52
     num_ict_expressions: int = 53
-    n_face_gaussians: int = 4096
-    n_eye_gaussians_per_side: int = 64
+    n_surface_gaussians_per_face: int = 8
+    n_surface_gaussians_per_head: int = 8
+    n_surface_gaussians_per_mouth_socket: int = 1
+    n_surface_gaussians_mouth_interior: int = 4
+    gum_h_sigma_scale: float = 4.0
+    n_surface_gaussians_per_eye_socket: int = 1
+    n_eye_gaussians_per_side: int = 1024
+    n_accessory_gaussians: int = 0
+    auto_detect_accessory: bool = False
+    accessory_min_pixel_ratio: float = 0.0005
     gaze_uv_range: float = 0.12
     learn_gaze_refine: bool = True
     gamma_min: float = 0.4
@@ -33,11 +42,10 @@ class Config:
     au_active_sample_ratio: float = 0.3
     au_active_thresh: float = 0.12
 
-    # train (iterations overridden by training.stages.STAGE_SCHEDULE in train.py)
+    # train
     use_stage_schedule: bool = True
-    stage: str = "legacy"
     batch_size: int = 1
-    iterations: int = 55000
+    iterations: int = 60000
     lr_tracker: float = 1e-3
     lr_pose_weight: float = 1e-3
     lr_deformer: float = 1e-3
@@ -46,7 +54,7 @@ class Config:
     save_every: int = 1000
     checkpoint_dir: Path = Path("out/checkpoints")
 
-    # loss weights
+    # loss weights (defaults; stages override)
     w_rgb: float = 1.0
     w_mp_lmk: float = 1.0
     w_mp_mask: float = 1.0
@@ -57,9 +65,9 @@ class Config:
     w_scale: float = 0.001
     w_opacity: float = 0.001
 
-    # render (gsplat only — see rendering/avatar_renderer.py)
+    # render (gsplat only)
     image_size: int = 512
     n_semantic_classes: int = 7
+    sh_degree: Optional[int] = None
 
-    # gsplat: pip install gsplat OR git submodule at ./gsplat (do not edit submodule)
     gsplat_submodule: Path = Path("gsplat")

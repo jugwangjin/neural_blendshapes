@@ -14,8 +14,13 @@ def rotation_6d_to_matrix(r6):
     return torch.stack([b1, b2, b3], dim=-1)
 
 
-def apply_rigid(verts, R, t):
-    """verts [B, V, 3], R [B, 3, 3], t [B, 3]."""
+def apply_rigid(verts, R, t, scale=None):
+    """verts [B, V, 3], R [B, 3, 3], t [B, 3], optional uniform ``scale`` (scalar or [B])."""
+    if scale is not None:
+        if scale.ndim == 0:
+            verts = verts * scale
+        else:
+            verts = verts * scale.view(-1, 1, 1)
     return verts @ R.transpose(-1, -2) + t[:, None, :]
 
 

@@ -7,32 +7,8 @@ from losses.gaussian_regularization import loss_opacity, loss_scale
 from losses.h_regularization import loss_h_anchor_surface, loss_h_semantic
 from losses.segmentation import loss_segmentation_logits, loss_segmentation_soft
 from losses.iris_landmark import loss_iris_landmarks_2d
+from losses.mediapipe_landmark_478 import loss_mediapipe_landmarks_478
 from losses.rgb import l1_loss
-
-
-def loss_mediapipe_landmarks_2d(pred_xyz, mp_uv, mp_embedding, faces, camera, image_size, mp_valid=None):
-    """
-    pred_xyz: [B, V, 3] mesh vertices (world)
-    mp_uv: [B, 478, 2] in [0, 1]
-    mp_embedding: dict with ict_lmk_face_idx, ict_lmk_b_coords, mp_landmark_indices
-    """
-    from utils.barycentric import vertices2landmarks
-
-    face_idx = torch.tensor(mp_embedding["ict_lmk_face_idx"], dtype=torch.long, device=pred_xyz.device)
-    bary = torch.tensor(mp_embedding["ict_lmk_b_coords"], dtype=torch.float32, device=pred_xyz.device)
-    lmk_xyz = vertices2landmarks(pred_xyz, faces, face_idx, bary)
-
-    proj = camera.project_world_points(lmk_xyz.reshape(-1, 3)).reshape(pred_xyz.shape[0], -1, 2)
-    pred_uv = proj / image_size
-    mp_ids = mp_embedding["mp_landmark_indices"]
-    n = min(pred_uv.shape[1], mp_uv.shape[1], len(mp_ids))
-    target = mp_uv[:, :n, :]
-    pred = pred_uv[:, :n, :]
-    err = (pred - target).pow(2)
-    if mp_valid is not None:
-        w = mp_valid[:, :n, None]
-        err = err * w
-    return err.mean()
 
 
 def _get_w(cfg, key, default=0.0):
@@ -51,8 +27,8 @@ def compute_losses(
     ict_faces,
     corr=None,
     deformer=None,
-    expr_deform=None,
     expr_delta=None,
+    avatar=None,
 ):
     losses = {}
 
@@ -79,19 +55,29 @@ def compute_losses(
                 target = target.unsqueeze(0)
             losses["seg"] = loss_segmentation_soft(pred_sem, target)
 
-    if batch.get("mp_landmarks_2d") is not None:
-        losses["mp_lmk"] = loss_mediapipe_landmarks_2d(
-            avatar_out.get("mesh_xyz", avatar_out["xyz"].unsqueeze(0)),
+    if batch.get("mp_landmarks_2d") is not None and mp_embedding is not None:
+        mesh_xyz = avatar_out.get("mesh_xyz")
+        if mesh_xyz is None:
+            raise ValueError("mp_lmk loss requires avatar_out['mesh_xyz'] (ICT deformed vertices)")
+        losses["mp_lmk"] = loss_mediapipe_landmarks_478(
+            mesh_xyz,
+            ict_faces,
             batch["mp_landmarks_2d"],
             mp_embedding,
-            ict_faces,
             camera,
             cfg.image_size,
             mp_valid=batch.get("mp_valid"),
+            mp_ids=mp_embedding.get("_mp_ids"),
+            face_idx=mp_embedding.get("_face_idx"),
+            bary=mp_embedding.get("_bary"),
         )
 
-    if avatar_out.get("iris_control_xyz") is not None and batch.get("mp_landmarks_2d") is not None:
-        iris_xyz = avatar_out["iris_control_xyz"]
+    iris_xyz = avatar_out.get("iris_control_xyz")
+    if (
+        iris_xyz is not None
+        and iris_xyz.numel() > 0
+        and batch.get("mp_landmarks_2d") is not None
+    ):
         if iris_xyz.ndim == 3:
             iris_xyz = iris_xyz[0]
         mp_uv = batch["mp_landmarks_2d"]
@@ -99,15 +85,19 @@ def compute_losses(
             mp_uv = mp_uv[0]
         losses["iris"] = loss_iris_landmarks_2d(iris_xyz, mp_uv, camera, cfg.image_size)
 
-    n_face = avatar_out["face"]["xyz"].shape[0]
+    n_face = avatar_out["surface"]["xyz"].shape[0]
     eyeball_mask = torch.zeros(avatar_out["h"].shape[0], dtype=torch.bool, device=avatar_out["h"].device)
     eyeball_mask[n_face:] = True
     if avatar_out.get("sem_prob") is not None and _get_w(cfg, "w_h", 0.0) > 0:
+        h_scale = None
+        if avatar is not None and getattr(avatar, "h_sigma_scale", None) is not None:
+            h_scale = avatar.h_sigma_scale
         losses["h"] = loss_h_semantic(
             avatar_out["h"],
             avatar_out["sem_prob"],
             class_sigma=getattr(cfg, "h_class_sigma", None),
             class_weight=getattr(cfg, "h_class_weight", None),
+            h_sigma_scale=h_scale,
         )
     else:
         losses["h"] = loss_h_anchor_surface(
@@ -123,17 +113,16 @@ def compute_losses(
     losses["scale"] = loss_scale(avatar_out["scale"])
     losses["opacity"] = loss_opacity(avatar_out["opacity"])
 
-    face_mod = avatar_out.get("face")
     if (
-        face_mod is not None
-        and getattr(face_mod, "sem_logits", None) is not None
-        and getattr(face_mod, "sem_anchor", None) is not None
+        avatar is not None
+        and getattr(avatar, "sem_logits", None) is not None
+        and getattr(avatar, "sem_anchor", None) is not None
         and _get_w(cfg, "w_sem_anchor", 0.0) > 0
     ):
         from rendering.gaussian_semantics import loss_semantic_anchor
 
         losses["sem_anchor"] = loss_semantic_anchor(
-            face_mod.sem_logits, face_mod.sem_anchor, face_mod.sem_frozen_dims
+            avatar.sem_logits, avatar.sem_anchor, avatar.sem_frozen_dims
         )
 
     if corr is not None and corr.get("gamma") is not None and _get_w(cfg, "w_gamma_prior") > 0:
@@ -143,6 +132,8 @@ def compute_losses(
         pr = corr["pose_residual"]
         tr = corr["translation_residual"]
         losses["pose_prior"] = pr.pow(2).mean() + tr.pow(2).mean()
+        if corr.get("pose_scale") is not None:
+            losses["pose_prior"] = losses["pose_prior"] + (corr["pose_scale"] - 1.0).pow(2).mean()
 
     if corr is not None and _get_w(cfg, "w_gaze_residual", 0.0) > 0:
         from utils.gaze_uv import gaze_residual_prior_loss
@@ -151,24 +142,25 @@ def compute_losses(
             corr["gaze_residual_right"]
         )
 
-    if expr_deform is not None and expr_delta is not None:
+    if deformer is not None and expr_delta is not None and corr is not None:
         c_raw = corr.get("coeffs_raw", corr["coeffs"])
-        reg = expr_deform.regularization_loss(corr["coeffs"], c_raw)
+        reg = deformer.regularization_loss(corr["coeffs"], c_raw, expr_delta=expr_delta)
         if _get_w(cfg, "w_expr_neutral", 0.0) > 0:
             losses["expr_neutral"] = reg["expr_neutral"]
         if _get_w(cfg, "w_expr_leak", 0.0) > 0:
             losses["expr_leak"] = reg["expr_leak"]
         if _get_w(cfg, "w_expr_amp", 0.0) > 0:
             losses["expr_amp"] = reg["expr_amp"]
+        if _get_w(cfg, "w_expr_amp", 0.0) > 0 and "expr_socket" in reg:
+            losses["expr_socket"] = reg["expr_socket"]
         if _get_w(cfg, "w_expr_deform_reg", 0.0) > 0:
             losses["expr_deform_reg"] = (
-                reg["expr_neutral"] + reg["expr_leak"] + reg["expr_amp"]
+                reg["expr_neutral"] + reg["expr_leak"] + reg["expr_amp"] + reg["expr_socket"]
             )
 
     w_tpl = _get_w(cfg, "w_template_smooth", _get_w(cfg, "w_identity_smooth", 0.0))
     if deformer is not None and w_tpl > 0:
-        off = deformer.template_offset
-        losses["template_smooth"] = off.pow(2).mean()
+        losses["template_smooth"] = deformer.template_regularization_loss()
 
     w_mask = _get_w(cfg, "w_mask", _get_w(cfg, "w_mp_mask", 0.0))
     terms = [
@@ -188,6 +180,7 @@ def compute_losses(
         ("expr_neutral", "w_expr_neutral"),
         ("expr_leak", "w_expr_leak"),
         ("expr_amp", "w_expr_amp"),
+        ("expr_socket", "w_expr_amp"),
         ("sem_anchor", "w_sem_anchor"),
         ("template_smooth", None),
         ("identity_smooth", "w_identity_smooth"),

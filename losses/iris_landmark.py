@@ -2,15 +2,15 @@
 
 import torch
 
+from utils.mediapipe_indices import LEFT_IRIS_MP, RIGHT_IRIS_MP
+
 
 def loss_iris_landmarks_2d(iris_xyz, mp_uv, camera, image_size):
     """
     iris_xyz: [10, 3] world (5 left + 5 right control points)
     mp_uv: [478, 2] normalized [0,1] MediaPipe landmarks
     """
-    left_idx = [468, 469, 470, 471, 472]
-    right_idx = [473, 474, 475, 476, 477]
-    targets = torch.cat([mp_uv[left_idx], mp_uv[right_idx]], dim=0)
+    targets = torch.cat([mp_uv[LEFT_IRIS_MP], mp_uv[RIGHT_IRIS_MP]], dim=0)
 
     proj = camera.project_world_points(iris_xyz)
     pred = proj[:, :2] / image_size

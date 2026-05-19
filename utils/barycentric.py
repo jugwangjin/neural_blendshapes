@@ -10,6 +10,11 @@ def sample_barycentric_numpy(vertices, faces, face_idx, bary):
     return (pts * bary[:, :, None]).sum(axis=1)
 
 
+def vertices2landmarks_barycentric(vertices, faces, face_idx, bary):
+    """Alias for vertices2landmarks (barycentric ICT surface sampling)."""
+    return vertices2landmarks(vertices, faces, face_idx, bary)
+
+
 def vertices2landmarks(vertices, faces, lmk_face_idx, lmk_bary_coords):
     """
     vertices: [B, V, 3]
@@ -54,3 +59,22 @@ def sample_surface(vertices, faces, face_idx, bary):
 
 def sample_normals(vertex_normals, faces, face_idx, bary):
     return sample_surface(vertex_normals, faces, face_idx, bary)
+
+
+def uniform_barycentric_samples(n, device, dtype=torch.float32):
+    """Area-uniform random barycentric weights on a triangle, shape [n, 3]."""
+    r1 = torch.rand(n, device=device, dtype=dtype)
+    r2 = torch.rand(n, device=device, dtype=dtype)
+    s = torch.sqrt(r1)
+    b0 = 1.0 - s
+    b1 = s * (1.0 - r2)
+    b2 = s * r2
+    return torch.stack([b0, b1, b2], dim=-1)
+
+
+def bary_to_uv_coords(face_idx, bary, uv_faces, uvs):
+    """Map mesh (face_idx, bary) → UV [N, 2] using per-corner vt indices."""
+    fi = face_idx.long()
+    tri_uv_idx = uv_faces[fi]
+    tri_uv = uvs[tri_uv_idx]
+    return (tri_uv * bary[:, :, None]).sum(dim=1)

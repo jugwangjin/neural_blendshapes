@@ -30,11 +30,56 @@ class ICTFaceKitTorch(torch.nn.Module):
         identity_shape_modes = model_dict['identity_shape_modes']
 
         self.landmark_indices = model_dict['landmark_indices']
+        self.landmark_start = int(model_dict.get('flame_similarity_landmark_start', 17))
         
         self.face_indices = model_dict['face_indices']
         self.not_face_indices = model_dict['not_face_indices']
         self.eyeball_indices = model_dict['eyeball_indices']
         self.head_indices = model_dict['head_indices']
+
+        self.asset_variant = model_dict.get('asset_variant', 'legacy')
+        self.asset_schema_version = int(model_dict.get('asset_schema_version', 0))
+        self.vertex_count = int(model_dict.get('vertex_count', model_dict['neutral_mesh'].shape[0]))
+
+        if 'left_eyeball_indices' not in model_dict:
+            self.left_eyeball_indices = list(range(21451, 23021))
+        if 'right_eyeball_indices' not in model_dict:
+            self.right_eyeball_indices = list(range(23021, 24591))
+
+        for key in (
+            'surface_sample_vertex_indices',
+            'mouth_interior_vertex_indices',
+            'gums_tongue_indices',
+            'teeth_indices',
+            'mouth_socket_indices',
+            'eye_socket_left_indices',
+            'eye_socket_right_indices',
+            'skin_face_indices',
+            'head_neck_indices',
+            'left_eyeball_indices',
+            'right_eyeball_indices',
+            'left_iris_indices',
+            'right_iris_indices',
+            'face_texture_map_id',
+            'face_material_name',
+            'material_names',
+            'primary_texture_materials',
+            'face_geometry_chart_id',
+            'face_part_id',
+            'face_uv_tile_u',
+            'face_uv_tile_v',
+            'texture_map_tile',
+            'n_texture_maps',
+            'geometry_chart_part',
+            'n_geometry_charts',
+            'triangle_uv_atlas',
+            'triangle_uv_local',
+            'eye_uv_mirror_right_u',
+            'uv_tile_index_v',
+            'uv_tile_index_vt',
+        ):
+            if key in model_dict:
+                setattr(self, key, model_dict[key])
 
         vertex_parts = model_dict['vertex_parts']
 
@@ -81,9 +126,18 @@ class ICTFaceKitTorch(torch.nn.Module):
         expression_shape_modes_norm = torch.norm(torch.tensor(expression_shape_modes, dtype=torch.float32), dim=-1) # shape of (num_expression, num_vertices)
         expression_shape_modes_norm = expression_shape_modes_norm / (torch.amax(expression_shape_modes_norm, dim=1, keepdim=True) + 1e-8) # shape of (num_expression, num_vertices)
 
-        # ICT topology: eyeball verts 21451:23021 (L), 23021:24591 (R) — not eye sockets 13294:14062
-        self.register_buffer('left_eyeball_center', torch.mean(self.neutral_mesh[:, 21451:23021], dim=1).clone().detach())
-        self.register_buffer('right_eyeball_center', torch.mean(self.neutral_mesh[:, 23021:24591], dim=1).clone().detach())
+        left_ids = list(getattr(self, 'left_eyeball_indices', range(21451, 23021)))
+        right_ids = list(getattr(self, 'right_eyeball_indices', range(23021, 24591)))
+        self.register_buffer('left_eyeball_idx', torch.tensor(left_ids, dtype=torch.long))
+        self.register_buffer('right_eyeball_idx', torch.tensor(right_ids, dtype=torch.long))
+        self.register_buffer(
+            'left_eyeball_center',
+            torch.mean(self.neutral_mesh[:, self.left_eyeball_idx], dim=1).clone().detach(),
+        )
+        self.register_buffer(
+            'right_eyeball_center',
+            torch.mean(self.neutral_mesh[:, self.right_eyeball_idx], dim=1).clone().detach(),
+        )
         
         self.left_eyeball_blendshape_indices = [self.expression_names.tolist().index('eyeLookUp_L'), self.expression_names.tolist().index('eyeLookDown_L'), 
                                                 self.expression_names.tolist().index('eyeLookIn_L'), self.expression_names.tolist().index('eyeLookOut_L'), ]
@@ -97,7 +151,7 @@ class ICTFaceKitTorch(torch.nn.Module):
 
         self.register_buffer('identity', torch.zeros(1, self.num_identity))
         self.register_buffer('expression', torch.zeros(1, self.num_expression))
-        self.expression[0, jaw_index] = 0.75 # jaw open for canonical face
+        self.expression[0, jaw_index] = float(model_dict.get('flame_similarity_ict_jaw_open', 0.75))
         
         try:
             canonical = np.load(canonical, allow_pickle=True).item()
@@ -108,14 +162,49 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.register_buffer('R', canonical['R'].cpu()) # shape of (B, 3, 3)
         self.register_buffer('T', canonical['T'].cpu()) # shape of (B, 3)
 
+        self.register_buffer(
+            'flame_similarity_s',
+            torch.tensor(model_dict.get('flame_similarity_s', 1.0), dtype=torch.float32).reshape(1),
+        )
+        self.register_buffer(
+            'flame_similarity_T',
+            torch.tensor(
+                model_dict.get('flame_similarity_T', np.zeros(3, dtype=np.float32)),
+                dtype=torch.float32,
+            ).reshape(1, 3),
+        )
+        if 'flame_alignment_R' in model_dict:
+            self.register_buffer(
+                'flame_alignment_s',
+                torch.tensor(model_dict['flame_alignment_s'], dtype=torch.float32).reshape(1),
+            )
+            self.register_buffer(
+                'flame_alignment_R',
+                torch.tensor(model_dict['flame_alignment_R'], dtype=torch.float32).reshape(1, 3, 3),
+            )
+            self.register_buffer(
+                'flame_alignment_T',
+                torch.tensor(model_dict['flame_alignment_T'], dtype=torch.float32).reshape(1, 3),
+            )
+            self.use_flame_alignment = True
+        else:
+            self.use_flame_alignment = False
+        self.use_flame_similarity = True
+
         # with torch.no_grad():
         canonical = self.forward(expression_weights=self.expression, identity_weights=self.identity, to_canonical=True)
         self.register_buffer('canonical', canonical)
         self.register_buffer('neutral_mesh_canonical', self.to_canonical_space(self.neutral_mesh).clone().detach())
 
     def update_eyeball_centers(self, template_mesh):
-        self.register_buffer('left_eyeball_center', torch.mean(template_mesh[None, 21451:23021], dim=1).clone().detach())
-        self.register_buffer('right_eyeball_center', torch.mean(template_mesh[None, 23021:24591], dim=1).clone().detach())
+        self.register_buffer(
+            'left_eyeball_center',
+            torch.mean(template_mesh[None, self.left_eyeball_idx], dim=1).clone().detach(),
+        )
+        self.register_buffer(
+            'right_eyeball_center',
+            torch.mean(template_mesh[None, self.right_eyeball_idx], dim=1).clone().detach(),
+        )
         
 
     def to_canonical_space(self, mesh):
@@ -131,12 +220,24 @@ class ICTFaceKitTorch(torch.nn.Module):
         mesh = self.s * (torch.einsum('bvd, bmd -> bvm', mesh, self.R)) + self.T
         return mesh
 
+    def apply_flame_similarity(self, mesh):
+        """Map deformed ICT mesh to FLAME space (``flame_alignment_s,R,T`` if baked, else coarse ``s,T``)."""
+        if not self.use_flame_similarity:
+            return mesh
+        if getattr(self, 'use_flame_alignment', False):
+            return (
+                self.flame_alignment_s * torch.matmul(mesh, self.flame_alignment_R)
+                + self.flame_alignment_T
+            )
+        return self.flame_similarity_s * mesh + self.flame_similarity_T
+
     def forward(
         self,
         expression_weights=None,
         identity_weights=None,
         to_canonical=True,
         apply_eyeball_rotation=False,
+        apply_flame_similarity=True,
     ):
         """
         Forward pass of the ICTFaceKitTorch model.
@@ -164,41 +265,35 @@ class ICTFaceKitTorch(torch.nn.Module):
                         torch.einsum('bn, bnmd -> bmd', expression_weights, self.expression_shape_modes.repeat(bsize, 1, 1, 1)) + \
                         torch.einsum('bn, bnmd -> bmd', identity_weights, self.identity_shape_modes.repeat(bsize, 1, 1, 1))
 
+        if apply_flame_similarity:
+            deformed_mesh = self.apply_flame_similarity(deformed_mesh)
+
         if not apply_eyeball_rotation:
             if to_canonical:
                 return self.to_canonical_space(deformed_mesh)
             return deformed_mesh
 
-        # for eyeballs (left eyeball: from verts [21451:23021], right eyeball: from verts [23021:24591])
-        # based on index eyeLookIn_L/R, eyeLookOut_L/R, eyeLookUp_L/R, eyeLookDown_L/R
-        # rotate the eyeballs 
-        # for left eyeball: get xy rotation from eyeLookIn_L, eyeLookOut_L, eyeLookUp_L, eyeLookDown_L
-        # for right eyeball: get xy rotation from eyeLookIn_R, eyeLookOut_R, eyeLookUp_R, eyeLookDown_R
         left_eyeball_rotation = torch.zeros(bsize, 3).to(expression_weights.device)
         left_eyeball_rotation[:, 0] = (expression_weights[:, self.left_eyeball_blendshape_indices[1]] - expression_weights[:, self.left_eyeball_blendshape_indices[0]]) * np.pi * 0.075
         left_eyeball_rotation[:, 1] = (expression_weights[:, self.left_eyeball_blendshape_indices[3]] - expression_weights[:, self.left_eyeball_blendshape_indices[2]]) * np.pi * 0.075
-
         left_eyeball_matrix = pt3d.euler_angles_to_matrix(left_eyeball_rotation, convention='XYZ')
-        
+
         right_eyeball_rotation = torch.zeros(bsize, 3).to(expression_weights.device)
         right_eyeball_rotation[:, 0] = (expression_weights[:, self.right_eyeball_blendshape_indices[1]] - expression_weights[:, self.right_eyeball_blendshape_indices[0]]) * np.pi * 0.075
         right_eyeball_rotation[:, 1] = (expression_weights[:, self.right_eyeball_blendshape_indices[2]] - expression_weights[:, self.right_eyeball_blendshape_indices[3]]) * np.pi * 0.075
-
         right_eyeball_matrix = pt3d.euler_angles_to_matrix(right_eyeball_rotation, convention='XYZ')
 
-        # rotate the eyeballs
-        left_eyeball = deformed_mesh[:, 21451:23021] - self.left_eyeball_center
+        li = self.left_eyeball_idx
+        ri = self.right_eyeball_idx
+        left_eyeball = deformed_mesh[:, li] - self.left_eyeball_center
         left_eyeball_rotated = torch.einsum('bvd, bmd -> bvm', left_eyeball, left_eyeball_matrix)
-        left_eyeball_displacement = left_eyeball_rotated - left_eyeball
-        deformed_mesh[:, 21451:23021] = deformed_mesh[:, 21451:23021] + left_eyeball_displacement
-        
-        right_eyeball = deformed_mesh[:, 23021:24591] - self.right_eyeball_center
+        deformed_mesh[:, li] = deformed_mesh[:, li] + left_eyeball_rotated - left_eyeball
+
+        right_eyeball = deformed_mesh[:, ri] - self.right_eyeball_center
         right_eyeball_rotated = torch.einsum('bvd, bmd -> bvm', right_eyeball, right_eyeball_matrix)
-        right_eyeball_displacement = right_eyeball_rotated - right_eyeball
-        deformed_mesh[:, 23021:24591] = deformed_mesh[:, 23021:24591] + right_eyeball_displacement
+        deformed_mesh[:, ri] = deformed_mesh[:, ri] + right_eyeball_rotated - right_eyeball
 
         if to_canonical:
-            # Transform the deformed mesh to canonical space
             deformed_mesh = self.to_canonical_space(deformed_mesh)
 
         return deformed_mesh
@@ -306,6 +401,24 @@ class ICTFaceKitTorch(torch.nn.Module):
         facial_mask[self.face_indices] = 1
         facial_mask[self.eyeball_indices] = 1
         self.facial_mask = facial_mask
+
+    def landmark_vertices(self, mesh, region='all'):
+        """
+        Sample Multi-PIE 68 landmarks on ``mesh`` (B,V,3) or (V,3).
+
+        ``region``: ``all`` | ``inner`` (FLAME-pairable [17:]) | ``jawline`` ([0:17]).
+        Training supervision uses baked MediaPipe bary embedding, not these vertex picks.
+        """
+        idx = self.landmark_indices
+        if region == 'inner':
+            idx = idx[self.landmark_start :]
+        elif region == 'jawline':
+            idx = idx[: self.landmark_start]
+        elif region != 'all':
+            raise ValueError(f"landmark_vertices region must be all|inner|jawline, got {region!r}")
+        if mesh.dim() == 2:
+            return mesh[idx]
+        return mesh[:, idx]
 
     def load_mediapipe_idx(self, mediapipe_name_to_ict):
 

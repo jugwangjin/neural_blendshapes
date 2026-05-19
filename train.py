@@ -1,9 +1,7 @@
 """
-MediaPipe → tracker MLP → ICT deformer → UVH/eye Gaussians → 3DGS.
+MediaPipe → tracker MLP → ICT deformer → surface/eye Gaussians → gsplat.
 
-2-stage schedule:
-  1 coarse geometry (tracker + template deformer)
-  2A expression warmup → 2B Gaussian detail
+Stages: 1 mesh+tracker → 2A expression → 2B GS detail → 3 view appearance
 
 Run from repo root:
   python train.py
@@ -12,7 +10,6 @@ Run from repo root:
 import sys
 from pathlib import Path
 
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -24,7 +21,6 @@ from dataset.video_dataset import VideoDataset, collate_batch
 from rendering import GaussianRenderer
 from losses.train_losses import compute_losses
 from model.expr_regions import build_expr_region_weight
-from model.expression_deform_mlp import SupportGatedExpressionDeformer
 from model.gaussian_avatar import GaussianAvatar
 from model.ict_deformer import ICTDeformer
 from model.ict_model import ICTFaceKitTorch
@@ -36,20 +32,26 @@ from training.apply import (
     stage_loss_cfg,
 )
 from training.stages import STAGE_SCHEDULE, iter_stages, total_training_steps
+from utils.accessory_detect import segmentation_has_accessory
 from utils.camera import FixedCamera
+from losses.mediapipe_landmark_478 import embedding_tensors, load_mediapipe_ict_embedding
+from utils.sampling import count_surface_gaussians
 
 
-def load_mp_embedding(path):
-    d = np.load(path, allow_pickle=True)
-    return {
-        "mp_landmark_indices": d["mp_landmark_indices"],
-        "ict_lmk_face_idx": d["ict_lmk_face_idx"],
-        "ict_lmk_b_coords": d["ict_lmk_b_coords"],
-    }
+def load_mp_embedding(path, device):
+    emb = load_mediapipe_ict_embedding(path)
+    mp_ids, face_idx, bary = embedding_tensors(emb, device)
+    emb["_mp_ids"] = mp_ids
+    emb["_face_idx"] = face_idx
+    emb["_bary"] = bary
+    n = len(emb["mp_landmark_indices"])
+    print(f"MP→ICT landmark embedding: {path} ({n} landmarks)")
+    return emb
 
 
 def main():
     cfg = Config()
+    assert cfg.batch_size == 1, "avatar/render path is single-mesh; set batch_size=1"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cfg.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -75,31 +77,67 @@ def main():
         gamma_min=cfg.gamma_min,
         gamma_max=cfg.gamma_max,
         gaze_uv_range=cfg.gaze_uv_range,
+        use_landmarks=True,
     ).to(device)
 
-    deformer = ICTDeformer(ict).to(device)
     expr_region_weight = build_expr_region_weight(ict).to(device)
-    expr_deform = SupportGatedExpressionDeformer(
+    deformer = ICTDeformer(
         ict,
         expr_region_weight,
         n_coeffs=cfg.num_mp_blendshapes,
     ).to(device)
 
+    n_acc = cfg.n_accessory_gaussians
+    if cfg.auto_detect_accessory and n_acc == 0:
+        if segmentation_has_accessory(
+            cfg.segmentation_dir,
+            cfg.train_scenes,
+            min_pixel_ratio=cfg.accessory_min_pixel_ratio,
+        ):
+            n_acc = 512
+            print(f"accessory detected in segmentation — using n_accessory_gaussians={n_acc}")
+
+    n_surface = count_surface_gaussians(
+        ict,
+        ict.faces,
+        k_face=cfg.n_surface_gaussians_per_face,
+        k_head=cfg.n_surface_gaussians_per_head,
+        k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
+        k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
+        k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
+    )
+    print(
+        f"surface Gaussians: {n_surface} "
+        f"(face/head={cfg.n_surface_gaussians_per_face}/{cfg.n_surface_gaussians_per_head} "
+        f"mouth_socket={cfg.n_surface_gaussians_per_mouth_socket} "
+        f"mouth_interior={cfg.n_surface_gaussians_mouth_interior} "
+        f"eye_socket={cfg.n_surface_gaussians_per_eye_socket}; "
+        f"gum/k={cfg.n_surface_gaussians_mouth_interior} h_sigma×{cfg.gum_h_sigma_scale}; "
+        f"teeth/eyeball mesh skipped)"
+    )
+
     avatar = GaussianAvatar.from_ict(
         ict,
-        n_face_gaussians=cfg.n_face_gaussians,
+        deformer=deformer,
+        k_face=cfg.n_surface_gaussians_per_face,
+        k_head=cfg.n_surface_gaussians_per_head,
+        k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
+        k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
+        k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
         n_eye_per_side=cfg.n_eye_gaussians_per_side,
+        n_accessory_gaussians=n_acc,
         gaze_uv_range=cfg.gaze_uv_range,
         learn_gaze_refine=cfg.learn_gaze_refine,
         n_semantic_classes=cfg.n_semantic_classes,
+        gum_h_sigma_scale=cfg.gum_h_sigma_scale,
     ).to(device)
 
-    init_training_state(avatar, expr_deform)
+    init_training_state(avatar)
 
-    renderer = GaussianRenderer(cfg, image_size=cfg.image_size).to(device)
+    renderer = GaussianRenderer(cfg, image_size=cfg.image_size, sh_degree=None).to(device)
     camera = FixedCamera.from_default_npz(cfg.camera_npz, width=cfg.image_size, height=cfg.image_size)
 
-    mp_embedding = load_mp_embedding(cfg.mp_embedding)
+    mp_embedding = load_mp_embedding(cfg.mp_embedding, device)
     ict_faces = ict.faces
 
     global_step = 0
@@ -114,8 +152,11 @@ def main():
         print(f"\n=== Stage {stage_idx}: {spec.name} ({spec.steps} steps) ===")
         print(spec.description)
 
-        apply_stage_requires_grad(spec, tracker, deformer, avatar, expr_deform)
-        mesh_optim, gaussian_optim = build_optimizers(spec, tracker, deformer, avatar, expr_deform)
+        renderer.set_sh_degree(spec.sh_degree)
+        cfg.sh_degree = spec.sh_degree
+
+        apply_stage_requires_grad(spec, tracker, deformer, avatar)
+        mesh_optim, gaussian_optim = build_optimizers(spec, tracker, deformer, avatar)
         loss_cfg = stage_loss_cfg(spec)
         stage_local = 0
 
@@ -136,24 +177,11 @@ def main():
                     force_gamma_one=spec.fix_gamma_at_one,
                 )
 
-                expr_delta = None
-                if spec.train_expression_deform:
-                    expr_delta = expr_deform(corr["coeffs"])
-
-                verts_out = deformer(
-                    mp_coeffs_corr=corr["coeffs"],
-                    pose_rotation_6d=corr["pose_residual"],
-                    pose_translation=corr["translation_residual"],
-                    expr_delta=expr_delta,
-                )
-
                 avatar_out = avatar(
-                    verts_out["verts_posed"][0],
-                    ict.faces,
-                    gaze_uv_left=corr["gaze_uv_left"],
-                    gaze_uv_right=corr["gaze_uv_right"],
+                    tracker_out=corr,
+                    apply_expression_deform=spec.train_expression_deform,
                 )
-                avatar_out["mesh_xyz"] = verts_out["verts_posed"]
+                expr_delta = avatar_out.get("expr_delta")
 
                 render_semantic = spec.w_seg > 0
                 render = renderer(
@@ -171,8 +199,8 @@ def main():
                     ict_faces,
                     corr=corr,
                     deformer=deformer,
-                    expr_deform=expr_deform if spec.train_expression_deform else None,
                     expr_delta=expr_delta,
+                    avatar=avatar,
                 )
 
                 if mesh_optim is not None:
@@ -204,7 +232,6 @@ def main():
                             "stage": spec.name,
                             "tracker": tracker.state_dict(),
                             "deformer": deformer.state_dict(),
-                            "expr_deform": expr_deform.state_dict(),
                             "avatar": avatar.state_dict(),
                             "cfg": cfg,
                         },

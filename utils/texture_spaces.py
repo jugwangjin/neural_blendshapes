@@ -1,57 +1,16 @@
 """
-ICT texture-space meshes from vertex_parts.
-
-Eye texture slide uses eyeball parts only (6, 7), not eye sockets (3, 4).
-Vertex index ranges may differ after triangulation; vertex_parts ids are authoritative.
+ICT texture-space meshes from npy region index arrays (not hardcoded part ids).
 """
 
 import torch
 
+from utils.eye_chart import build_sclera_uv_mesh
+from utils.ict_regions import filter_triangles_all_vertices_in, surface_allowed_vertices
 from utils.uv_mesh import UVMesh
 
-# vertex_parts ids (ict_facekit_to_npy)
-PART_FACE_SKIN = (0,)
-PART_HEAD_NECK = (1,)
-PART_MOUTH_SOCKET = (2,)
-PART_EYE_SOCKET_L = (3,)
-PART_EYE_SOCKET_R = (4,)
-PART_GUM_TONGUE = (5,)
-PART_EYEBALL_L = (6,)
-PART_EYEBALL_R = (7,)
 
-PART_FACE = (0, 1, 2, 5)
-PART_LEFT_EYE_TEXTURE = (6,)
-PART_RIGHT_EYE_TEXTURE = (7,)
-PART_LEFT_EYE = PART_LEFT_EYE_TEXTURE
-PART_RIGHT_EYE = PART_RIGHT_EYE_TEXTURE
-PART_EYEBALL = (6, 7)
-
-
-def _vertex_parts_tensor(vertex_parts, device):
-    if torch.is_tensor(vertex_parts):
-        return vertex_parts.to(device=device, dtype=torch.long)
-    return torch.tensor(vertex_parts, device=device, dtype=torch.long)
-
-
-def filter_face_indices(faces, vertex_parts, allowed_part_ids):
-    allowed = set(allowed_part_ids)
-    keep = []
-    if torch.is_tensor(vertex_parts):
-        vp = vertex_parts
-        for fi in range(faces.shape[0]):
-            tri = faces[fi]
-            if all(int(vp[v]) in allowed for v in tri):
-                keep.append(fi)
-    else:
-        for fi in range(faces.shape[0]):
-            tri = faces[fi].tolist()
-            if all(vertex_parts[v] in allowed for v in tri):
-                keep.append(fi)
-    return torch.tensor(keep, dtype=torch.long, device=faces.device)
-
-
-def build_texture_space_mesh(verts, faces, uvs, uv_faces, vertex_parts, allowed_part_ids, device):
-    face_idx = filter_face_indices(faces, vertex_parts, allowed_part_ids)
+def build_texture_space_mesh(verts, faces, uvs, uv_faces, allowed_vertex_ids, device):
+    face_idx = filter_triangles_all_vertices_in(faces, allowed_vertex_ids, device=device)
     return UVMesh(
         verts=verts.to(device),
         faces=faces.to(device),
@@ -76,18 +35,18 @@ class TextureSpaceMeshes:
         faces = ict.faces
         uvs = ict.uvs
         uv_faces = ict.uv_faces
-        vp = ict.vertex_parts
+
+        surface_verts = getattr(ict, "surface_sample_vertex_indices", None)
+        if surface_verts is None:
+            surface_verts = surface_allowed_vertices(ict)
 
         face_mesh, face_fi = build_texture_space_mesh(
-            verts, faces, uvs, uv_faces, vp, PART_FACE, device
+            verts, faces, uvs, uv_faces, surface_verts, device
         )
-        left_mesh, left_fi = build_texture_space_mesh(
-            verts, faces, uvs, uv_faces, vp, PART_LEFT_EYE_TEXTURE, device
-        )
-        right_mesh, right_fi = build_texture_space_mesh(
-            verts, faces, uvs, uv_faces, vp, PART_RIGHT_EYE_TEXTURE, device
-        )
+        left_mesh = build_sclera_uv_mesh(ict, "L", device)
+        right_mesh = build_sclera_uv_mesh(ict, "R", device)
+        left_fi = left_mesh.active_face_idx
+        right_fi = right_mesh.active_face_idx
+
         face_mesh.active_face_idx = face_fi
-        left_mesh.active_face_idx = left_fi
-        right_mesh.active_face_idx = right_fi
         return cls(face_mesh, left_mesh, right_mesh, face_fi, left_fi, right_fi)

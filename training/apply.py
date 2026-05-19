@@ -33,6 +33,7 @@ def stage_loss_cfg(spec: StageSpec):
         w_template_smooth=spec.w_template_smooth,
         h_class_sigma=h_sigma.numpy().tolist(),
         h_class_weight=h_weight.numpy().tolist(),
+        mask_accessory_in_seg=not spec.train_accessory,
     )
 
 
@@ -43,87 +44,106 @@ def _set_requires_grad(module, flag):
         p.requires_grad = flag
 
 
-def _freeze_uvh_geometry(module):
-    module.uv.requires_grad = False
-    module.log_scale.requires_grad = False
-    module.rotation.requires_grad = False
-    if module.fixed_h is None:
-        module.h.requires_grad = False
-
-
-def _set_uvh_trainable(module, appearance, geometry, semantic, geom_lr_scale=1.0):
+def _set_surface_trainable(surface, appearance, geometry, semantic, geom_scale=1.0):
     if appearance:
-        module.color.requires_grad = True
-        module.opacity.requires_grad = True
+        surface.color.requires_grad = True
+        surface.opacity.requires_grad = True
     else:
-        module.color.requires_grad = False
-        module.opacity.requires_grad = False
+        surface.color.requires_grad = False
+        surface.opacity.requires_grad = False
 
     if geometry:
-        module.uv.requires_grad = True
-        module.log_scale.requires_grad = True
-        module.rotation.requires_grad = True
-        if module.fixed_h is None:
-            module.h.requires_grad = True
+        surface.h.requires_grad = True
+        surface.log_scale.requires_grad = True
+        surface.rotation.requires_grad = True
     else:
-        _freeze_uvh_geometry(module)
+        surface.h.requires_grad = False
+        surface.log_scale.requires_grad = False
+        surface.rotation.requires_grad = False
 
-    if semantic and module.sem_logits is not None:
-        module.sem_logits.requires_grad = True
-    elif module.sem_logits is not None:
-        module.sem_logits.requires_grad = False
+    if semantic and surface.sem_logits is not None:
+        surface.sem_logits.requires_grad = True
+    elif surface.sem_logits is not None:
+        surface.sem_logits.requires_grad = False
 
 
-def apply_stage_requires_grad(spec, tracker, deformer, avatar, expr_deform):
+def _set_texture_trainable(tex, appearance, uv_slide):
+    if appearance:
+        tex.color.requires_grad = True
+        tex.opacity.requires_grad = True
+    else:
+        tex.color.requires_grad = False
+        tex.opacity.requires_grad = False
+    tex.log_scale.requires_grad = False
+    tex.rotation.requires_grad = False
+    if tex.fixed_h is None:
+        tex.h.requires_grad = False
+    tex.uv.requires_grad = uv_slide
+
+
+def _set_accessory_trainable(acc, train):
+    if acc is None or acc.n_gaussians == 0:
+        return
+    for p in acc.parameters():
+        p.requires_grad = train
+
+
+def apply_stage_requires_grad(spec, tracker, deformer, avatar):
     _set_requires_grad(tracker, False)
     _set_requires_grad(deformer, False)
     _set_requires_grad(avatar, False)
-    _set_requires_grad(expr_deform, False)
 
-    need_trunk = (
-        spec.train_pose_residual
-        or (spec.train_gamma and not spec.fix_gamma_at_one)
-        or spec.train_tracker
-    )
-    if need_trunk:
-        for p in tracker.trunk.parameters():
-            p.requires_grad = True
-    if spec.train_pose_residual or spec.train_tracker:
-        for p in tracker.head_pose.parameters():
-            p.requires_grad = True
-        for p in tracker.head_trans.parameters():
-            p.requires_grad = True
     if spec.train_gamma and not spec.fix_gamma_at_one:
+        for p in tracker.expr_trunk.parameters():
+            p.requires_grad = True
         for p in tracker.head_gamma.parameters():
             p.requires_grad = True
+    if spec.train_tracker:
+        for p in tracker.expr_trunk.parameters():
+            p.requires_grad = True
+        for p in tracker.head_gamma.parameters():
+            p.requires_grad = True
+
+    if spec.train_pose_residual or spec.train_tracker:
+        for p in tracker.pose_trunk.parameters():
+            p.requires_grad = True
+        for p in tracker.head_pose.parameters():
+            p.requires_grad = True
+        tracker.log_pose_scale.requires_grad = True
 
     if spec.train_pose_weight:
         for p in deformer.pose_weight_net.parameters():
             p.requires_grad = True
 
     if spec.train_template_deformer:
-        deformer.template_offset.requires_grad = True
+        for p in deformer.template_mlp.parameters():
+            p.requires_grad = True
+        deformer.log_max_template_delta.requires_grad = True
 
-    if spec.train_expression_deform and expr_deform is not None:
-        _set_requires_grad(expr_deform, True)
+    if spec.train_expression_deform:
+        for p in deformer.expr_au_embed.parameters():
+            p.requires_grad = True
+        for p in deformer.expr_mlp.parameters():
+            p.requires_grad = True
 
     g = spec.geometry_lr_scale
-    _set_uvh_trainable(
-        avatar.face,
+    surf = avatar.surface
+    _set_surface_trainable(
+        surf,
         spec.train_gaussian_appearance,
         spec.train_gaussian_geometry,
         spec.train_gaussian_semantic,
-        geom_lr_scale=g,
+        geom_scale=g,
     )
-    for side in (avatar.eyes.left, avatar.eyes.right):
-        _set_uvh_trainable(
-            side,
-            spec.train_gaussian_appearance,
-            False,
-            spec.train_gaussian_semantic,
-        )
-        if spec.train_eye_gaze:
-            side.uv.requires_grad = True
+    if spec.train_gaussian_geometry and g < 1.0:
+        surf.h.requires_grad = spec.train_gaussian_geometry
+
+    uv_on = spec.train_eye_gaze
+    _set_texture_trainable(
+        avatar.eyes,
+        spec.train_gaussian_appearance,
+        uv_slide=uv_on,
+    )
 
     if avatar.eyes.gaze_refine_left is not None:
         avatar.eyes.gaze_refine_left.requires_grad = spec.train_eye_gaze
@@ -131,16 +151,17 @@ def apply_stage_requires_grad(spec, tracker, deformer, avatar, expr_deform):
         avatar.eyes.gaze_refine_right.requires_grad = spec.train_eye_gaze
 
     if spec.train_eye_gaze:
+        for p in tracker.gaze_trunk.parameters():
+            p.requires_grad = True
         for p in tracker.head_gaze_l.parameters():
             p.requires_grad = True
         for p in tracker.head_gaze_r.parameters():
             p.requires_grad = True
-        if not need_trunk:
-            for p in tracker.trunk.parameters():
-                p.requires_grad = True
+
+    _set_accessory_trainable(avatar.accessory, spec.train_accessory)
 
 
-def build_optimizers(spec, tracker, deformer, avatar, expr_deform):
+def build_optimizers(spec, tracker, deformer, avatar):
     mesh_groups = []
     gaussian_groups = []
     gscale = spec.geometry_lr_scale
@@ -157,40 +178,47 @@ def build_optimizers(spec, tracker, deformer, avatar, expr_deform):
             }
         )
 
-    if spec.train_template_deformer and deformer.template_offset.requires_grad:
-        mesh_groups.append({"params": [deformer.template_offset], "lr": spec.lr_template})
+    if spec.train_template_deformer:
+        tpl_params = [p for p in deformer.template_mlp.parameters() if p.requires_grad]
+        if deformer.log_max_template_delta.requires_grad:
+            tpl_params.append(deformer.log_max_template_delta)
+        if tpl_params:
+            mesh_groups.append({"params": tpl_params, "lr": spec.lr_template})
 
-    if spec.train_expression_deform and expr_deform is not None:
-        mesh_groups.append(
-            {
-                "params": [p for p in expr_deform.parameters() if p.requires_grad],
-                "lr": spec.lr_expr_deform,
-            }
-        )
+    if spec.train_expression_deform:
+        expr_params = []
+        for p in deformer.expr_au_embed.parameters():
+            if p.requires_grad:
+                expr_params.append(p)
+        for p in deformer.expr_mlp.parameters():
+            if p.requires_grad:
+                expr_params.append(p)
+        if expr_params:
+            mesh_groups.append({"params": expr_params, "lr": spec.lr_expr_deform})
 
-    def add_uvh_groups(mod):
-        if mod.color.requires_grad:
-            gaussian_groups.append({"params": [mod.color], "lr": spec.lr_gaussian_color})
-        if mod.opacity.requires_grad:
-            gaussian_groups.append({"params": [mod.opacity], "lr": spec.lr_gaussian_opacity})
-        if mod.uv.requires_grad:
-            gaussian_groups.append({"params": [mod.uv], "lr": spec.lr_gaussian_uv * gscale})
-        if mod.log_scale.requires_grad:
-            gaussian_groups.append({"params": [mod.log_scale], "lr": spec.lr_gaussian_scale * gscale})
-        if mod.rotation.requires_grad:
-            gaussian_groups.append({"params": [mod.rotation], "lr": spec.lr_gaussian_scale * gscale})
-        if mod.fixed_h is None and mod.h.requires_grad:
-            gaussian_groups.append({"params": [mod.h], "lr": spec.lr_gaussian_h * gscale})
-        if (
-            mod.sem_logits is not None
-            and mod.sem_logits.requires_grad
-            and mod.sem_prob_fixed is None
-        ):
-            gaussian_groups.append({"params": [mod.sem_logits], "lr": spec.lr_gaussian_uv * gscale})
+    def add_surface_groups(surf):
+        if surf.color.requires_grad:
+            gaussian_groups.append({"params": [surf.color], "lr": spec.lr_gaussian_color})
+        if surf.opacity.requires_grad:
+            gaussian_groups.append({"params": [surf.opacity], "lr": spec.lr_gaussian_opacity})
+        if surf.h.requires_grad:
+            gaussian_groups.append({"params": [surf.h], "lr": spec.lr_gaussian_h * gscale})
+        if surf.log_scale.requires_grad:
+            gaussian_groups.append({"params": [surf.log_scale], "lr": spec.lr_gaussian_scale * gscale})
+        if surf.rotation.requires_grad:
+            gaussian_groups.append({"params": [surf.rotation], "lr": spec.lr_gaussian_scale * gscale})
+        if surf.sem_logits is not None and surf.sem_logits.requires_grad:
+            gaussian_groups.append({"params": [surf.sem_logits], "lr": spec.lr_gaussian_scale * gscale})
 
-    add_uvh_groups(avatar.face)
-    for side in (avatar.eyes.left, avatar.eyes.right):
-        add_uvh_groups(side)
+    add_surface_groups(avatar.surface)
+
+    eye_mod = avatar.eyes
+    if eye_mod.color.requires_grad:
+        gaussian_groups.append({"params": [eye_mod.color], "lr": spec.lr_gaussian_color})
+    if eye_mod.opacity.requires_grad:
+        gaussian_groups.append({"params": [eye_mod.opacity], "lr": spec.lr_gaussian_opacity})
+    if eye_mod.uv.requires_grad:
+        gaussian_groups.append({"params": [eye_mod.uv], "lr": spec.lr_eye_uv * gscale})
 
     gaze_params = []
     if avatar.eyes.gaze_refine_left is not None and avatar.eyes.gaze_refine_left.requires_grad:
@@ -200,12 +228,17 @@ def build_optimizers(spec, tracker, deformer, avatar, expr_deform):
     if gaze_params:
         gaussian_groups.append({"params": gaze_params, "lr": spec.lr_eye_gaze})
 
+    acc = avatar.accessory
+    if acc is not None and acc.n_gaussians > 0:
+        acc_params = [p for p in acc.parameters() if p.requires_grad]
+        if acc_params:
+            gaussian_groups.append({"params": acc_params, "lr": spec.lr_accessory})
+
     mesh_optim = torch.optim.Adam(mesh_groups) if mesh_groups else None
     gaussian_optim = torch.optim.Adam(gaussian_groups) if gaussian_groups else None
     return mesh_optim, gaussian_optim
 
 
-def init_training_state(avatar, expr_deform):
+def init_training_state(avatar):
     with torch.no_grad():
-        if avatar.face.fixed_h is None:
-            avatar.face.h.zero_()
+        avatar.surface.h.zero_()

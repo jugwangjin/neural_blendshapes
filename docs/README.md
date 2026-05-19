@@ -17,8 +17,9 @@
 |------|------|
 | [implementation/default_camera.md](implementation/default_camera.md) | `default_camera.npz` bake·로드 |
 | [implementation/ict_mediapipe_lmk_baker.md](implementation/ict_mediapipe_lmk_baker.md) | MediaPipe → ICT landmark embedding |
+| [implementation/ict_facekit_npy.md](implementation/ict_facekit_npy.md) | `ict_facekit_torch.npy` bake (parts #0–#8) |
+| [implementation/ict_texture_map_index.md](implementation/ict_texture_map_index.md) | usemtl + UV tile → `face_texture_map_id` |
 | [implementation/save_ict_blendshapes.md](implementation/save_ict_blendshapes.md) | ICT blendshape npz export |
-| [implementation/ict_mediapipe_lmk.md](implementation/ict_mediapipe_lmk.md) | (요약) MP landmark on ICT |
 
 ## 기타
 

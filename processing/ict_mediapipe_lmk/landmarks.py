@@ -3,7 +3,21 @@ import torch
 import trimesh
 
 
+def validate_lmk_face_indices(faces, face_idx, label="landmarks"):
+    face_idx = np.asarray(face_idx, dtype=np.int64)
+    n_faces = len(faces)
+    bad = face_idx >= n_faces
+    if np.any(bad):
+        raise ValueError(
+            f"{label}: {int(bad.sum())} face_idx >= num_faces ({n_faces}), "
+            f"max index {int(face_idx.max())}. "
+            "FLAME use_processed_faces must match flame_static_embedding.pkl "
+            "(use --no_processed_faces)."
+        )
+
+
 def sample_bary(vertices, faces, face_idx, bary):
+    validate_lmk_face_indices(faces, face_idx)
     tri = faces[face_idx]
     pts = vertices[tri]
     return (pts * bary[:, :, None]).sum(axis=1)

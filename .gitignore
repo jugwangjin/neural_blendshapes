@@ -17,6 +17,9 @@ figures
 quant/*
 quant
 
+debug/
+debugs/
+
 # large files
 assets
 large-steps-pytorch
@@ -35,6 +38,7 @@ processing/flame/__pycache__/
 *.so
 
 ./docs
+legacy/
 
 # Distribution / packaging
 .Python

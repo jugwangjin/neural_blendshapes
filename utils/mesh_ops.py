@@ -15,3 +15,6 @@ def vertex_normals(verts, faces):
     vn.index_add_(0, faces[:, 1], fn)
     vn.index_add_(0, faces[:, 2], fn)
     return vn / vn.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+
+
+compute_vertex_normals = vertex_normals

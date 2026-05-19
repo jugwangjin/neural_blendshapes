@@ -4,13 +4,13 @@ import pickle
 
 import numpy as np
 
-from ict_mediapipe_lmk.constants import (
+from processing.ict_mediapipe_lmk.constants import (
     LEFT_IRIS_FLAME,
     LEFT_IRIS_MP,
     RIGHT_IRIS_FLAME,
     RIGHT_IRIS_MP,
 )
-from ict_mediapipe_lmk.landmarks import sample_bary
+from processing.ict_mediapipe_lmk.landmarks import sample_bary
 
 
 def load_flame_static_embedding(path):

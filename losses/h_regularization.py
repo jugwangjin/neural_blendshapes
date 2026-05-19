@@ -11,12 +11,13 @@ def charbonnier(x, eps=1e-3):
     return torch.sqrt(x * x + eps * eps)
 
 
-def loss_h_semantic(h, sem_prob, class_sigma=None, class_weight=None):
+def loss_h_semantic(h, sem_prob, class_sigma=None, class_weight=None, h_sigma_scale=None):
     """
     h: [G, 1]
     sem_prob: [G, K] softmax over semantic classes
     class_sigma: [K] allowed |h| scale per class
     class_weight: [K] loss multiplier (accessory=0 → no prior)
+    h_sigma_scale: optional [G] multiplier on sigma (e.g. gum Gaussians > 1 → looser |h|)
     """
     if class_sigma is None or class_weight is None:
         sigma_t, weight_t = h_prior_tensors(h.device, h.dtype)
@@ -25,7 +26,10 @@ def loss_h_semantic(h, sem_prob, class_sigma=None, class_weight=None):
         weight_t = torch.tensor(class_weight, device=h.device, dtype=h.dtype)
 
     r = h.squeeze(-1).abs().unsqueeze(-1)
-    per_class = charbonnier(r / sigma_t.view(1, -1)) * weight_t.view(1, -1)
+    sigma = sigma_t.view(1, -1)
+    if h_sigma_scale is not None:
+        sigma = sigma * h_sigma_scale.view(-1, 1)
+    per_class = charbonnier(r / sigma) * weight_t.view(1, -1)
     return (sem_prob * per_class).sum(dim=-1).mean()
 
 

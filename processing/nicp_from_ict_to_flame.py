@@ -357,10 +357,6 @@ def main(args):
     closest_vertex_indices = closest_vertex_indices.cpu().data.numpy()
 
 
-
-
-    
-
     # let's visualize this closest vertices. 
     # use o3d.geometry.LineSet
     # create a line set.

@@ -8,17 +8,23 @@ for _root in (_REPO_ROOT, _PROCESSING_ROOT):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from processing.paths import ASSETS_DIR, REPO_ROOT
+from processing.paths import ASSETS_DIR, setup_import_paths, setup_ict_facekit_import
+from processing.ict_region_dict import (
+    OFFICIAL_PART_SPLITS,
+    VERTEX_COUNT_STANDARD,
+    build_official_region_indices,
+    build_region_dict,
+    vertex_parts_from_splits,
+)
 
-from arguments import config_parser
-import torch
+setup_import_paths()
+_, facex_dir = setup_ict_facekit_import()
+from ICT_FaceKit.Scripts import face_model_io
 
 import numpy as np
 import pickle
 import os
 import chumpy as ch
-
-from ICT_FaceKit.Scripts import face_model_io
 import openmesh as om
 # from ICT_FaceKit.ict_model import ICTModel
 
@@ -76,18 +82,17 @@ def remove_negative_triangles(triangle_mesh, triangle_uv):
     return positive_triangles, positive_uv
 
 
-def main(args):
+def main():
     # read quad mesh using openmesh
     # half edge representation
-    file_path = os.path.join(REPO_ROOT, 'ICT_FaceKit/FaceXModel/generic_neutral_mesh.obj')
-    generic_neutral_mesh = om.read_polymesh(file_path, halfedge_tex_coord = True)
-    faces = generic_neutral_mesh.face_vertex_indices()[:24692]
+    file_path = str(facex_dir / "generic_neutral_mesh.obj")
+    generic_neutral_mesh = om.read_polymesh(file_path, halfedge_tex_coord=True)
+    quad_faces = generic_neutral_mesh.face_vertex_indices()
     vertices = generic_neutral_mesh.points()
     tex_coords = generic_neutral_mesh.halfedge_texcoords2D()
     uv_quads = tex_coords[generic_neutral_mesh.face_halfedge_indices()]
-    
-    # convert it to triangle mesh
-    faces, triangle_uv = convert_quad_mesh_to_triangle_mesh(faces, uv_quads)
+
+    faces, triangle_uv = convert_quad_mesh_to_triangle_mesh(quad_faces, uv_quads)
 
     # print(np.min(triangle_uv, axis=0), np.max(triangle_uv, axis=0))
 
@@ -100,7 +105,7 @@ def main(args):
     new_uvs = []
     vmapping = []
     new_faces = []
-    vertex_uvs = np.zeros((24591, 2)) - 1
+    vertex_uvs = np.zeros((VERTEX_COUNT_STANDARD, 2)) - 1
 
     for n, face in tqdm.tqdm(enumerate(faces)):
         new_face = []
@@ -148,69 +153,27 @@ def main(args):
     # trimesh_mesh.visual = trimesh.visual.TextureVisuals(uv=new_uvs)
     # trimesh_mesh.export('debug/cleaned_uv.obj')
 
-    ict_model = face_model_io.load_face_model('ICT_FaceKit/FaceXModel')
+    ict_model = face_model_io.load_face_model(str(facex_dir))
 
     ict_num_expression = ict_model._num_expression_shapes
     ict_num_identity = ict_model._num_identity_shapes
-    ict_expression_shape_modes = ict_model._expression_shape_modes[:, :24591]
-    ict_identity_shape_modes = ict_model._identity_shape_modes[:, :24591]
+    ict_expression_shape_modes = ict_model._expression_shape_modes[:, :VERTEX_COUNT_STANDARD]
+    ict_identity_shape_modes = ict_model._identity_shape_modes[:, :VERTEX_COUNT_STANDARD]
 
-    landmark_indices = [1278, 1272, 12, 1834, 243, 781, 2199, 1447, 966, 3661, 4390, 
-                        3022, 2484, 4036, 2253, 3490, 3496, 268, 493, 1914, 
-                                 2044, 1401, 3615, 4240, 4114, 2734, 2509, 978, 4527, 4942, 
-                                 4857, 1140, 2075, 1147, 4269, 3360, 1507, 1542, 1537, 1528, 
-                                 1518, 1511, 3742, 3751, 3756, 3721, 3725, 3732, 5708, 5695, 
-                                 2081, 0, 4275, 6200, 6213, 6346, 6461, 5518, 5957, 5841, 5702, 
-                                 5711, 5533, 6216, 6207, 6470, 5517, 5966]
-    face_indices = list(range(0, 9409)) + list(range(11248, 21451)) 
-    not_face_indices = list(range(9409, 11248))
-    eyeball_indices = list(range(21451, 24591)) 
-    head_indices = face_indices + not_face_indices
+    landmark_indices = [
+        1278, 1272, 12, 1834, 243, 781, 2199, 1447, 966, 3661, 4390,
+        3022, 2484, 4036, 2253, 3490, 3496, 268, 493, 1914,
+        2044, 1401, 3615, 4240, 4114, 2734, 2509, 978, 4527, 4942,
+        4857, 1140, 2075, 1147, 4269, 3360, 1507, 1542, 1537, 1528,
+        1518, 1511, 3742, 3751, 3756, 3721, 3725, 3732, 5708, 5695,
+        2081, 0, 4275, 6200, 6213, 6346, 6461, 5518, 5957, 5841, 5702,
+        5711, 5533, 6216, 6207, 6470, 5517, 5966,
+    ]
 
-    vertices = vertices[:24591]
-    vertex_uvs = vertex_uvs[:24591]
-
-    parts_split = [9409, 11248, 13294, 13678, 14062, 17039, 21451, 23021, 24591]
-    vertex_parts = [0] * len(vertices)
-    
-    for i, part in enumerate(parts_split):
-        if i == 0:
-            vertex_parts[:part] = [i] * part
-        else:
-            vertex_parts[parts_split[i-1]:part] = [i] * (part - parts_split[i-1])
-
-    
-    # build vmapped indices indices to face / not face / eyeball dict
-    vmapping_dict = {v: i for i, v in enumerate(vmapping)}
-    new_landmark_indices = []
-    for landmark_index in landmark_indices:
-        new_landmark_indices.append(vmapping_dict[landmark_index])
-    # landmark_indices = new_landmark_indices
-
-        # build original indices to face / not face / eyeball dict
-    region_dict = [0] * (len(face_indices) + len(not_face_indices) + len(eyeball_indices))
-
-    for i in range(len(region_dict)):
-        region_dict[i] = 0 if i in face_indices else 1 if i in not_face_indices else 2
-
-    new_face_indices = []
-    new_not_face_indices = []
-    new_eyeball_indices = []
-
-    for face_index in face_indices:
-        new_face_indices.append(vmapping_dict[face_index])
-
-    for not_face_index in not_face_indices:
-        new_not_face_indices.append(vmapping_dict[not_face_index])
-
-    for eyeball_index in eyeball_indices:
-        new_eyeball_indices.append(vmapping_dict[eyeball_index])
-
-    # face_indices = new_face_indices
-    # not_face_indices = new_not_face_indices
-    # eyeball_indices = new_eyeball_indices
-    # head_indices = face_indices + not_face_indices
-
+    vertices = vertices[:VERTEX_COUNT_STANDARD]
+    vertex_uvs = vertex_uvs[:VERTEX_COUNT_STANDARD]
+    vertex_parts = vertex_parts_from_splits(len(vertices), OFFICIAL_PART_SPLITS)
+    regions = build_official_region_indices()
 
     # fetch above five elements to a single dict
     ict_model_dict = {}
@@ -232,18 +195,23 @@ def main(args):
     ict_model_dict['identity_names'] = ict_model._identity_names
     ict_model_dict['model_config'] = ict_model._model_config
     ict_model_dict['landmark_indices'] = landmark_indices
-    ict_model_dict['face_indices'] = face_indices
-    ict_model_dict['not_face_indices'] = not_face_indices
-    ict_model_dict['eyeball_indices'] = eyeball_indices
-    ict_model_dict['head_indices'] = head_indices
+    ict_model_dict.update(regions)
+    ict_model_dict.update(
+        build_region_dict(
+            vertices,
+            vertex_parts,
+            regions["face_indices"],
+            regions["not_face_indices"],
+            regions["eyeball_indices"],
+            OFFICIAL_PART_SPLITS,
+            asset_variant="official_24591",
+        )
+    )
 
-    # save as a numpy
-    np.save(str(ASSETS_DIR / 'ict_facekit_torch.npy'), ict_model_dict)
+    out_path = ASSETS_DIR / "ict_facekit_torch.npy"
+    np.save(str(out_path), ict_model_dict)
+    print(f"saved {out_path}  verts={len(vertices)}  variant={ict_model_dict['asset_variant']}")
 
 
-if __name__ == '__main__':
-    
-    parser = config_parser()
-    args = parser.parse_args()
-
-    main(args)
+if __name__ == "__main__":
+    main()

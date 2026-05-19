@@ -1,12 +1,19 @@
 """
-2-stage training schedule (+ optional Stage 2A/2B warmup).
+Training schedule (mesh → expression → view-independent GS → view-dependent appearance).
 
-Stage 1: tracker + pose + template deformer (coarse geometry)
-Stage 2A: expression deformer + Gaussian appearance (geometry low LR)
-Stage 2B: expression (low LR) + full Gaussian detail
+  Stage 1 — Tracker + template MLP + pose weight; Gaussian color/opacity + small ``h``;
+             eye gaze UV slide; ``w_h`` + template reg steer mesh identity.
+
+  Stage 2A — Tracker/template frozen; learn support-gated expression residual + ``h`` detail;
+             eye gaze refine/slide still on.
+
+  Stage 2B — All mesh frozen; view-independent Gaussian geometry + appearance (+ accessory).
+
+  Stage 3 — Everything frozen; view-dependent appearance only (raise ``sh_degree`` when supported).
 """
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -15,7 +22,6 @@ class StageSpec:
     steps: int
     description: str = ""
 
-    # Mesh / tracking
     train_tracker: bool = False
     train_gamma: bool = False
     fix_gamma_at_one: bool = False
@@ -25,11 +31,12 @@ class StageSpec:
     train_expression_deform: bool = False
     train_eye_gaze: bool = False
 
-    # Gaussian subsets
     train_gaussian_appearance: bool = False
     train_gaussian_geometry: bool = False
     train_gaussian_semantic: bool = False
+    train_accessory: bool = False
     geometry_lr_scale: float = 1.0
+    sh_degree: Optional[int] = None
 
     w_rgb: float = 0.0
     w_mp_lmk: float = 0.0
@@ -54,14 +61,13 @@ class StageSpec:
     lr_pose_weight: float = 5e-5
     lr_template: float = 5e-5
     lr_expr_deform: float = 5e-5
-    lr_gaussian_uv: float = 1e-3
     lr_gaussian_h: float = 5e-4
     lr_gaussian_color: float = 1e-2
     lr_gaussian_opacity: float = 5e-3
     lr_gaussian_scale: float = 1e-3
+    lr_eye_uv: float = 1e-3
+    lr_accessory: float = 1e-3
     lr_eye_gaze: float = 1e-3
-
-    mesh_update_interval: int = 1
 
 
 STAGE_SCHEDULE: list[StageSpec] = [
@@ -71,76 +77,108 @@ STAGE_SCHEDULE: list[StageSpec] = [
         description="Precompute MP/seg/camera caches.",
     ),
     StageSpec(
-        name="1_coarse_geometry",
+        name="1_coarse_mesh",
         steps=15000,
-        description="Tracker + pose + template deformer; Gaussian position frozen.",
+        description=(
+            "Tracker + template + pose weight; eye gaze slide; RGB/opacity; "
+            "small h (distance prior pulls mesh via deformer)."
+        ),
         train_tracker=True,
         train_gamma=True,
         train_pose_residual=True,
         train_pose_weight=True,
         train_template_deformer=True,
+        train_eye_gaze=True,
         train_gaussian_appearance=True,
-        train_eye_gaze=False,
+        train_gaussian_geometry=True,
+        geometry_lr_scale=0.08,
+        sh_degree=None,
         w_mp_lmk=100.0,
         w_iris=50.0,
         w_mask=10.0,
         w_seg=2.0,
-        w_rgb=0.3,
-        w_h=0.5,
+        w_rgb=0.35,
+        w_h=0.6,
         w_gamma_prior=5.0,
         w_pose_prior=1.0,
         w_gaze_residual=0.1,
-        w_template_smooth=0.1,
+        w_template_smooth=0.15,
+        lr_gaussian_h=8e-5,
+        lr_eye_uv=8e-5,
+        lr_eye_gaze=1e-3,
     ),
     StageSpec(
-        name="2A_expression_warmup",
-        steps=5000,
-        description="Expression deformer on; Gaussian color/opacity; uv/h low LR.",
+        name="2A_expression",
+        steps=8000,
+        description=(
+            "Tracker/template frozen; expression residual + h detail; "
+            "blendshape gap; eye slide on."
+        ),
         train_expression_deform=True,
+        train_eye_gaze=True,
         train_gaussian_appearance=True,
         train_gaussian_geometry=True,
         train_gaussian_semantic=True,
-        geometry_lr_scale=0.1,
-        train_eye_gaze=True,
-        w_rgb=0.8,
+        geometry_lr_scale=0.15,
+        sh_degree=None,
+        w_rgb=0.85,
         w_mask=5.0,
         w_seg=2.0,
         w_sem_anchor=0.1,
-        w_mp_lmk=40.0,
+        w_mp_lmk=35.0,
         w_iris=25.0,
-        w_h=0.4,
+        w_h=0.45,
         w_expr_neutral=0.5,
         w_expr_leak=0.2,
         w_expr_amp=0.1,
-        w_scale=0.005,
-        w_opacity=0.005,
+        w_gaze_residual=0.05,
+        w_scale=0.006,
+        w_opacity=0.006,
         lr_expr_deform=5e-5,
-        lr_gaussian_h=5e-5,
-        lr_gaussian_uv=1e-4,
+        lr_gaussian_h=6e-5,
+        lr_eye_gaze=5e-4,
     ),
     StageSpec(
-        name="2B_gaussian_detail",
-        steps=35000,
-        description="Full Gaussian detail; template/tracker frozen; expr low LR.",
-        train_expression_deform=True,
+        name="2B_geometry_detail",
+        steps=30000,
+        description=(
+            "Mesh stack frozen; view-independent Gaussian h/scale/color/opacity; "
+            "accessory optional."
+        ),
         train_gaussian_appearance=True,
         train_gaussian_geometry=True,
-        train_gaussian_semantic=True,
-        train_eye_gaze=True,
+        train_accessory=True,
+        geometry_lr_scale=1.0,
+        sh_degree=None,
         w_rgb=1.0,
         w_mask=5.0,
-        w_seg=2.0,
-        w_sem_anchor=0.05,
-        w_mp_lmk=15.0,
-        w_iris=15.0,
-        w_h=0.5,
-        w_expr_neutral=0.3,
-        w_expr_leak=0.15,
-        w_expr_amp=0.08,
+        w_seg=1.5,
+        w_mp_lmk=12.0,
+        w_iris=12.0,
+        w_h=0.55,
         w_scale=0.01,
         w_opacity=0.01,
         w_eye_uv_barrier=0.001,
-        lr_expr_deform=1e-5,
+        lr_gaussian_h=4e-4,
+        lr_gaussian_color=8e-3,
+        lr_gaussian_opacity=4e-3,
+    ),
+    StageSpec(
+        name="3_view_appearance",
+        steps=8000,
+        description=(
+            "All geometry/mesh frozen; view-dependent appearance "
+            "(set sh_degree>0 when color channels support SH)."
+        ),
+        train_gaussian_appearance=True,
+        sh_degree=None,
+        w_rgb=1.0,
+        w_seg=1.0,
+        w_mp_lmk=4.0,
+        w_iris=4.0,
+        w_mask=3.0,
+        lr_gaussian_color=4e-3,
+        lr_gaussian_opacity=2e-3,
     ),
 ]
 

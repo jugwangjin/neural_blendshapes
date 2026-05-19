@@ -21,12 +21,16 @@ class AvatarRenderer(nn.Module):
         zfar=100.0,
         bg_color=None,
         channel_chunk=32,
+        sh_degree=None,
     ):
         super().__init__()
         self.image_size = image_size
         self.znear = znear
         self.zfar = zfar
         self.channel_chunk = channel_chunk
+        if sh_degree is None and cfg is not None:
+            sh_degree = getattr(cfg, "sh_degree", None)
+        self.sh_degree = sh_degree
 
         if bg_color is None:
             bg = torch.zeros(3)
@@ -37,9 +41,14 @@ class AvatarRenderer(nn.Module):
     def _cam(self, camera):
         return fixed_camera_to_gsplat(camera, znear=self.znear, zfar=self.zfar)
 
-    def _rasterize(self, packed, camera, features, render_mode="RGB", backgrounds=None):
+    def set_sh_degree(self, sh_degree):
+        self.sh_degree = sh_degree
+
+    def _rasterize(self, packed, camera, features, render_mode="RGB", backgrounds=None, sh_degree=None):
         cam = self._cam(camera)
         backgrounds = backgrounds.to(device=packed["means"].device, dtype=features.dtype)
+        if sh_degree is None:
+            sh_degree = self.sh_degree
         return rasterization(
             means=packed["means"],
             quats=packed["quats"],
@@ -52,7 +61,7 @@ class AvatarRenderer(nn.Module):
             height=cam["height"],
             near_plane=cam["znear"],
             far_plane=cam["zfar"],
-            sh_degree=None,
+            sh_degree=sh_degree,
             render_mode=render_mode,
             backgrounds=backgrounds,
             channel_chunk=self.channel_chunk,
