@@ -4,3 +4,6 @@
 [submodule "gsplat"]
 	path = gsplat
 	url = https://github.com/nerfstudio-project/gsplat.git
+[submodule "ICT_FaceKit"]
+	path = ICT_FaceKit
+	url = https://github.com/USC-ICT/ICT-FaceKit.git
