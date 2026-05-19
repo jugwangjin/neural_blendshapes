@@ -31,6 +31,7 @@ class AvatarRenderer(nn.Module):
         if sh_degree is None and cfg is not None:
             sh_degree = getattr(cfg, "sh_degree", None)
         self.sh_degree = sh_degree
+        self.packed = bool(getattr(cfg, "gsplat_packed", False) if cfg is not None else False)
 
         if bg_color is None:
             bg = torch.zeros(3)
@@ -38,17 +39,35 @@ class AvatarRenderer(nn.Module):
             bg = torch.tensor(bg_color, dtype=torch.float32)
         self.register_buffer("background_rgb", bg)
 
-    def _cam(self, camera):
-        return fixed_camera_to_gsplat(camera, znear=self.znear, zfar=self.zfar)
+    def _cam(self, camera, device):
+        return fixed_camera_to_gsplat(
+            camera, znear=self.znear, zfar=self.zfar, device=device
+        )
 
     def set_sh_degree(self, sh_degree):
         self.sh_degree = sh_degree
 
-    def _rasterize(self, packed, camera, features, render_mode="RGB", backgrounds=None, sh_degree=None):
-        cam = self._cam(camera)
-        backgrounds = backgrounds.to(device=packed["means"].device, dtype=features.dtype)
+    @staticmethod
+    def _bg_nchw(background, channels, device, dtype):
+        bg = background.to(device=device, dtype=dtype).reshape(-1)
+        if bg.numel() == 1:
+            bg = bg.expand(channels)
+        else:
+            bg = bg[:channels]
+        if bg.numel() < channels:
+            bg = torch.cat([bg, bg.new_zeros(channels - bg.numel(), device=device, dtype=dtype)])
+        return bg.view(1, channels, 1, 1)
+
+    @staticmethod
+    def _composite_background(image_nchw, alpha_nchw, background_nchw):
+        return image_nchw + (1.0 - alpha_nchw).clamp(0.0, 1.0) * background_nchw
+
+    def _rasterize(self, packed, camera, features, render_mode="RGB", sh_degree=None):
+        device = packed["means"].device
+        cam = self._cam(camera, device=device)
         if sh_degree is None:
             sh_degree = self.sh_degree
+        # Do not pass backgrounds into gsplat (packed=True shape assert in rasterize_to_pixels).
         return rasterization(
             means=packed["means"],
             quats=packed["quats"],
@@ -63,9 +82,9 @@ class AvatarRenderer(nn.Module):
             far_plane=cam["zfar"],
             sh_degree=sh_degree,
             render_mode=render_mode,
-            backgrounds=backgrounds,
+            backgrounds=None,
             channel_chunk=self.channel_chunk,
-            packed=True,
+            packed=self.packed,
         )
 
     @staticmethod
@@ -74,13 +93,13 @@ class AvatarRenderer(nn.Module):
 
     def render_rgb(self, avatar_out, camera, background=None):
         packed = pack_gaussians(avatar_out)
-        bg = self.background_rgb.to(packed["means"].device)
+        device = packed["means"].device
+        bg = self.background_rgb.to(device)
         if background is not None:
-            bg = background.to(packed["means"].device).reshape(-1)[:3]
-        colors, alphas, meta = self._rasterize(
-            packed, camera, packed["colors"], backgrounds=bg.view(1, 3)
-        )
+            bg = background.to(device).reshape(-1)[:3]
+        colors, alphas, meta = self._rasterize(packed, camera, packed["colors"])
         rgb, alpha = self._to_nchw(colors, alphas)
+        rgb = self._composite_background(rgb, alpha, self._bg_nchw(bg, 3, device, rgb.dtype))
         return {
             "rgb": rgb.clamp(0, 1),
             "alpha": alpha,
@@ -93,11 +112,7 @@ class AvatarRenderer(nn.Module):
         packed = pack_gaussians(avatar_out)
         device = packed["means"].device
         colors, alphas, meta = self._rasterize(
-            packed,
-            camera,
-            packed["colors"],
-            render_mode=render_mode,
-            backgrounds=torch.zeros(1, 1, device=device),
+            packed, camera, packed["colors"], render_mode=render_mode
         )
         depth, alpha = self._to_nchw(colors, alphas)
         return {"depth": depth, "alpha": alpha, "meta": meta}
@@ -108,9 +123,10 @@ class AvatarRenderer(nn.Module):
         K = features.shape[-1]
         device = features.device
         if backgrounds is None:
-            backgrounds = torch.zeros(1, K, device=device, dtype=features.dtype)
-        colors, alphas, meta = self._rasterize(packed, camera, features, backgrounds=backgrounds)
+            backgrounds = torch.zeros(K, device=device, dtype=features.dtype)
+        colors, alphas, meta = self._rasterize(packed, camera, features)
         sem, alpha = self._to_nchw(colors, alphas)
+        sem = self._composite_background(sem, alpha, self._bg_nchw(backgrounds, K, device, sem.dtype))
         return {
             "semantic": sem,
             "semantic_prob": sem / alpha.clamp(min=1e-6),

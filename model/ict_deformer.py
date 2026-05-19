@@ -16,7 +16,8 @@ from model.expr_regions import (
     build_teeth_mask,
 )
 from model.pose_weight import PoseWeightMLP
-from utils.so3 import apply_rigid, rotation_6d_to_matrix
+from utils.camera import rotation_matrix_y_deg
+from utils.so3 import apply_rigid, apply_rigid_about_centroid, rotation_6d_to_matrix
 
 
 def charbonnier(x, eps=1e-3):
@@ -46,7 +47,8 @@ class ICTDeformer(nn.Module):
         self.delta_ratio = delta_ratio
         self.delta_floor = delta_floor
 
-        canonical = ict_facekit.neutral_mesh_canonical[0].detach()
+        # Jaw-open reference (``flame_similarity_ict_jaw_open`` + ``apply_flame_similarity``), not closed neutral.
+        canonical = ict_facekit.canonical[0].detach()
         self.register_buffer("canonical_xyz", canonical)
 
         if region_weight is None:
@@ -130,7 +132,7 @@ class ICTDeformer(nn.Module):
             [self.canonical_xyz, emb.unsqueeze(0).expand(self.canonical_xyz.shape[0], -1)],
             dim=-1,
         )
-        raw = self.expr_mlp(inp)
+        raw = self.expr_mlp(inp) # TODO: Inference only인 경우 precomputed raw 사용할 수 있게 하기기
         gate = self.expr_gate[j]
         max_delta = self.delta_ratio * self.expr_mag[j] + self.delta_floor * gate
         delta_j = gate.unsqueeze(-1) * max_delta.unsqueeze(-1) * torch.tanh(raw)
@@ -204,11 +206,48 @@ class ICTDeformer(nn.Module):
             losses["expr_socket"] = c_eff.new_zeros(())
         return losses
 
-    def apply_weighted_pose(self, verts, R, t, scale=None):
-        """verts [B,V,3], R [B,3,3], t [B,3], optional uniform scale."""
-        w = self.pose_weight_net(self.canonical_xyz)
-        rigid = apply_rigid(verts, R, t, scale=scale)
+    def apply_weighted_pose(
+        self,
+        verts,
+        R,
+        t,
+        scale=None,
+        pose_weight_fixed=None,
+        rotate_about_centroid=False,
+    ):
+        """verts [B,V,3], R [B,3,3], t [B,3]; optional uniform scale (usually disabled)."""
+        if pose_weight_fixed is not None:
+            w = torch.full(
+                (self.canonical_xyz.shape[0], 1),
+                float(pose_weight_fixed),
+                device=verts.device,
+                dtype=verts.dtype,
+            )
+        else:
+            w = self.pose_weight_net(self.canonical_xyz)
+        if rotate_about_centroid:
+            rigid = apply_rigid_about_centroid(verts, R, t)
+        else:
+            rigid = apply_rigid(verts, R, t, scale=scale)
         return (1.0 - w.unsqueeze(0)) * verts + w.unsqueeze(0) * rigid
+
+    # NOTE: only for debug
+    def apply_head_yaw(self, verts, yaw_deg, pivot=None):
+        """
+        Rotate mesh about world +Y (constant camera → head/mesh orbit).
+
+        Same row-vector convention as ``utils.camera.rotate_points_y``.
+        """
+        if float(yaw_deg) == 0.0:
+            return verts
+        if pivot is None:
+            pivot = self.canonical_xyz.mean(dim=0)
+        pivot = pivot.reshape(3).to(device=verts.device, dtype=verts.dtype)
+        B = verts.shape[0]
+        R = rotation_matrix_y_deg(float(yaw_deg), device=verts.device, dtype=verts.dtype)
+        t = (pivot - pivot @ R.T).unsqueeze(0).expand(B, -1)
+        R_b = R.unsqueeze(0).expand(B, -1, -1)
+        return apply_rigid(verts, R_b, t)
 
     def forward(
         self,
@@ -220,25 +259,39 @@ class ICTDeformer(nn.Module):
         expr_delta=None,
         apply_expression_deform=True,
         return_unposed=False,
+        expression_weights=None,
+        apply_flame_similarity=True,
+        head_yaw_deg=None,
+        pose_weight_fixed=None,
+        rotate_about_centroid=True,
+        pose_zero_tz=False,
     ):
         """
         mp_coeffs_corr: [B, 52]
         c_eff: [B, J] for support-gated expression (optional if ``expr_delta`` set)
         pose_rotation_6d: [B, 6] residual (optional)
         pose_translation: [B, 3] residual (optional)
+        expression_weights: optional [B, num_expression] (bypasses MP→ICT mapping)
+        head_yaw_deg: orbit mesh about world +Y (constant-camera sanity / debug)
+        pose_weight_fixed: if set, use this w(x) instead of PoseWeightMLP (e.g. 1.0)
+        rotate_about_centroid: rotate about mesh centroid (not world origin)
+        pose_zero_tz: zero translation z before applying pose
         """
         B = mp_coeffs_corr.shape[0]
         device = mp_coeffs_corr.device
-        exp_w = self.mp_to_ict_expression(mp_coeffs_corr)
+        if expression_weights is not None:
+            exp_w = expression_weights
+        else:
+            exp_w = self.mp_to_ict_expression(mp_coeffs_corr)
 
         tpl = self.template_delta()
-        neutral = self.ict.neutral_mesh + tpl.unsqueeze(0)
         verts_unposed = self.ict.forward(
             expression_weights=exp_w,
             to_canonical=False,
             apply_eyeball_rotation=False,
+            apply_flame_similarity=apply_flame_similarity,
         )
-        verts_unposed = verts_unposed - self.ict.neutral_mesh + neutral
+        verts_unposed = verts_unposed + tpl.unsqueeze(0)
 
         if expr_delta is None and apply_expression_deform and c_eff is not None:
             expr_delta = self.expression_delta(c_eff)
@@ -251,10 +304,30 @@ class ICTDeformer(nn.Module):
             pose_translation = torch.zeros(B, 3, device=device, dtype=mp_coeffs_corr.dtype)
 
         R = rotation_6d_to_matrix(pose_rotation_6d)
+        t_pose = pose_translation
+        if pose_zero_tz:
+            t_pose = t_pose.clone()
+            t_pose[..., 2] = 0.0
         verts_posed = self.apply_weighted_pose(
-            verts_unposed, R, pose_translation, scale=pose_scale
+            verts_unposed,
+            R,
+            t_pose,
+            scale=pose_scale,
+            pose_weight_fixed=pose_weight_fixed,
+            rotate_about_centroid=rotate_about_centroid,
         )
-        pose_w = self.pose_weight_net(self.canonical_xyz)
+        if head_yaw_deg is not None and float(head_yaw_deg) != 0.0:
+            verts_posed = self.apply_head_yaw(verts_posed, head_yaw_deg)
+
+        if pose_weight_fixed is not None:
+            pose_w = torch.full(
+                (self.canonical_xyz.shape[0], 1),
+                float(pose_weight_fixed),
+                device=device,
+                dtype=verts_unposed.dtype,
+            )
+        else:
+            pose_w = self.pose_weight_net(self.canonical_xyz)
 
         out = {
             "verts_posed": verts_posed,

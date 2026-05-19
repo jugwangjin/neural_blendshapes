@@ -16,7 +16,6 @@ class Config:
 
     # assets
     ict_npy: Path = Path("assets/ict_facekit_torch.npy")
-    ict_canonical: Path = Path("assets/ict_identity.npy")
     mp_embedding: Path = Path(
         "assets/ict_mediapipe_landmark_embedding_from_metrical_tracker.npz"
     )
@@ -32,6 +31,11 @@ class Config:
     gum_h_sigma_scale: float = 4.0
     n_surface_gaussians_per_eye_socket: int = 1
     n_eye_gaussians_per_side: int = 1024
+    eye_uv_sample_mode: str = "hemisphere"  # "hemisphere" | "hemisphere_snap" | "triangle"
+    eye_sclera_min_front_dot: float = 0.0
+    eye_sclera_hemisphere_only: bool = True
+    gaussian_scale_knn_k: int = 3
+    gaussian_scale_knn_factor: float = 1.0
     n_accessory_gaussians: int = 0
     auto_detect_accessory: bool = False
     accessory_min_pixel_ratio: float = 0.0005
@@ -57,7 +61,8 @@ class Config:
     # loss weights (defaults; stages override)
     w_rgb: float = 1.0
     w_mp_lmk: float = 1.0
-    w_mp_mask: float = 1.0
+    w_silhouette: float = 10.0
+    w_mp_mask: float = 10.0  # alias for silhouette
     w_seg: float = 1.0
     w_iris: float = 1.0
     w_h: float = 0.01
@@ -71,3 +76,6 @@ class Config:
     sh_degree: Optional[int] = None
 
     gsplat_submodule: Path = Path("gsplat")
+
+    # packed=True saves memory; RGB passes with backgrounds fall back to packed=False (gsplat assert)
+    gsplat_packed: bool = True

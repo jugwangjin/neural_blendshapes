@@ -5,6 +5,7 @@ Uses separate verts_uvs / faces_uvs (ICT seam-safe).
 """
 
 from dataclasses import dataclass
+from typing import Tuple
 
 import numpy as np
 import torch
@@ -41,75 +42,179 @@ def _search_faces(uv_mesh: UVMesh):
     return np.arange(uv_mesh.faces_uvs.shape[0])
 
 
+def _barycentric_2d_batch(p, a, b, c, eps=1e-4):
+    """p [G,F,2], a,b,c [1,F,2] -> w [G,F,3]."""
+    v0 = b - a
+    v1 = c - a
+    v2 = p - a
+    d00 = (v0 * v0).sum(-1)
+    d01 = (v0 * v1).sum(-1)
+    d11 = (v1 * v1).sum(-1)
+    d20 = (v2 * v0).sum(-1)
+    d21 = (v2 * v1).sum(-1)
+    denom = (d00 * d11 - d01 * d01).clamp(min=eps * eps)
+    v = (d11 * d20 - d01 * d21) / denom
+    w = (d00 * d21 - d01 * d20) / denom
+    u = 1.0 - v - w
+    return torch.stack([u, v, w], dim=-1)
+
+
+@dataclass
+class ChartTriangleHit:
+    """Step 1: UV point located on a chart triangle (UV-space index + barycentric)."""
+
+    tri_idx: torch.Tensor   # [G] row into ``tri_local_uv`` / ``mesh_face_per_tri``
+    bary: torch.Tensor      # [G, 3] same weights used on mesh corners
+
+
+def uv_points_to_chart_triangle_bary(
+    uv_points: torch.Tensor,
+    tri_local_uv: torch.Tensor,
+    eps: float = 1e-4,
+) -> ChartTriangleHit:
+    """
+    Step 1 — UV coords → UV-space triangle + barycentric.
+
+    ``tri_local_uv`` [T, 3, 2]: corner UVs of each chart triangle (e.g. ``triangle_uv_local[fi]``).
+    Returns which chart triangle ``tri_idx[g]`` and barycentric weights on that triangle.
+    """
+    uv = uv_points.detach().float()
+    device = uv.device
+    tri_uv = tri_local_uv.to(device=device, dtype=uv.dtype)
+
+    g, f = uv.shape[0], tri_uv.shape[0]
+    if g == 0:
+        empty_l = torch.zeros(0, dtype=torch.long, device=device)
+        return ChartTriangleHit(tri_idx=empty_l, bary=torch.zeros(0, 3, dtype=uv.dtype, device=device))
+
+    a = tri_uv[:, 0].unsqueeze(0)
+    b = tri_uv[:, 1].unsqueeze(0)
+    c = tri_uv[:, 2].unsqueeze(0)
+    p = uv.unsqueeze(1)
+    bary_all = _barycentric_2d_batch(p, a, b, c, eps=eps)
+    score = bary_all.min(dim=-1).values
+    tri_idx = score.argmax(dim=1)
+    br_out = bary_all[torch.arange(g, device=device), tri_idx]
+    br_out = br_out.clamp(min=0.0)
+    br_out = br_out / br_out.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+
+    miss = score[torch.arange(g, device=device), tri_idx] < -eps
+    if miss.any():
+        centers = tri_uv.mean(dim=1)
+        dist = (centers.unsqueeze(0) - uv[miss].unsqueeze(1)).pow(2).sum(-1)
+        tri_idx_miss = dist.argmin(dim=1)
+        tri_m = tri_uv[tri_idx_miss]
+        p_m = uv[miss]
+        clipped = torch.maximum(torch.minimum(p_m, tri_m.max(dim=1).values), tri_m.min(dim=1).values)
+        bary_m = _barycentric_2d_batch(
+            clipped.unsqueeze(1),
+            tri_m[:, 0].unsqueeze(1),
+            tri_m[:, 1].unsqueeze(1),
+            tri_m[:, 2].unsqueeze(1),
+            eps=eps,
+        ).squeeze(1)
+        tri_idx[miss] = tri_idx_miss
+        br_out[miss] = bary_m.clamp(min=0.0)
+        br_out[miss] = br_out[miss] / br_out[miss].sum(dim=-1, keepdim=True).clamp(min=1e-8)
+
+    return ChartTriangleHit(tri_idx=tri_idx, bary=br_out)
+
+
+def chart_triangle_to_mesh_face(
+    tri_idx: torch.Tensor,
+    mesh_face_per_tri: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Step 2 — chart triangle index → global mesh ``face_idx``.
+
+    ``mesh_face_per_tri[t]`` is the ICT mesh face for chart triangle ``t``.
+    Barycentric from step 1 is unchanged on the corresponding mesh triangle.
+    """
+    return mesh_face_per_tri.to(device=tri_idx.device, dtype=torch.long)[tri_idx.long()]
+
+
+def chart_uv_to_mesh_face_bary(
+    uv_points: torch.Tensor,
+    mesh_face_per_tri: torch.Tensor,
+    tri_local_uv: torch.Tensor,
+    eps: float = 1e-4,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Full pipeline (chart-local UV on one material, e.g. ``M_ScleraLeft``):
+
+      UV coords
+        → (chart ``tri_idx``, ``bary``)     # UV-space face + barycentric
+        → mesh ``face_idx`` via lookup table
+        → same ``bary`` on mesh triangle     # 3D via ``sample_surface(verts, faces, …)``
+    """
+    hit = uv_points_to_chart_triangle_bary(uv_points, tri_local_uv, eps=eps)
+    mesh_fi = chart_triangle_to_mesh_face(hit.tri_idx, mesh_face_per_tri)
+    return mesh_fi, hit.bary
+
+
+def local_uv_triangles_to_face_bary(uv_points, face_indices, tri_local_uv, eps=1e-4):
+    """Alias: ``chart_uv_to_mesh_face_bary`` with per-triangle global face ids."""
+    return chart_uv_to_mesh_face_bary(uv_points, face_indices, tri_local_uv, eps=eps)
+
+
 def uv_to_face_bary(uv_points, uv_mesh: UVMesh, eps=1e-4):
     """
     uv_points: [G, 2] in texture space
     returns face_idx [G], bary [G, 3] indexing full face array
     """
-    uv_np = uv_points.detach().cpu().numpy()
-    tri_uv_all = _triangle_uv_coords(uv_mesh).detach().cpu().numpy()
-    search_fi = _search_faces(uv_mesh)
-
-    face_idx = []
-    bary = []
-
-    for p in uv_np:
-        found = False
-        for fi in search_fi:
-            tri = tri_uv_all[fi]
-            w = barycentric_coords_2d(p, tri[0], tri[1], tri[2])
-            if (w >= -eps).all():
-                face_idx.append(int(fi))
-                bary.append(w.astype(np.float32))
-                found = True
-                break
-        if not found:
-            centers = tri_uv_all[search_fi].mean(axis=1)
-            local = int(np.argmin(np.linalg.norm(centers - p[None], axis=1)))
-            fi = int(search_fi[local])
-            tri = tri_uv_all[fi]
-            w = barycentric_coords_2d(
-                np.clip(p, tri.min(0), tri.max(0)), tri[0], tri[1], tri[2]
-            )
-            face_idx.append(fi)
-            bary.append(w.astype(np.float32))
-
-    face_idx = torch.tensor(face_idx, dtype=torch.long, device=uv_points.device)
-    bary = torch.tensor(np.stack(bary), dtype=uv_points.dtype, device=uv_points.device)
-    return face_idx, bary
+    tri_uv_all = _triangle_uv_coords(uv_mesh)
+    if uv_mesh.active_face_idx is not None:
+        search_fi = uv_mesh.active_face_idx
+        tri_uv = tri_uv_all[search_fi]
+    else:
+        search_fi = torch.arange(tri_uv_all.shape[0], device=tri_uv_all.device, dtype=torch.long)
+        tri_uv = tri_uv_all
+    return local_uv_triangles_to_face_bary(uv_points, search_fi, tri_uv, eps=eps)
 
 
-def _lookup_face_bary(uv, uv_mesh, uvh_module):
+def _lookup_face_bary(uv, uv_mesh, uvh_module, cache_key=None):
     if uvh_module is None:
         return uv_to_face_bary(uv, uv_mesh)
 
-    reproject = uvh_module.cached_face_idx is None
-    if uvh_module.cached_face_idx is not None and uvh_module.training:
-        uvh_module._uv_lookup_step += 1
-        if uvh_module._uv_lookup_step % uvh_module.reproject_uv_every == 0:
+    key = cache_key or "default"
+    cache_fi_attr = f"cached_face_idx_{key}"
+    cache_br_attr = f"cached_bary_{key}"
+    cached_fi = getattr(uvh_module, cache_fi_attr, None)
+    cached_br = getattr(uvh_module, cache_br_attr, None)
+
+    reproject = cached_fi is None
+    if cached_fi is not None and uvh_module.training:
+        step = getattr(uvh_module, "_uv_lookup_step", 0) + 1
+        uvh_module._uv_lookup_step = step
+        every = max(1, int(getattr(uvh_module, "reproject_uv_every", 1)))
+        if step % every == 0:
             reproject = True
 
     if reproject:
         fi, br = uv_to_face_bary(uv, uv_mesh)
-        uvh_module.cached_face_idx = fi
-        uvh_module.cached_bary = br
+        setattr(uvh_module, cache_fi_attr, fi)
+        setattr(uvh_module, cache_br_attr, br)
         return fi, br
 
-    return uvh_module.cached_face_idx, uvh_module.cached_bary
+    return cached_fi, cached_br
 
 
-def surface_points_from_uvh(uv, h, uv_mesh: UVMesh, uvh_module=None):
+def surface_points_from_uvh(uv, h, uv_mesh: UVMesh, uvh_module=None, mesh_verts=None):
     """
     uv: [G, 2], h: [G, 1]
     X = S(u,v) + h * N(u,v)   (h=0 for eyeball texture spaces)
     uvh_module: optional UVHGaussians — caches face_idx/bary between steps.
+    mesh_verts: optional [V,3] posed mesh (defaults to ``uv_mesh.verts``).
     """
     from utils.barycentric import sample_normals, sample_surface
     from utils.mesh_ops import compute_vertex_normals
 
-    face_idx, bary = _lookup_face_bary(uv, uv_mesh, uvh_module)
-    v_normals = compute_vertex_normals(uv_mesh.verts, uv_mesh.faces)
-    p = sample_surface(uv_mesh.verts, uv_mesh.faces, face_idx, bary)
+    face_idx, bary = _lookup_face_bary(uv, uv_mesh, uvh_module, cache_key=getattr(uvh_module, "_uv_cache_key", None))
+    verts = mesh_verts if mesh_verts is not None else uv_mesh.verts
+    if verts.ndim == 3:
+        verts = verts[0]
+    v_normals = compute_vertex_normals(verts, uv_mesh.faces)
+    p = sample_surface(verts, uv_mesh.faces, face_idx, bary)
     n = sample_normals(v_normals, uv_mesh.faces, face_idx, bary)
     xyz = p + h * n
     return xyz, face_idx, bary, n

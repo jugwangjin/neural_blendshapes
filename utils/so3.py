@@ -24,6 +24,12 @@ def apply_rigid(verts, R, t, scale=None):
     return verts @ R.transpose(-1, -2) + t[:, None, :]
 
 
+def apply_rigid_about_centroid(verts, R, t):
+    """Rigid motion with rotation about per-batch vertex centroid (stable head orbit)."""
+    c = verts.mean(dim=1, keepdim=True)
+    return (verts - c) @ R.transpose(-1, -2) + c + t[:, None, :]
+
+
 def compose_pose_delta(R_base, t_base, R_delta, t_delta):
     """Apply delta in camera/head frame after base pose."""
     R = R_delta @ R_base

@@ -13,8 +13,9 @@ def stage_loss_cfg(spec: StageSpec):
     return SimpleNamespace(
         w_rgb=spec.w_rgb,
         w_mp_lmk=spec.w_mp_lmk,
-        w_mp_mask=spec.w_mask,
-        w_mask=spec.w_mask,
+        w_silhouette=spec.w_silhouette if spec.w_silhouette > 0 else spec.w_mask,
+        w_mp_mask=spec.w_silhouette if spec.w_silhouette > 0 else spec.w_mask,
+        w_mask=spec.w_silhouette if spec.w_silhouette > 0 else spec.w_mask,
         w_seg=spec.w_seg,
         w_iris=spec.w_iris,
         w_h=spec.w_h,
@@ -23,6 +24,8 @@ def stage_loss_cfg(spec: StageSpec):
         w_opacity=spec.w_opacity,
         w_gamma_prior=spec.w_gamma_prior,
         w_pose_prior=spec.w_pose_prior,
+        w_pose_tz=spec.w_pose_tz,
+        apply_pose_scale=spec.apply_pose_scale,
         w_gaze_residual=spec.w_gaze_residual,
         w_expr_deform_reg=spec.w_expr_deform_reg,
         w_expr_neutral=spec.w_expr_neutral,
@@ -67,18 +70,26 @@ def _set_surface_trainable(surface, appearance, geometry, semantic, geom_scale=1
         surface.sem_logits.requires_grad = False
 
 
-def _set_texture_trainable(tex, appearance, uv_slide):
+def _set_eye_gaussians_trainable(eyes, appearance, train_gaze):
+    """
+    Shared ``EyeTextureGaussians``: ``uv`` / ``h`` are fixed buffers (sclera chart).
+    Train appearance + optional ``gaze_refine_*`` only — never slide base UV.
+    """
     if appearance:
-        tex.color.requires_grad = True
-        tex.opacity.requires_grad = True
+        eyes.color.requires_grad = True
+        eyes.opacity.requires_grad = True
+        eyes.log_scale.requires_grad = True
+        eyes.rotation.requires_grad = True
     else:
-        tex.color.requires_grad = False
-        tex.opacity.requires_grad = False
-    tex.log_scale.requires_grad = False
-    tex.rotation.requires_grad = False
-    if tex.fixed_h is None:
-        tex.h.requires_grad = False
-    tex.uv.requires_grad = uv_slide
+        eyes.color.requires_grad = False
+        eyes.opacity.requires_grad = False
+        eyes.log_scale.requires_grad = False
+        eyes.rotation.requires_grad = False
+
+    if eyes.gaze_refine_left is not None:
+        eyes.gaze_refine_left.requires_grad = train_gaze
+    if eyes.gaze_refine_right is not None:
+        eyes.gaze_refine_right.requires_grad = train_gaze
 
 
 def _set_accessory_trainable(acc, train):
@@ -109,7 +120,8 @@ def apply_stage_requires_grad(spec, tracker, deformer, avatar):
             p.requires_grad = True
         for p in tracker.head_pose.parameters():
             p.requires_grad = True
-        tracker.log_pose_scale.requires_grad = True
+        if spec.train_pose_scale:
+            tracker.log_pose_scale.requires_grad = True
 
     if spec.train_pose_weight:
         for p in deformer.pose_weight_net.parameters():
@@ -138,17 +150,11 @@ def apply_stage_requires_grad(spec, tracker, deformer, avatar):
     if spec.train_gaussian_geometry and g < 1.0:
         surf.h.requires_grad = spec.train_gaussian_geometry
 
-    uv_on = spec.train_eye_gaze
-    _set_texture_trainable(
+    _set_eye_gaussians_trainable(
         avatar.eyes,
         spec.train_gaussian_appearance,
-        uv_slide=uv_on,
+        train_gaze=spec.train_eye_gaze,
     )
-
-    if avatar.eyes.gaze_refine_left is not None:
-        avatar.eyes.gaze_refine_left.requires_grad = spec.train_eye_gaze
-    if avatar.eyes.gaze_refine_right is not None:
-        avatar.eyes.gaze_refine_right.requires_grad = spec.train_eye_gaze
 
     if spec.train_eye_gaze:
         for p in tracker.gaze_trunk.parameters():
@@ -217,8 +223,10 @@ def build_optimizers(spec, tracker, deformer, avatar):
         gaussian_groups.append({"params": [eye_mod.color], "lr": spec.lr_gaussian_color})
     if eye_mod.opacity.requires_grad:
         gaussian_groups.append({"params": [eye_mod.opacity], "lr": spec.lr_gaussian_opacity})
-    if eye_mod.uv.requires_grad:
-        gaussian_groups.append({"params": [eye_mod.uv], "lr": spec.lr_eye_uv * gscale})
+    if eye_mod.log_scale.requires_grad:
+        gaussian_groups.append({"params": [eye_mod.log_scale], "lr": spec.lr_gaussian_scale * gscale})
+    if eye_mod.rotation.requires_grad:
+        gaussian_groups.append({"params": [eye_mod.rotation], "lr": spec.lr_gaussian_scale * gscale})
 
     gaze_params = []
     if avatar.eyes.gaze_refine_left is not None and avatar.eyes.gaze_refine_left.requires_grad:

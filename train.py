@@ -1,7 +1,7 @@
 """
 MediaPipe → tracker MLP → ICT deformer → surface/eye Gaussians → gsplat.
 
-Stages: 1 mesh+tracker → 2A expression → 2B GS detail → 3 view appearance
+Stages: 0 bootstrap pose → 1 mesh+tracker → 2A expression → 2B GS detail → 3 view appearance
 
 Run from repo root:
   python train.py
@@ -67,10 +67,7 @@ def main():
         num_workers=0,
     )
 
-    ict = ICTFaceKitTorch(
-        npy_dir=str(cfg.ict_npy),
-        canonical=str(cfg.ict_canonical),
-    ).to(device)
+    ict = ICTFaceKitTorch(npy_dir=str(cfg.ict_npy)).to(device)
 
     tracker = TrackerCorrectionMLP(
         n_blendshapes=cfg.num_mp_blendshapes,
@@ -130,12 +127,30 @@ def main():
         learn_gaze_refine=cfg.learn_gaze_refine,
         n_semantic_classes=cfg.n_semantic_classes,
         gum_h_sigma_scale=cfg.gum_h_sigma_scale,
+        eye_uv_sample_mode=cfg.eye_uv_sample_mode,
+        eye_sclera_min_front_dot=cfg.eye_sclera_min_front_dot,
+        eye_sclera_hemisphere_only=cfg.eye_sclera_hemisphere_only,
+        gaussian_scale_knn_k=cfg.gaussian_scale_knn_k,
+        gaussian_scale_knn_factor=cfg.gaussian_scale_knn_factor,
     ).to(device)
 
     init_training_state(avatar)
 
     renderer = GaussianRenderer(cfg, image_size=cfg.image_size, sh_degree=None).to(device)
-    camera = FixedCamera.from_default_npz(cfg.camera_npz, width=cfg.image_size, height=cfg.image_size)
+    camera = FixedCamera.from_default_or_mesh(
+        ict.canonical[0],
+        path=cfg.camera_npz,
+        width=cfg.image_size,
+        height=cfg.image_size,
+        device=device,
+    )
+    pivot = ict.canonical[0].mean(dim=0)
+    camera = camera.with_view_correction(pivot)
+    if not cfg.camera_npz.is_file():
+        print(
+            f"note: {cfg.camera_npz} missing — using mesh-bounds camera; "
+            "bake with: python scripts/bake_default_camera.py"
+        )
 
     mp_embedding = load_mp_embedding(cfg.mp_embedding, device)
     ict_faces = ict.faces
@@ -177,9 +192,14 @@ def main():
                     force_gamma_one=spec.fix_gamma_at_one,
                 )
 
+                pose_weight_fixed = 1.0 if spec.pose_weight_one else None
                 avatar_out = avatar(
                     tracker_out=corr,
                     apply_expression_deform=spec.train_expression_deform,
+                    use_pose_scale=spec.apply_pose_scale,
+                    pose_weight_fixed=pose_weight_fixed,
+                    rotate_about_centroid=spec.pose_rotate_about_centroid,
+                    pose_zero_tz=spec.pose_zero_tz,
                 )
                 expr_delta = avatar_out.get("expr_delta")
 

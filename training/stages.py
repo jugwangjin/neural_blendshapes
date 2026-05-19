@@ -1,15 +1,21 @@
 """
-Training schedule (mesh → expression → view-independent GS → view-dependent appearance).
+Training schedule (bootstrap pose → mesh → expression → GS → view appearance).
+
+  Stage 0 bootstrap — Landmark pose only: R+t about mesh centroid, scale=1, w(x)=1;
+             no expression deform / template / GS train.
 
   Stage 1 — Tracker + template MLP + pose weight; Gaussian color/opacity + small ``h``;
-             eye gaze UV slide; ``w_h`` + template reg steer mesh identity.
+             eye ``gaze_refine`` + tracker gaze (base UV fixed); ``w_h`` + template reg.
 
-  Stage 2A — Tracker/template frozen; learn support-gated expression residual + ``h`` detail;
-             eye gaze refine/slide still on.
+  Stage 2A — Tracker/template frozen; learn support-gated expression residual + ``h`` detail.
 
-  Stage 2B — All mesh frozen; view-independent Gaussian geometry + appearance (+ accessory).
+  Stage 2B — All mesh frozen; view-independent Gaussian geometry + appearance.
 
-  Stage 3 — Everything frozen; view-dependent appearance only (raise ``sh_degree`` when supported).
+  Stage 3 — Everything frozen; view-dependent appearance only.
+
+Global pose policy (all stages unless ``apply_pose_scale=True``):
+  - Uniform ``pose_scale`` is not applied to the mesh (fixed at 1).
+  - Residual rotation + translation are learned together; rigid motion uses centroid pivot.
 """
 
 from dataclasses import dataclass
@@ -26,6 +32,11 @@ class StageSpec:
     train_gamma: bool = False
     fix_gamma_at_one: bool = False
     train_pose_residual: bool = False
+    train_pose_scale: bool = False
+    apply_pose_scale: bool = False
+    pose_rotate_about_centroid: bool = True
+    pose_weight_one: bool = False
+    pose_zero_tz: bool = False
     train_pose_weight: bool = False
     train_template_deformer: bool = False
     train_expression_deform: bool = False
@@ -41,7 +52,8 @@ class StageSpec:
     w_rgb: float = 0.0
     w_mp_lmk: float = 0.0
     w_iris: float = 0.0
-    w_mask: float = 0.0
+    w_silhouette: float = 10.0
+    w_mask: float = 0.0  # alias → w_silhouette in train_losses if w_silhouette unset
     w_seg: float = 0.0
     w_h: float = 0.0
     w_eye_uv_barrier: float = 0.0
@@ -49,6 +61,7 @@ class StageSpec:
     w_opacity: float = 0.0
     w_gamma_prior: float = 0.0
     w_pose_prior: float = 0.0
+    w_pose_tz: float = 0.0
     w_gaze_residual: float = 0.0
     w_expr_deform_reg: float = 0.0
     w_expr_neutral: float = 0.0
@@ -77,10 +90,31 @@ STAGE_SCHEDULE: list[StageSpec] = [
         description="Precompute MP/seg/camera caches.",
     ),
     StageSpec(
+        name="0_bootstrap_pose",
+        steps=4000,
+        description=(
+            "Landmark pose only: full rigid (w=1), R+t about mesh centroid, scale fixed; "
+            "no expression deform / template / GS training."
+        ),
+        fix_gamma_at_one=True,
+        train_pose_residual=True,
+        pose_weight_one=True,
+        pose_rotate_about_centroid=True,
+        pose_zero_tz=True,
+        apply_pose_scale=False,
+        w_mp_lmk=200.0,
+        w_iris=30.0,
+        w_silhouette=5.0,
+        w_rgb=0.0,
+        w_pose_prior=0.05,
+        w_pose_tz=2.0,
+        lr_tracker=2e-4,
+    ),
+    StageSpec(
         name="1_coarse_mesh",
         steps=15000,
         description=(
-            "Tracker + template + pose weight; eye gaze slide; RGB/opacity; "
+            "Tracker + template + pose weight; eye gaze refine; RGB + silhouette; "
             "small h (distance prior pulls mesh via deformer)."
         ),
         train_tracker=True,
@@ -95,7 +129,7 @@ STAGE_SCHEDULE: list[StageSpec] = [
         sh_degree=None,
         w_mp_lmk=100.0,
         w_iris=50.0,
-        w_mask=10.0,
+        w_silhouette=10.0,
         w_seg=2.0,
         w_rgb=0.35,
         w_h=0.6,
@@ -122,7 +156,7 @@ STAGE_SCHEDULE: list[StageSpec] = [
         geometry_lr_scale=0.15,
         sh_degree=None,
         w_rgb=0.85,
-        w_mask=5.0,
+        w_silhouette=5.0,
         w_seg=2.0,
         w_sem_anchor=0.1,
         w_mp_lmk=35.0,
@@ -151,7 +185,7 @@ STAGE_SCHEDULE: list[StageSpec] = [
         geometry_lr_scale=1.0,
         sh_degree=None,
         w_rgb=1.0,
-        w_mask=5.0,
+        w_silhouette=5.0,
         w_seg=1.5,
         w_mp_lmk=12.0,
         w_iris=12.0,
@@ -176,7 +210,7 @@ STAGE_SCHEDULE: list[StageSpec] = [
         w_seg=1.0,
         w_mp_lmk=4.0,
         w_iris=4.0,
-        w_mask=3.0,
+        w_silhouette=3.0,
         lr_gaussian_color=4e-3,
         lr_gaussian_opacity=2e-3,
     ),

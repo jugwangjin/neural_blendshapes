@@ -10,7 +10,12 @@ import open3d as o3d
 
 
 class ICTFaceKitTorch(torch.nn.Module):
-    def __init__(self, npy_dir = './assets/ict_facekit_torch.npy', canonical = None, mediapipe_name_to_ict = './assets/mediapipe_name_to_indices.pkl'):
+    def __init__(
+        self,
+        npy_dir='./assets/ict_facekit_torch.npy',
+        canonical=None,
+        mediapipe_name_to_ict='./assets/mediapipe_name_to_indices.pkl',
+    ):
         super().__init__()
         self.load_mediapipe_idx(mediapipe_name_to_ict)
         model_dict = np.load(npy_dir, allow_pickle=True).item()
@@ -153,14 +158,18 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.register_buffer('expression', torch.zeros(1, self.num_expression))
         self.expression[0, jaw_index] = float(model_dict.get('flame_similarity_ict_jaw_open', 0.75))
         
-        try:
-            canonical = np.load(canonical, allow_pickle=True).item()
-        except:
-            canonical = np.load('./assets/ict_identity.npy', allow_pickle=True).item()
-            # B of s, R, T is 1
-        self.register_buffer('s', canonical['s'].cpu()) # shape of (B)
-        self.register_buffer('R', canonical['R'].cpu()) # shape of (B, 3, 3)
-        self.register_buffer('T', canonical['T'].cpu()) # shape of (B, 3)
+        if canonical is not None:
+            pose = np.load(canonical, allow_pickle=True).item()
+            s = pose['s'].cpu().reshape(-1)[0]
+            R = pose['R'].cpu()
+            T = pose['T'].cpu().reshape(1, 3)
+        else:
+            s = torch.tensor(1.0, dtype=torch.float32)
+            R = torch.eye(3, dtype=torch.float32)
+            T = torch.zeros(1, 3, dtype=torch.float32)
+        self.register_buffer('s', torch.tensor([float(s)], dtype=torch.float32))
+        self.register_buffer('R', R.reshape(1, 3, 3) if R.dim() == 2 else R)
+        self.register_buffer('T', T.reshape(1, 3) if T.dim() == 1 else T)
 
         self.register_buffer(
             'flame_similarity_s',
@@ -191,10 +200,10 @@ class ICTFaceKitTorch(torch.nn.Module):
             self.use_flame_alignment = False
         self.use_flame_similarity = True
 
-        # with torch.no_grad():
+        # Jaw-open ICT + FLAME alignment (+ optional legacy ``to_canonical_space`` when ``canonical`` npy passed).
         canonical = self.forward(expression_weights=self.expression, identity_weights=self.identity, to_canonical=True)
         self.register_buffer('canonical', canonical)
-        self.register_buffer('neutral_mesh_canonical', self.to_canonical_space(self.neutral_mesh).clone().detach())
+        self.register_buffer('neutral_mesh_canonical', canonical.clone().detach())
 
     def update_eyeball_centers(self, template_mesh):
         self.register_buffer(
@@ -230,6 +239,33 @@ class ICTFaceKitTorch(torch.nn.Module):
                 + self.flame_alignment_T
             )
         return self.flame_similarity_s * mesh + self.flame_similarity_T
+
+    def transform_displacement(self, delta):
+        """Apply the linear part of the FLAME map to per-vertex displacements ``[..., V, 3]``."""
+        if not self.use_flame_similarity:
+            return delta
+        if getattr(self, 'use_flame_alignment', False):
+            return self.flame_alignment_s * torch.matmul(delta, self.flame_alignment_R)
+        return self.flame_similarity_s * delta
+
+    def alignment_info(self):
+        """Human-readable alignment state (npy mesh is always raw ICT; transform applied at runtime)."""
+        jaw = float(self.expression[0, self.jaw_index].item())
+        info = {
+            "neutral_mesh_prealigned": False,
+            "use_flame_alignment": bool(getattr(self, "use_flame_alignment", False)),
+            "use_flame_similarity": bool(self.use_flame_similarity),
+            "flame_similarity_ict_jaw_open": jaw,
+        }
+        if getattr(self, "use_flame_alignment", False):
+            info["flame_alignment_s"] = float(self.flame_alignment_s.item())
+            info["flame_alignment_T"] = self.flame_alignment_T.reshape(-1).tolist()
+        else:
+            info["flame_similarity_s"] = float(self.flame_similarity_s.item())
+            info["flame_similarity_T"] = self.flame_similarity_T.reshape(-1).tolist()
+        info["legacy_canonical_s"] = float(self.s.item())
+        info["legacy_canonical_T"] = self.T.reshape(-1).tolist()
+        return info
 
     def forward(
         self,

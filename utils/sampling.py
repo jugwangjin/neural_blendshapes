@@ -5,8 +5,7 @@ import torch
 from utils.barycentric import bary_to_uv_coords, uniform_barycentric_samples
 from utils.ict_regions import (
     classify_surface_triangles_batch,
-    filter_triangles_all_vertices_in,
-    surface_allowed_vertices,
+    surface_layout_triangle_ids,
 )
 
 def _k_table_tensor(k_mouth_interior, k_mouth_socket, k_eye_socket, k_head, k_face, device):
@@ -34,8 +33,7 @@ def build_surface_gaussian_layout(
     Returns ``face_idx, bary, tri_ids, uv, is_gum`` (``is_gum`` = mouth_interior samples).
     """
     device = device or faces.device
-    allowed = surface_allowed_vertices(ict)
-    tri_ids = filter_triangles_all_vertices_in(faces, allowed, device=device)
+    tri_ids = surface_layout_triangle_ids(ict, faces, device=device)
 
     if tri_ids.numel() == 0:
         empty_f = torch.zeros(0, dtype=torch.long, device=device)
@@ -84,8 +82,7 @@ def count_surface_gaussians(
     k_eye_socket=1,
 ):
     device = faces.device
-    allowed = surface_allowed_vertices(ict)
-    tri_ids = filter_triangles_all_vertices_in(faces, allowed, device=device)
+    tri_ids = surface_layout_triangle_ids(ict, faces, device=device)
     if tri_ids.numel() == 0:
         return 0
     codes = classify_surface_triangles_batch(tri_ids, faces, ict, device)

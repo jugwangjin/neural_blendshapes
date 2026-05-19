@@ -9,12 +9,23 @@ from losses.segmentation import loss_segmentation_logits, loss_segmentation_soft
 from losses.iris_landmark import loss_iris_landmarks_2d
 from losses.mediapipe_landmark_478 import loss_mediapipe_landmarks_478
 from losses.rgb import l1_loss
+from losses.silhouette import loss_silhouette
 
 
 def _get_w(cfg, key, default=0.0):
     if isinstance(cfg, dict):
         return cfg.get(key, default)
     return getattr(cfg, key, default)
+
+
+def _silhouette_weight(cfg):
+    """``w_silhouette`` primary; ``w_mask`` / ``w_mp_mask`` kept as aliases."""
+    w = _get_w(cfg, "w_silhouette", 0.0)
+    if w <= 0.0:
+        w = _get_w(cfg, "w_mask", 0.0)
+    if w <= 0.0:
+        w = _get_w(cfg, "w_mp_mask", 0.0)
+    return w
 
 
 def compute_losses(
@@ -35,8 +46,16 @@ def compute_losses(
     if render is not None and "rgb" in render and batch.get("image") is not None:
         losses["rgb"] = l1_loss(render["rgb"], batch["image"])
 
-    if batch.get("mask") is not None and render is not None and "alpha" in render:
-        losses["mask"] = (render["alpha"] - batch["mask"]).pow(2).mean()
+    if render is not None and "alpha" in render:
+        w_sil = _silhouette_weight(cfg)
+        if batch.get("mask") is None:
+            if w_sil > 0.0:
+                raise ValueError(
+                    "silhouette loss enabled (w_silhouette>0) but batch has no 'mask' — "
+                    "check dataset *_mask.png caches"
+                )
+        else:
+            losses["silhouette"] = loss_silhouette(render["alpha"], batch["mask"])
 
     if render is not None and (
         render.get("semantic_prob") is not None or render.get("semantic") is not None
@@ -132,8 +151,11 @@ def compute_losses(
         pr = corr["pose_residual"]
         tr = corr["translation_residual"]
         losses["pose_prior"] = pr.pow(2).mean() + tr.pow(2).mean()
-        if corr.get("pose_scale") is not None:
+        if _get_w(cfg, "apply_pose_scale", False) and corr.get("pose_scale") is not None:
             losses["pose_prior"] = losses["pose_prior"] + (corr["pose_scale"] - 1.0).pow(2).mean()
+
+    if corr is not None and _get_w(cfg, "w_pose_tz", 0.0) > 0:
+        losses["pose_tz"] = corr["translation_residual"][..., 2].pow(2).mean()
 
     if corr is not None and _get_w(cfg, "w_gaze_residual", 0.0) > 0:
         from utils.gaze_uv import gaze_residual_prior_loss
@@ -162,11 +184,11 @@ def compute_losses(
     if deformer is not None and w_tpl > 0:
         losses["template_smooth"] = deformer.template_regularization_loss()
 
-    w_mask = _get_w(cfg, "w_mask", _get_w(cfg, "w_mp_mask", 0.0))
+    w_silhouette = _silhouette_weight(cfg)
     terms = [
         ("rgb", "w_rgb"),
         ("mp_lmk", "w_mp_lmk"),
-        ("mask", None),
+        ("silhouette", None),
         ("seg", "w_seg"),
         ("iris", "w_iris"),
         ("h", "w_h"),
@@ -175,6 +197,7 @@ def compute_losses(
         ("opacity", "w_opacity"),
         ("gamma_prior", "w_gamma_prior"),
         ("pose_prior", "w_pose_prior"),
+        ("pose_tz", "w_pose_tz"),
         ("gaze_residual", "w_gaze_residual"),
         ("expr_deform_reg", "w_expr_deform_reg"),
         ("expr_neutral", "w_expr_neutral"),
@@ -190,8 +213,8 @@ def compute_losses(
     for key, wkey in terms:
         if key not in losses:
             continue
-        if key == "mask":
-            w = w_mask
+        if key == "silhouette":
+            w = w_silhouette
         elif key == "template_smooth":
             w = w_tpl
         else:

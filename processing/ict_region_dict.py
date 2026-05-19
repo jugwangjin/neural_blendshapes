@@ -59,7 +59,14 @@ def build_official_region_indices():
     not_face_indices = head_neck
     eyeball_indices = left_eyeball + right_eyeball
     head_indices = face_indices + not_face_indices
-    surface_sample_vertex_indices = skin_face + head_neck + mouth_socket + gums_tongue
+    surface_sample_vertex_indices = (
+        skin_face
+        + head_neck
+        + mouth_socket
+        + eye_socket_left
+        + eye_socket_right
+        + gums_tongue
+    )
 
     return {
         "skin_face_indices": skin_face,

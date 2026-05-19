@@ -179,7 +179,8 @@ def transplant_one_eye(
                 f"[{side}] no M_Sclera* triangles on eyeball verts — check face_material_name / npy"
             )
         print(
-            f"  [{side}] iris MP → M_Sclera* ({n_sclera} tris, filled disk; M_Iris* annulus excluded)"
+            f"  [{side}] iris MP → M_Sclera* ({n_sclera} tris, filled disk; M_Iris* annulus excluded). "
+            f"Eye 3DGS UV uses sclera front hemisphere+ (see utils.eye_chart.sclera_sampling_face_indices)."
         )
     else:
         proj_mask = _eyeball_tri_mask(f_ict, ict_eye_ids, len(v_ict))

@@ -8,13 +8,11 @@ from utils.smoothstep import smoothstep
 def dilate_vertex_mask(mask, faces, n_ring=2):
     """Max-pool mask over mesh adjacency (triangle faces)."""
     v = mask.clone()
+    f = faces.long()
     for _ in range(n_ring):
+        face_max = v[f].amax(dim=1)
         pooled = v.clone()
-        for f in faces:
-            m = v[f].max()
-            pooled[f[0]] = torch.maximum(pooled[f[0]], m)
-            pooled[f[1]] = torch.maximum(pooled[f[1]], m)
-            pooled[f[2]] = torch.maximum(pooled[f[2]], m)
+        pooled.scatter_reduce_(0, f.reshape(-1), face_max.repeat_interleave(3), reduce="amax", include_self=True)
         v = pooled
     return v
 
@@ -37,9 +35,7 @@ def precompute_expression_support(
     m = mag / (q + 1e-8)
     support = smoothstep(m, support_lo, support_hi)
     faces = ict.faces
-    dilated = []
-    for e in range(support.shape[0]):
-        dilated.append(dilate_vertex_mask(support[e], faces, n_ring=dilate_rings))
+    dilated = [dilate_vertex_mask(support[e], faces, n_ring=dilate_rings) for e in range(support.shape[0])]
     support = torch.stack(dilated, dim=0)
     return mag, support
 
@@ -52,12 +48,6 @@ def build_mp_gates(ict, region_weight, mag_e, support_e):
     mag: [J, V] = mag[ict_j]
     """
     mp_to_ict = torch.tensor(ict.mediapipe_to_ict, dtype=torch.long)
-    j_count = len(mp_to_ict)
-    v = region_weight.shape[0]
-    gate = torch.zeros(j_count, v, dtype=region_weight.dtype)
-    mag = torch.zeros(j_count, v, dtype=mag_e.dtype)
-    for j, ei in enumerate(mp_to_ict):
-        ei = int(ei)
-        gate[j] = support_e[ei] * region_weight
-        mag[j] = mag_e[ei]
+    gate = support_e[mp_to_ict] * region_weight.unsqueeze(0)
+    mag = mag_e[mp_to_ict]
     return gate, mag, mp_to_ict

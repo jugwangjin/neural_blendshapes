@@ -27,8 +27,8 @@ class TrackerCorrectionMLP(nn.Module):
     Three trunks (no shared hidden state):
 
     - **expr**: blendshapes + optional full 478×2 landmarks → gamma
-    - **pose**: raw 6D pose + sparse head anchors → rotation(6) + translation(3) residuals;
-      **scale** is a global learnable scalar (not MLP output).
+    - **pose**: raw 6D pose + sparse head anchors → rotation(6) + translation(3) residuals.
+      Optional global ``log_pose_scale`` (training off by default; mesh uses scale=1).
     - **gaze**: raw pose + face-direction landmarks + iris 468–477 → gaze UV residual
     """
 

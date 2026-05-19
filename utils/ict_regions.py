@@ -8,6 +8,22 @@ ict.surface_sample_vertex_indices, ict.eyeball_indices, etc. from the loaded npy
 import numpy as np
 import torch
 
+# Surface mesh Gaussians: skin/head/mouth only — eyes use ``EyeTextureGaussians``.
+SURFACE_EXCLUDED_MATERIALS = frozenset(
+    {
+        "M_ScleraLeft",
+        "M_ScleraRight",
+        "M_IrisLeft",
+        "M_IrisRight",
+        "M_EyeballLeft",
+        "M_EyeballRight",
+        "M_LacrimalFluid",
+        "M_EyeOcclusion",
+        "M_EyeBlend",
+        "M_EyeLashes",
+    }
+)
+
 
 def _as_long_tensor(ids, device):
     if torch.is_tensor(ids):
@@ -34,23 +50,108 @@ def filter_triangles_all_vertices_in(faces, allowed_vertex_ids, device=None):
 
 
 def filter_triangles_exclude_vertices(faces, exclude_vertex_ids, device=None):
+    """Drop triangles that touch any vertex in ``exclude_vertex_ids``."""
     device = device or faces.device
-    n_verts = int(exclude_vertex_ids.max()) + 1 if len(exclude_vertex_ids) else 0
+    if exclude_vertex_ids is None or len(exclude_vertex_ids) == 0:
+        return torch.arange(faces.shape[0], device=device, dtype=torch.long)
+    n_verts = int(faces.max().item()) + 1
     excluded = _vertex_mask(n_verts, exclude_vertex_ids, device)
     tri = faces.long()
     keep = ~excluded[tri].any(dim=1)
     return torch.where(keep)[0]
 
 
-def surface_allowed_vertices(ict):
-    if hasattr(ict, "surface_sample_vertex_indices"):
-        return ict.surface_sample_vertex_indices
-    face = list(ict.face_indices)
-    head = list(ict.not_face_indices)
-    eye = set(ict.eyeball_indices)
-    teeth = set(getattr(ict, "teeth_indices", []))
-    out = [i for i in face + head if i not in eye and i not in teeth]
+def surface_excluded_vertex_ids(ict):
+    """Vertices never used for surface Gaussian layout (eyeball → UV Gaussians only)."""
+    out = []
+    for key in (
+        "eyeball_indices",
+        "teeth_indices",
+    ):
+        ids = getattr(ict, key, None)
+        if ids is not None and len(ids) > 0:
+            out.extend(list(ids))
     return out
+
+
+def _face_material_names_np(ict):
+    if hasattr(ict, "face_material_name"):
+        names = ict.face_material_name
+    elif isinstance(ict, dict) and "face_material_name" in ict:
+        names = ict["face_material_name"]
+    else:
+        return None
+    if torch.is_tensor(names):
+        names = names.detach().cpu().numpy()
+    return np.asarray(names, dtype=object)
+
+
+def surface_excluded_material_mask(ict):
+    """Boolean [F] — eye / sclera / iris OBJ charts (not skin surface)."""
+    names = _face_material_names_np(ict)
+    if names is None:
+        return None
+    from processing.ict_obj_materials import normalize_material_name
+
+    out = np.zeros(len(names), dtype=bool)
+    for i, raw in enumerate(names):
+        if normalize_material_name(str(raw)) in SURFACE_EXCLUDED_MATERIALS:
+            out[i] = True
+    return out
+
+
+def surface_excluded_material_mask_torch(ict, device):
+    mask = surface_excluded_material_mask(ict)
+    if mask is None:
+        return None
+    return torch.tensor(mask, dtype=torch.bool, device=device)
+
+
+def surface_layout_triangle_ids(ict, faces, device=None):
+    """
+    Triangle indices eligible for ``build_surface_gaussian_layout``.
+
+    All corners in ``surface_allowed_vertices``, no eyeball/teeth vertex,
+    and no ``SURFACE_EXCLUDED_MATERIALS`` face (eye-socket uses surface like mouth-socket).
+    """
+    device = device or faces.device
+    allowed = surface_allowed_vertices(ict)
+    tri_ids = filter_triangles_all_vertices_in(faces, allowed, device=device)
+    if tri_ids.numel() == 0:
+        return tri_ids
+
+    exclude_verts = surface_excluded_vertex_ids(ict)
+    if exclude_verts:
+        keep = filter_triangles_exclude_vertices(faces, exclude_verts, device=device)
+        tri_ids = tri_ids[torch.isin(tri_ids, keep)]
+
+    mat_mask = surface_excluded_material_mask_torch(ict, device)
+    if mat_mask is not None and tri_ids.numel() > 0:
+        tri_ids = tri_ids[~mat_mask[tri_ids]]
+
+    return tri_ids
+
+
+def surface_allowed_vertices(ict):
+    exclude = set(surface_excluded_vertex_ids(ict))
+    if hasattr(ict, "surface_sample_vertex_indices"):
+        base = list(ict.surface_sample_vertex_indices)
+    else:
+        face = list(ict.face_indices)
+        head = list(ict.not_face_indices)
+        base = [i for i in face + head if i not in exclude]
+    # Older npy may omit eye-socket from ``surface_sample_vertex_indices``.
+    extra = []
+    for key in ("eye_socket_left_indices", "eye_socket_right_indices"):
+        ids = getattr(ict, key, None)
+        if ids:
+            extra.extend(list(ids))
+    seen = set(base)
+    for i in extra:
+        if i not in exclude and i not in seen:
+            base.append(i)
+            seen.add(i)
+    return [i for i in base if i not in exclude]
 
 
 def classify_surface_triangles_batch(tri_ids, faces, ict, device):
@@ -74,8 +175,11 @@ def classify_surface_triangles_batch(tri_ids, faces, ict, device):
         m = _vertex_mask(n_verts, ids, device)
         return m[tri].all(dim=1)
 
-    # Teeth: no surface Gaussians (gums substitute visually); eyeball → eye UV Gaussians.
+    # Teeth / eyeball / eye OBJ charts → skip (eyeball = UV Gaussians; socket = surface).
     skip = any_vertex_in(ict.eyeball_indices) | any_vertex_in(getattr(ict, "teeth_indices", []))
+    mat_mask = surface_excluded_material_mask_torch(ict, device)
+    if mat_mask is not None:
+        skip = skip | mat_mask[fi]
     gums = any_vertex_in(
         getattr(ict, "mouth_interior_vertex_indices", getattr(ict, "gums_tongue_indices", []))
     )
@@ -148,12 +252,12 @@ def sclera_vertices(ict, side):
     if hasattr(ict, "face_material_name") or (
         isinstance(ict, dict) and "face_material_name" in ict
     ):
-        from utils.eye_chart import sclera_face_indices
+        from utils.eye_chart import _ict_faces_np, sclera_face_indices
 
-        faces = ict.faces if hasattr(ict, "faces") else ict["faces"]
+        faces = _ict_faces_np(ict)
         fi = sclera_face_indices(ict, side)
         if fi.size > 0:
-            return np.unique(np.asarray(faces, dtype=np.int64)[fi].reshape(-1)).tolist()
+            return np.unique(faces[fi].reshape(-1)).tolist()
 
     if side == "L":
         eye = list(eyeball_left_vertices(ict))

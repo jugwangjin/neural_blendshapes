@@ -15,9 +15,12 @@ from utils.texture_spaces import TextureSpaceMeshes
 
 
 def anchor_mask_from_triangles(face_idx, faces, anchor_vertex_ids):
-    tri = faces[face_idx]
-    anchor = anchor_vertex_ids
-    return (tri.unsqueeze(-1) == anchor.view(1, 1, -1)).any(dim=(1, 2))
+    """True if any corner of the Gaussian's triangle is in ``anchor_vertex_ids``."""
+    n_verts = int(faces.max().item()) + 1
+    v_mask = torch.zeros(n_verts, dtype=torch.bool, device=faces.device)
+    v_mask[anchor_vertex_ids.long()] = True
+    tri = faces[face_idx.long()]
+    return v_mask[tri].any(dim=-1)
 
 
 def _random_tangent_basis(n, device):
@@ -107,18 +110,23 @@ class GaussianAvatar(nn.Module):
         cls,
         ict,
         deformer=None,
-        k_face=8,
+        k_face=12,
         k_head=8,
         k_mouth_socket=1,
-        k_mouth_interior=2,
+        k_mouth_interior=1,
         k_eye_socket=1,
         k_per_face=None,
-        n_eye_per_side=1024,
+        n_eye_per_side=2048,
         n_accessory_gaussians=0,
         sh_dim=3,
         gaze_uv_range=0.12,
         learn_gaze_refine=True,
         n_semantic_classes=7,
+        eye_uv_sample_mode="hemisphere",
+        eye_sclera_min_front_dot=0.0,
+        eye_sclera_hemisphere_only=True,
+        gaussian_scale_knn_k=4,
+        gaussian_scale_knn_factor=1.0,
         gum_h_sigma_scale=4.0,
         accessory_anchor_xyz=None,
         accessory_tangent_basis=None,
@@ -148,6 +156,9 @@ class GaussianAvatar(nn.Module):
             n_semantic_classes=n_semantic_classes,
             mirror_right_u=mirror_right_u,
             ict=ict,
+            uv_sample_mode=eye_uv_sample_mode,
+            sclera_min_front_dot=eye_sclera_min_front_dot,
+            sclera_hemisphere_only=eye_sclera_hemisphere_only,
         )
 
         accessory = None
@@ -183,7 +194,29 @@ class GaussianAvatar(nn.Module):
 
         model.texture_meshes = TextureSpaceMeshes.from_ict(ict)
         model._init_surface_semantics()
+        model._init_knn_scales(
+            k=gaussian_scale_knn_k,
+            scale_factor=gaussian_scale_knn_factor,
+        )
         return model
+
+    def _init_knn_scales(self, k=3, scale_factor=1.0):
+        from utils.gaussian_scale_init import init_module_log_scale, surface_gaussian_xyz
+
+        xyz = surface_gaussian_xyz(
+            self.ict,
+            self.face_idx,
+            self.bary,
+            h=self.h,
+            h_sigma_scale=getattr(self, "h_sigma_scale", None),
+        )
+        init_module_log_scale(self, xyz, k=k, scale_factor=scale_factor)
+
+        if self.eyes is not None:
+            self.eyes.init_log_scale_from_mesh(self.ict, k=k, scale_factor=scale_factor)
+
+        if self.accessory is not None and self.accessory.n_gaussians > 0:
+            init_module_log_scale(self.accessory, self.accessory.anchor_xyz, k=k, scale_factor=scale_factor)
 
     def _init_surface_semantics(self):
         from rendering.gaussian_semantics import init_face_gaussian_semantics
@@ -243,6 +276,10 @@ class GaussianAvatar(nn.Module):
         faces=None,
         expr_delta=None,
         apply_expression_deform=False,
+        use_pose_scale=False,
+        pose_weight_fixed=None,
+        rotate_about_centroid=True,
+        pose_zero_tz=False,
         gaze_uv_left=None,
         gaze_uv_right=None,
     ):
@@ -257,14 +294,18 @@ class GaussianAvatar(nn.Module):
             if self.deformer is None:
                 raise ValueError("GaussianAvatar.deformer is required when forward(tracker_out=...)")
             c_eff = tracker_out["coeffs"] if apply_expression_deform else None
+            pose_scale = tracker_out.get("pose_scale") if use_pose_scale else None
             deformed = self.deformer(
                 mp_coeffs_corr=tracker_out["coeffs"],
                 pose_rotation_6d=tracker_out["pose_residual"],
                 pose_translation=tracker_out["translation_residual"],
-                pose_scale=tracker_out.get("pose_scale"),
+                pose_scale=pose_scale,
                 c_eff=c_eff,
                 expr_delta=expr_delta,
                 apply_expression_deform=apply_expression_deform,
+                pose_weight_fixed=pose_weight_fixed,
+                rotate_about_centroid=rotate_about_centroid,
+                pose_zero_tz=pose_zero_tz,
             )
             verts_posed = deformed["verts_posed"]
             verts = verts_posed[0]

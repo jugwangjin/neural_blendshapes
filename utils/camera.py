@@ -36,19 +36,181 @@ class FixedCamera:
         return k
 
     @classmethod
-    def from_default_npz(cls, path=None, width=512, height=512):
+    def from_default_npz(cls, path=None, width=512, height=512, device=None):
         d = load_default_camera(path or DEFAULT_CAMERA_NPZ)
+        if d is None:
+            raise FileNotFoundError(
+                f"default camera not found: {path or DEFAULT_CAMERA_NPZ}. "
+                "Use FixedCamera.from_mesh_bounds(verts) or scripts/bake_default_camera.py"
+            )
         k = d["K_mean"]
-        return cls(
+        dev = torch.device("cpu") if device is None else torch.device(device)
+        cam = cls(
             width=width,
             height=height,
             fx=float(k[0, 0]),
             fy=float(k[1, 1]),
             cx=float(k[0, 2]),
             cy=float(k[1, 2]),
-            R=torch.tensor(d["R_mean"], dtype=torch.float32),
-            t=torch.tensor(d["t_mean"], dtype=torch.float32),
+            R=torch.tensor(d["R_mean"], dtype=torch.float32, device=dev),
+            t=torch.tensor(d["t_mean"], dtype=torch.float32, device=dev),
         )
+        return cam
+
+    @classmethod
+    def from_mesh_bounds(
+        cls,
+        verts,
+        width=512,
+        height=512,
+        fov_deg=35.0,
+        margin=1.35,
+        axis=2,
+    ):
+        """
+        Pinhole camera framing ``verts`` (OpenCV: +Z forward in camera space).
+
+        Row-vector convention: ``p_cam = p_world @ R.T + t`` with ``R=I``,
+        ``t = -center`` plus offset along ``axis`` so the mesh centroid has positive depth.
+        """
+        v = verts.detach().float().reshape(-1, 3)
+        dev = v.device
+        center = v.mean(dim=0)
+        extent = (v.max(dim=0).values - v.min(dim=0).values).max().item()
+        radius = max(extent * margin * 0.5, 0.05)
+        dist = radius / np.tan(np.radians(fov_deg / 2.0)) * 1.1
+        fx = fy = (width * 0.5) / np.tan(np.radians(fov_deg / 2.0))
+        t = -center.clone()
+        t[axis] = t[axis] + dist
+        return cls(
+            width=width,
+            height=height,
+            fx=float(fx),
+            fy=float(fy),
+            cx=width * 0.5,
+            cy=height * 0.5,
+            R=torch.eye(3, dtype=torch.float32, device=dev),
+            t=t.to(dtype=torch.float32),
+        )
+
+    @classmethod
+    def from_default_or_mesh(cls, verts, path=None, width=512, height=512, device=None, **mesh_kw):
+        """Load baked npz if present; otherwise fit to ``verts``."""
+        dev = device
+        if dev is None and torch.is_tensor(verts):
+            dev = verts.device
+        d = load_default_camera(path or DEFAULT_CAMERA_NPZ)
+        if d is not None:
+            return cls.from_default_npz(path=path, width=width, height=height, device=dev)
+        return cls.from_mesh_bounds(verts, width=width, height=height, **mesh_kw)
+
+    def to(self, device):
+        device = torch.device(device)
+        return FixedCamera(
+            width=self.width,
+            height=self.height,
+            fx=self.fx,
+            fy=self.fy,
+            cx=self.cx,
+            cy=self.cy,
+            R=self.R.to(device),
+            t=self.t.to(device),
+        )
+
+    def with_azimuth_y(self, azimuth_deg, pivot):
+        """
+        Orbit camera around world +Y (azimuth, degrees).
+
+        +azimuth = camera moves to subject's right (see face from the left).
+        Row convention: ``p_cam = p @ R.T + t``.
+        """
+        device = self.R.device
+        dtype = self.R.dtype
+        cam = self.to(device)
+        pivot = pivot.detach().float().reshape(3).to(device=device, dtype=dtype)
+        R_delta = rotation_matrix_y_deg(-float(azimuth_deg), device=device, dtype=dtype)
+        cam.R = R_delta @ cam.R
+        cam.t = (pivot - pivot @ R_delta.T) @ cam.R.T + cam.t
+        return cam
+
+    def with_roll_forward_deg(self, roll_deg):
+        """
+        Roll about camera forward (+Z in OpenCV camera space).
+
+        180° fixes upside-down image when ``from_mesh_bounds`` uses ``R=I`` on FLAME-aligned ICT.
+        """
+        device = self.R.device
+        dtype = self.R.dtype
+        cam = self.to(device)
+        R_roll = rotation_matrix_z_deg(float(roll_deg), device=device, dtype=dtype)
+        cam.R = R_roll @ cam.R
+        cam.t = cam.t @ R_roll.T
+        return cam
+
+    def with_view_correction(self, pivot, yaw_deg=180.0, roll_deg=180.0):
+        """
+        Frontal sanity/train view for FLAME-aligned ICT (face toward -Z, mesh bounds on +Z).
+
+        Order: orbit ``yaw_deg`` about world +Y at ``pivot``, then ``roll_deg`` about camera +Z.
+        """
+        device = self.R.device
+        cam = self.to(device)
+        if yaw_deg != 0.0:
+            cam = cam.with_azimuth_y(yaw_deg, pivot)
+        if roll_deg != 0.0:
+            cam = cam.with_roll_forward_deg(roll_deg)
+        return cam
+
+
+def rotation_matrix_y_deg(angle_deg, device="cpu", dtype=torch.float32):
+    """Right-handed rotation about world +Y (azimuth), for row-vector points ``p @ R.T``."""
+    rad = float(angle_deg) * np.pi / 180.0
+    c = torch.tensor(np.cos(rad), device=device, dtype=dtype)
+    s = torch.tensor(np.sin(rad), device=device, dtype=dtype)
+    z = torch.zeros((), device=device, dtype=dtype)
+    o = torch.ones((), device=device, dtype=dtype)
+    return torch.stack(
+        [
+            torch.stack([c, z, s]),
+            torch.stack([z, o, z]),
+            torch.stack([-s, z, c]),
+        ]
+    )
+
+
+def rotation_matrix_z_deg(angle_deg, device="cpu", dtype=torch.float32):
+    """Right-handed rotation about +Z (roll in OpenCV camera frame)."""
+    rad = float(angle_deg) * np.pi / 180.0
+    c = torch.tensor(np.cos(rad), device=device, dtype=dtype)
+    s = torch.tensor(np.sin(rad), device=device, dtype=dtype)
+    z = torch.zeros((), device=device, dtype=dtype)
+    o = torch.ones((), device=device, dtype=dtype)
+    return torch.stack(
+        [
+            torch.stack([c, -s, z]),
+            torch.stack([s, c, z]),
+            torch.stack([z, z, o]),
+        ]
+    )
+
+
+def rotate_points_y(points, angle_deg, pivot=None):
+    """Rotate ``[..., 3]`` about world +Y through ``pivot`` (default: centroid)."""
+    pts = points.detach().float()
+    flat = pts.reshape(-1, 3)
+    if pivot is None:
+        pivot = flat.mean(dim=0)
+    else:
+        pivot = pivot.detach().float().reshape(3)
+    R = rotation_matrix_y_deg(angle_deg, device=flat.device, dtype=flat.dtype)
+    out = (flat - pivot) @ R.T + pivot
+    return out.reshape(pts.shape)
+
+
+def default_azimuth_sweep(step_deg=30.0):
+    """Integer azimuth list from -90 to +90 inclusive, step 30°."""
+    step = int(step_deg)
+    return list(range(-90, 90 + 1, step))
 
 
 def world_to_camera(points, cam: FixedCamera):

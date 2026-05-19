@@ -5,8 +5,8 @@ import torch
 from utils.camera import FixedCamera
 
 
-def fixed_camera_to_gsplat(cam: FixedCamera, znear=0.01, zfar=100.0):
-    device = cam.R.device
+def fixed_camera_to_gsplat(cam: FixedCamera, znear=0.01, zfar=100.0, device=None):
+    device = device if device is not None else cam.R.device
     dtype = cam.R.dtype
     w2v = torch.eye(4, device=device, dtype=dtype)
     w2v[:3, :3] = cam.R.to(device=device, dtype=dtype)
