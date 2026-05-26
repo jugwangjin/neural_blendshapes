@@ -1,7 +1,11 @@
 """
-ICT eye texture charts (OBJ usemtl).
+ICT eye charts (OBJ ``usemtl``).
 
-- ``M_ScleraLeft`` / ``M_ScleraRight``: filled disk in local UV — eye Gaussians + iris MP landmarks.
+**Train:** ``utils/ict_regions`` + ``utils/sampling`` (sclera/occlusion surface Gaussians).
+
+**Legacy:** ``legacy/eye_uv_slide`` — ``embed_chart_uv_on_mesh``, ``build_sclera_uv_mesh``, ``TextureSpaceMeshes``.
+
+- ``M_ScleraLeft`` / ``M_ScleraRight``: sclera disk chart
 - ``M_IrisLeft`` / ``M_IrisRight``: annulus (empty center) — not used for UV sampling at pupil.
 """
 

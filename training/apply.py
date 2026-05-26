@@ -4,29 +4,39 @@ from types import SimpleNamespace
 
 import torch
 
-from rendering.semantic import h_prior_tensors
 from training.stages import StageSpec
 
 
 def stage_loss_cfg(spec: StageSpec):
-    h_sigma, h_weight = h_prior_tensors(torch.device("cpu"))
     return SimpleNamespace(
         w_rgb=spec.w_rgb,
         w_mp_lmk=spec.w_mp_lmk,
+        w_pie68_jaw=spec.w_pie68_jaw,
         w_silhouette=spec.w_silhouette if spec.w_silhouette > 0 else spec.w_mask,
         w_mp_mask=spec.w_silhouette if spec.w_silhouette > 0 else spec.w_mask,
         w_mask=spec.w_silhouette if spec.w_silhouette > 0 else spec.w_mask,
         w_seg=spec.w_seg,
-        w_iris=spec.w_iris,
         w_h=spec.w_h,
-        w_eye_uv_barrier=spec.w_eye_uv_barrier,
-        w_scale=spec.w_scale,
+        w_geometry=spec.w_geometry,
         w_opacity=spec.w_opacity,
         w_gamma_prior=spec.w_gamma_prior,
+        h_skin_sigma=getattr(spec, "h_skin_sigma", 0.002),
+        h_sigma_brow=getattr(spec, "h_sigma_brow", 0.004),
+        h_sigma_misc=getattr(spec, "h_sigma_misc", 0.010),
+        h_sigma_mouth=getattr(spec, "h_sigma_mouth", 0.008),
+        h_w_skin=getattr(spec, "h_w_skin", 1.0),
+        h_w_eye=getattr(spec, "h_w_eye", 1.0),
+        h_w_brow=getattr(spec, "h_w_brow", 0.45),
+        h_w_misc=getattr(spec, "h_w_misc", 0.12),
+        h_w_mouth=getattr(spec, "h_w_mouth", 0.28),
+        h_alpha_min=getattr(spec, "h_alpha_min", 0.08),
+        geometry_max_scale=getattr(spec, "geometry_max_scale", 0.05),
+        opacity_target=getattr(spec, "opacity_target", 1.0),
+        opacity_w_skin=getattr(spec, "opacity_w_skin", 1.0),
+        opacity_w_other=getattr(spec, "opacity_w_other", 0.05),
         w_pose_prior=spec.w_pose_prior,
         w_pose_tz=spec.w_pose_tz,
         apply_pose_scale=spec.apply_pose_scale,
-        w_gaze_residual=spec.w_gaze_residual,
         w_expr_deform_reg=spec.w_expr_deform_reg,
         w_expr_neutral=spec.w_expr_neutral,
         w_expr_leak=spec.w_expr_leak,
@@ -34,9 +44,6 @@ def stage_loss_cfg(spec: StageSpec):
         w_sem_anchor=spec.w_sem_anchor,
         w_identity_smooth=spec.w_template_smooth,
         w_template_smooth=spec.w_template_smooth,
-        h_class_sigma=h_sigma.numpy().tolist(),
-        h_class_weight=h_weight.numpy().tolist(),
-        mask_accessory_in_seg=not spec.train_accessory,
     )
 
 
@@ -70,35 +77,6 @@ def _set_surface_trainable(surface, appearance, geometry, semantic, geom_scale=1
         surface.sem_logits.requires_grad = False
 
 
-def _set_eye_gaussians_trainable(eyes, appearance, train_gaze):
-    """
-    Shared ``EyeTextureGaussians``: ``uv`` / ``h`` are fixed buffers (sclera chart).
-    Train appearance + optional ``gaze_refine_*`` only — never slide base UV.
-    """
-    if appearance:
-        eyes.color.requires_grad = True
-        eyes.opacity.requires_grad = True
-        eyes.log_scale.requires_grad = True
-        eyes.rotation.requires_grad = True
-    else:
-        eyes.color.requires_grad = False
-        eyes.opacity.requires_grad = False
-        eyes.log_scale.requires_grad = False
-        eyes.rotation.requires_grad = False
-
-    if eyes.gaze_refine_left is not None:
-        eyes.gaze_refine_left.requires_grad = train_gaze
-    if eyes.gaze_refine_right is not None:
-        eyes.gaze_refine_right.requires_grad = train_gaze
-
-
-def _set_accessory_trainable(acc, train):
-    if acc is None or acc.n_gaussians == 0:
-        return
-    for p in acc.parameters():
-        p.requires_grad = train
-
-
 def apply_stage_requires_grad(spec, tracker, deformer, avatar):
     _set_requires_grad(tracker, False)
     _set_requires_grad(deformer, False)
@@ -120,9 +98,8 @@ def apply_stage_requires_grad(spec, tracker, deformer, avatar):
             p.requires_grad = True
         for p in tracker.head_pose.parameters():
             p.requires_grad = True
-        if spec.train_pose_scale:
-            tracker.log_pose_scale.requires_grad = True
-
+    if spec.train_pose_scale:
+        tracker.log_pose_scale.requires_grad = True
     if spec.train_pose_weight:
         for p in deformer.pose_weight_net.parameters():
             p.requires_grad = True
@@ -149,22 +126,6 @@ def apply_stage_requires_grad(spec, tracker, deformer, avatar):
     )
     if spec.train_gaussian_geometry and g < 1.0:
         surf.h.requires_grad = spec.train_gaussian_geometry
-
-    _set_eye_gaussians_trainable(
-        avatar.eyes,
-        spec.train_gaussian_appearance,
-        train_gaze=spec.train_eye_gaze,
-    )
-
-    if spec.train_eye_gaze:
-        for p in tracker.gaze_trunk.parameters():
-            p.requires_grad = True
-        for p in tracker.head_gaze_l.parameters():
-            p.requires_grad = True
-        for p in tracker.head_gaze_r.parameters():
-            p.requires_grad = True
-
-    _set_accessory_trainable(avatar.accessory, spec.train_accessory)
 
 
 def build_optimizers(spec, tracker, deformer, avatar):
@@ -217,30 +178,6 @@ def build_optimizers(spec, tracker, deformer, avatar):
             gaussian_groups.append({"params": [surf.sem_logits], "lr": spec.lr_gaussian_scale * gscale})
 
     add_surface_groups(avatar.surface)
-
-    eye_mod = avatar.eyes
-    if eye_mod.color.requires_grad:
-        gaussian_groups.append({"params": [eye_mod.color], "lr": spec.lr_gaussian_color})
-    if eye_mod.opacity.requires_grad:
-        gaussian_groups.append({"params": [eye_mod.opacity], "lr": spec.lr_gaussian_opacity})
-    if eye_mod.log_scale.requires_grad:
-        gaussian_groups.append({"params": [eye_mod.log_scale], "lr": spec.lr_gaussian_scale * gscale})
-    if eye_mod.rotation.requires_grad:
-        gaussian_groups.append({"params": [eye_mod.rotation], "lr": spec.lr_gaussian_scale * gscale})
-
-    gaze_params = []
-    if avatar.eyes.gaze_refine_left is not None and avatar.eyes.gaze_refine_left.requires_grad:
-        gaze_params.append(avatar.eyes.gaze_refine_left)
-    if avatar.eyes.gaze_refine_right is not None and avatar.eyes.gaze_refine_right.requires_grad:
-        gaze_params.append(avatar.eyes.gaze_refine_right)
-    if gaze_params:
-        gaussian_groups.append({"params": gaze_params, "lr": spec.lr_eye_gaze})
-
-    acc = avatar.accessory
-    if acc is not None and acc.n_gaussians > 0:
-        acc_params = [p for p in acc.parameters() if p.requires_grad]
-        if acc_params:
-            gaussian_groups.append({"params": acc_params, "lr": spec.lr_accessory})
 
     mesh_optim = torch.optim.Adam(mesh_groups) if mesh_groups else None
     gaussian_optim = torch.optim.Adam(gaussian_groups) if gaussian_groups else None

@@ -1,8 +1,9 @@
 """
 Build assets/ict_facekit_torch.npy — runtime topology source of truth.
 
-Official ICT-FaceKit quad parts #0–#8 only (vertices 0:24591).
-Excludes parts #9–#16 (lacrimal, eye blend, occlusion, eyelashes).
+Full ICT-FaceKit topology parts #0–#16 (vertices 0:26719), including
+``M_EyeOcclusion`` (parts #13–#14). Lacrimal / eye-blend / eyelashes are kept in
+the asset but gated off in ``model/expr_regions`` (train deformer ignores them).
 
 Regenerate on server:
   python processing/ict_facekit_to_npy_full_head.py
@@ -24,9 +25,9 @@ for _root in (_REPO_ROOT, _PROCESSING_ROOT):
 
 from processing.paths import ASSETS_DIR, setup_import_paths, setup_ict_facekit_import
 from processing.ict_region_dict import (
-    OFFICIAL_PART_SPLITS,
-    VERTEX_COUNT_STANDARD,
-    build_official_region_indices,
+    OFFICIAL_FULL_PART_SPLITS,
+    VERTEX_COUNT_FULL,
+    build_full_head_region_indices,
     build_region_dict,
     vertex_parts_from_splits,
 )
@@ -68,9 +69,9 @@ from processing.ict_flame_similarity import (
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--export_uv_debug",
+        "--no_export_uv_debug",
         action="store_true",
-        help="Write debug/ict_facekit_uv/ + per-texture-chart PNGs",
+        help="Skip debug/ict_facekit_uv/ per-usemtl chart PNGs (default: export all materials)",
     )
     parser.add_argument("--uv_debug_dir", type=str, default="debugs/ict_facekit_uv")
     parser.add_argument("--uv_texture_size", type=int, default=512)
@@ -144,9 +145,9 @@ def main():
         )
 
     faces, triangle_uv, tri_material_names = convert_quad_mesh_to_triangle_mesh(
-        mesh_faces, mesh_uvs, face_materials, n_verts=VERTEX_COUNT_STANDARD
+        mesh_faces, mesh_uvs, face_materials, n_verts=VERTEX_COUNT_FULL
     )
-    print(f"  tris (official verts 0:{VERTEX_COUNT_STANDARD}): F={len(faces)}")
+    print(f"  tris (full head verts 0:{VERTEX_COUNT_FULL}): F={len(faces)}")
     triangle_uv_atlas = triangle_uv.copy()
 
     mtl_pack = build_texture_map_index_from_materials(tri_material_names)
@@ -159,7 +160,7 @@ def main():
         vertices,
         triangle_uv_local,
         face_uv_tile,
-        n_3d_verts=VERTEX_COUNT_STANDARD,
+        n_3d_verts=VERTEX_COUNT_FULL,
     )
     new_vertices = seam["new_vertices"]
     new_uvs = seam["new_uvs"]
@@ -170,8 +171,8 @@ def main():
     uv_tile_index_v = seam["uv_tile_index_v"]
 
     ict_model = face_model_io.load_face_model(str(facex_dir))
-    vertices = vertices[:VERTEX_COUNT_STANDARD]
-    vertex_parts = vertex_parts_from_splits(len(vertices), OFFICIAL_PART_SPLITS)
+    vertices = vertices[:VERTEX_COUNT_FULL]
+    vertex_parts = vertex_parts_from_splits(len(vertices), OFFICIAL_FULL_PART_SPLITS)
 
     face_part_id = face_part_id_from_vertices(faces, vertex_parts)
     geom_pack = build_geometry_chart_index(face_part_id)
@@ -193,7 +194,7 @@ def main():
         face_uv_tile=face_uv_tile,
     )
 
-    regions = build_official_region_indices()
+    regions = build_full_head_region_indices()
 
     eye_uv_symmetry = analyze_eye_uv_symmetry(
         vertex_uvs,
@@ -206,7 +207,7 @@ def main():
     validate_landmark_indices(landmark_indices, len(vertices))
     print(f"  landmark_indices: 68 Multi-PIE (ICT-FaceKit README jawline 0-16)")
     expression_shape_modes = expression_modes_as_vertex_deltas(
-        ict_model._expression_shape_modes, VERTEX_COUNT_STANDARD
+        ict_model._expression_shape_modes, len(vertices)
     )
     expression_names = ict_model._expression_names
 
@@ -285,7 +286,7 @@ def main():
         "num_expression": ict_model._num_expression_shapes,
         "num_identity": ict_model._num_identity_shapes,
         "expression_shape_modes": expression_shape_modes,
-        "identity_shape_modes": ict_model._identity_shape_modes[:, :VERTEX_COUNT_STANDARD],
+        "identity_shape_modes": ict_model._identity_shape_modes[:, : len(vertices)],
         "expression_names": expression_names,
         "identity_names": ict_model._identity_names,
         "model_config": ict_model._model_config,
@@ -301,10 +302,13 @@ def main():
             regions["face_indices"],
             regions["not_face_indices"],
             regions["eyeball_indices"],
-            OFFICIAL_PART_SPLITS,
-            asset_variant="official_24591",
+            OFFICIAL_FULL_PART_SPLITS,
         )
     )
+    n_occ = len(regions.get("left_eye_occlusion_indices", [])) + len(
+        regions.get("right_eye_occlusion_indices", [])
+    )
+    print(f"  eye_occlusion verts: {n_occ}  (M_EyeOcclusion surface Gaussians)")
 
     out_path = ASSETS_DIR / "ict_facekit_torch.npy"
     np.save(str(out_path), ict_model_dict)
@@ -321,7 +325,7 @@ def main():
         f"materials K={mtl_pack['n_texture_maps']} geometry_charts G={geom_pack['n_geometry_charts']}"
     )
 
-    if args.export_uv_debug:
+    if not args.no_export_uv_debug:
         export_uv_debug(
             args.uv_debug_dir,
             vertices,

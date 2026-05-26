@@ -8,21 +8,22 @@ ict.surface_sample_vertex_indices, ict.eyeball_indices, etc. from the loaded npy
 import numpy as np
 import torch
 
-# Surface mesh Gaussians: skin/head/mouth only — eyes use ``EyeTextureGaussians``.
+# Surface mesh Gaussians: skin/head/mouth + sparse sclera / eye-occlusion (ICT blendshapes).
+# Sclera & occlusion are sampled here (h pinned to 0); iris/lashes charts stay excluded.
 SURFACE_EXCLUDED_MATERIALS = frozenset(
     {
-        "M_ScleraLeft",
-        "M_ScleraRight",
         "M_IrisLeft",
         "M_IrisRight",
         "M_EyeballLeft",
         "M_EyeballRight",
         "M_LacrimalFluid",
-        "M_EyeOcclusion",
         "M_EyeBlend",
         "M_EyeLashes",
     }
 )
+
+SCLERA_MATERIALS = frozenset({"M_ScleraLeft", "M_ScleraRight"})
+EYE_OCCLUSION_MATERIAL = "M_EyeOcclusion"
 
 
 def _as_long_tensor(ids, device):
@@ -62,16 +63,62 @@ def filter_triangles_exclude_vertices(faces, exclude_vertex_ids, device=None):
 
 
 def surface_excluded_vertex_ids(ict):
-    """Vertices never used for surface Gaussian layout (eyeball → UV Gaussians only)."""
-    out = []
+    """
+    Vertices excluded from skin/head surface layout (not ``M_EyeOcclusion`` / sclera tris).
+
+    Teeth + lacrimal / eye-blend / eyelashes aux parts; eyeball tris handled via material mask.
+    """
+    out = list(getattr(ict, "teeth_indices", []) or [])
     for key in (
-        "eyeball_indices",
-        "teeth_indices",
+        "lacrimal_indices",
+        "eye_blend_indices",
+        "eyelashes_left_indices",
+        "eyelashes_right_indices",
     ):
-        ids = getattr(ict, key, None)
-        if ids is not None and len(ids) > 0:
-            out.extend(list(ids))
+        out.extend(list(getattr(ict, key, []) or []))
     return out
+
+
+def _material_face_mask(ict, material_names):
+    names = _face_material_names_np(ict)
+    if names is None:
+        return None
+    from processing.ict_obj_materials import normalize_material_name
+
+    want = {normalize_material_name(m) for m in material_names}
+    out = np.zeros(len(names), dtype=bool)
+    for i, raw in enumerate(names):
+        if normalize_material_name(str(raw)) in want:
+            out[i] = True
+    return out
+
+
+def sclera_layout_face_indices(ict):
+    """``M_ScleraLeft`` / ``M_ScleraRight`` faces (forward hemisphere sampling set)."""
+    from utils.eye_chart import sclera_face_indices
+
+    fi_l = sclera_face_indices(ict, "L")
+    fi_r = sclera_face_indices(ict, "R")
+    if fi_l.size == 0 and fi_r.size == 0:
+        return np.zeros(0, dtype=np.int64)
+    return np.concatenate([fi_l, fi_r]).astype(np.int64)
+
+
+def eye_occlusion_layout_face_indices(ict):
+    """``M_EyeOcclusion`` — deformed by ICT eye-occlusion blendshapes."""
+    mask = _material_face_mask(ict, {EYE_OCCLUSION_MATERIAL})
+    if mask is None:
+        return np.zeros(0, dtype=np.int64)
+    return np.where(mask)[0].astype(np.int64)
+
+
+def eye_gaussian_layout_face_indices(ict):
+    """Sclera + eye-occlusion triangles for sparse white surface Gaussians."""
+    parts = [sclera_layout_face_indices(ict), eye_occlusion_layout_face_indices(ict)]
+    parts = [p for p in parts if p.size > 0]
+    if not parts:
+        return np.zeros(0, dtype=np.int64)
+    return np.unique(np.concatenate(parts)).astype(np.int64)
 
 
 def _face_material_names_np(ict):
@@ -109,27 +156,33 @@ def surface_excluded_material_mask_torch(ict, device):
 
 def surface_layout_triangle_ids(ict, faces, device=None):
     """
-    Triangle indices eligible for ``build_surface_gaussian_layout``.
+    Triangle indices for ``build_surface_gaussian_layout``.
 
-    All corners in ``surface_allowed_vertices``, no eyeball/teeth vertex,
-    and no ``SURFACE_EXCLUDED_MATERIALS`` face (eye-socket uses surface like mouth-socket).
+    Skin/head/mouth/eye-socket (``surface_allowed_vertices``) plus sclera +
+    ``M_EyeOcclusion`` faces. Teeth and iris/lash eye charts excluded.
     """
     device = device or faces.device
     allowed = surface_allowed_vertices(ict)
     tri_ids = filter_triangles_all_vertices_in(faces, allowed, device=device)
     if tri_ids.numel() == 0:
-        return tri_ids
+        tri_skin = tri_ids
+    else:
+        exclude_verts = surface_excluded_vertex_ids(ict)
+        if exclude_verts:
+            keep = filter_triangles_exclude_vertices(faces, exclude_verts, device=device)
+            tri_ids = tri_ids[torch.isin(tri_ids, keep)]
+        mat_mask = surface_excluded_material_mask_torch(ict, device)
+        if mat_mask is not None and tri_ids.numel() > 0:
+            tri_ids = tri_ids[~mat_mask[tri_ids]]
+        tri_skin = tri_ids
 
-    exclude_verts = surface_excluded_vertex_ids(ict)
-    if exclude_verts:
-        keep = filter_triangles_exclude_vertices(faces, exclude_verts, device=device)
-        tri_ids = tri_ids[torch.isin(tri_ids, keep)]
-
-    mat_mask = surface_excluded_material_mask_torch(ict, device)
-    if mat_mask is not None and tri_ids.numel() > 0:
-        tri_ids = tri_ids[~mat_mask[tri_ids]]
-
-    return tri_ids
+    eye_fi = eye_gaussian_layout_face_indices(ict)
+    if eye_fi.size == 0:
+        return tri_skin
+    tri_eye = torch.tensor(eye_fi, dtype=torch.long, device=device)
+    if tri_skin.numel() == 0:
+        return tri_eye
+    return torch.unique(torch.cat([tri_skin, tri_eye], dim=0))
 
 
 def surface_allowed_vertices(ict):
@@ -159,11 +212,13 @@ def classify_surface_triangles_batch(tri_ids, faces, ict, device):
     Vectorized region tags for mesh triangle indices.
 
     Returns int64 codes: 0 mouth_interior, 1 mouth_socket, 2 eye_socket,
-    3 head, 4 face, -1 skip (eyeball/teeth).
+    3 head, 4 face, 5 eyeball_sclera, 6 eye_occlusion, -1 skip.
     """
     fi = tri_ids.long()
     tri = faces[fi]
     n_verts = int(faces.max().item()) + 1
+    names = _face_material_names_np(ict)
+    from processing.ict_obj_materials import normalize_material_name
 
     def any_vertex_in(ids):
         if ids is None or len(ids) == 0:
@@ -175,11 +230,21 @@ def classify_surface_triangles_batch(tri_ids, faces, ict, device):
         m = _vertex_mask(n_verts, ids, device)
         return m[tri].all(dim=1)
 
-    # Teeth / eyeball / eye OBJ charts → skip (eyeball = UV Gaussians; socket = surface).
-    skip = any_vertex_in(ict.eyeball_indices) | any_vertex_in(getattr(ict, "teeth_indices", []))
+    on_sclera = torch.zeros(fi.shape[0], dtype=torch.bool, device=device)
+    on_occ = torch.zeros(fi.shape[0], dtype=torch.bool, device=device)
+    if names is not None:
+        for i in range(fi.shape[0]):
+            nm = normalize_material_name(str(names[int(fi[i].item())]))
+            if nm in SCLERA_MATERIALS:
+                on_sclera[i] = True
+            if nm == EYE_OCCLUSION_MATERIAL:
+                on_occ[i] = True
+
+    skip = any_vertex_in(getattr(ict, "teeth_indices", []))
+    skip = skip | (any_vertex_in(ict.eyeball_indices) & ~(on_sclera | on_occ))
     mat_mask = surface_excluded_material_mask_torch(ict, device)
     if mat_mask is not None:
-        skip = skip | mat_mask[fi]
+        skip = skip | (mat_mask[fi] & ~(on_sclera | on_occ))
     gums = any_vertex_in(
         getattr(ict, "mouth_interior_vertex_indices", getattr(ict, "gums_tongue_indices", []))
     )
@@ -194,6 +259,8 @@ def classify_surface_triangles_batch(tri_ids, faces, ict, device):
     code[eye_sock] = 2
     code[mouth_sock] = 1
     code[gums] = 0
+    code[on_sclera] = 5
+    code[on_occ] = 6
     code[skip] = -1
     return code
 

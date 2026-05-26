@@ -1,16 +1,39 @@
 """
 Build ICT region index arrays for assets/ict_facekit_torch.npy.
 
-Authoritative topology: official ICT-FaceKit parts #0–#8, vertices 0:24591.
+Default asset: full head parts #0–#16 (vertices 0:26719), including ``M_EyeOcclusion``.
+Official #0–#8 (0:24591) remains available via ``build_official_region_indices``.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-ASSET_SCHEMA_VERSION = 6
+ASSET_SCHEMA_VERSION = 7
 OFFICIAL_PART_SPLITS = [9409, 11248, 13294, 13678, 14062, 17039, 21451, 23021, 24591]
 VERTEX_COUNT_STANDARD = 24591
+
+# ICT-FaceKit README — full light model (parts #0–#16, vertices 0:26718).
+OFFICIAL_FULL_PART_SPLITS = [
+    9409,
+    11248,
+    13294,
+    13678,
+    14062,
+    17039,
+    21451,
+    23021,
+    24591,
+    24795,
+    24999,
+    25023,
+    25047,
+    25199,
+    25351,
+    26035,
+    26719,
+]
+VERTEX_COUNT_FULL = 26719
 
 PART_FACE_SKIN = 0
 PART_HEAD_NECK = 1
@@ -89,6 +112,41 @@ def build_official_region_indices():
     }
 
 
+def build_full_head_region_indices():
+    """
+    Parts #0–#8 (official) plus #9–#16 (lacrimal, eye blend, eye occlusion, eyelashes).
+
+    Eye-occlusion verts (13–14) are kept for ``M_EyeOcclusion`` surface Gaussians;
+    lacrimal / eye-blend / eyelashes are stored but gated off in ``expr_regions``.
+    """
+    r = build_official_region_indices()
+    lacrimal = _range(24591, 24795)
+    eye_blend = _range(24795, 25047)
+    eye_occ_left = _range(25047, 25199)
+    eye_occ_right = _range(25199, 25351)
+    eyelashes_left = _range(25351, 26035)
+    eyelashes_right = _range(26035, 26719)
+    r.update(
+        {
+            "lacrimal_indices": lacrimal,
+            "eye_blend_indices": eye_blend,
+            "left_eye_occlusion_indices": eye_occ_left,
+            "right_eye_occlusion_indices": eye_occ_right,
+            "eyelashes_left_indices": eyelashes_left,
+            "eyelashes_right_indices": eyelashes_right,
+            "auxiliary_part_indices": (
+                lacrimal
+                + eye_blend
+                + eye_occ_left
+                + eye_occ_right
+                + eyelashes_left
+                + eyelashes_right
+            ),
+        }
+    )
+    return r
+
+
 def build_region_dict(
     vertices,
     vertex_parts,
@@ -96,12 +154,21 @@ def build_region_dict(
     not_face_indices,
     eyeball_indices,
     parts_split,
-    asset_variant="official_24591",
+    asset_variant=None,
 ):
-    """Merge metadata for npy (official regions + schema fields)."""
+    """Merge metadata for npy (region lists + schema fields)."""
     n_verts = int(np.asarray(vertices).shape[0])
-    regions = build_official_region_indices()
-    if n_verts != VERTEX_COUNT_STANDARD:
+    if n_verts >= VERTEX_COUNT_FULL - 1:
+        regions = build_full_head_region_indices()
+        if asset_variant is None:
+            asset_variant = "full_head_26719"
+        parts_split = list(parts_split or OFFICIAL_FULL_PART_SPLITS)
+    else:
+        regions = build_official_region_indices()
+        if asset_variant is None:
+            asset_variant = "official_24591"
+        parts_split = list(parts_split or OFFICIAL_PART_SPLITS)
+    if n_verts != VERTEX_COUNT_STANDARD and n_verts < VERTEX_COUNT_FULL - 1:
         regions["left_eyeball_indices"], regions["right_eyeball_indices"] = _split_eyeballs_by_x(
             vertices, eyeball_indices
         )
@@ -110,8 +177,9 @@ def build_region_dict(
         "asset_variant": asset_variant,
         "asset_schema_version": ASSET_SCHEMA_VERSION,
         "vertex_count": n_verts,
-        "parts_split": list(parts_split),
+        "parts_split": parts_split,
         "official_part_splits": list(OFFICIAL_PART_SPLITS),
+        "full_head_part_splits": list(OFFICIAL_FULL_PART_SPLITS),
         **regions,
     }
 

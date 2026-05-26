@@ -1,12 +1,14 @@
-# Legacy (FLARE / mesh neural shader)
+# Archived code (not used by `train.py`)
 
-Not used by active `train.py`. Kept for reference and old experiment scripts at repo root.
+| Directory | Contents |
+|-----------|----------|
+| `flare/` | FLARE neural-shader stack: `test.py`, `load_nbshapes.py`, `arguments.py`, old `processing/*`, `configs/` |
+| `eye_uv_slide/` | UV-slide eye Gaussians, `gaze_uv.py`, barriers |
 
-| Path | Notes |
-|------|--------|
-| `model/deformer.py` | Placeholder — restore from [GitHub master model/deformer.py](https://raw.githubusercontent.com/jugwangjin/neural_blendshapes/master/model/deformer.py) |
-| `model/encoder.py` | DECA/ResNet encoder |
-| `model/resnet.py` | ResNet backbone |
-| `model/eye_plane_gaussians.py` | Pre–texture-space eye model |
-| `losses/mediapipe_landmark.py` | 68 landmark + gbuffer |
-| `utils/eye_frame.py` | Tangent frame for eye plane |
+**Active stack** (repo root): `train.py`, `model/`, `training/`, `rendering/`, `losses/train_losses.py`, `dataset/image_dataset.py`, `processing/ict_mediapipe_lmk/`, `processing/ict_facekit_to_npy_full_head.py`.
+
+Run archive (once, on server):
+
+```bash
+python scripts/archive_flare_legacy.py
+```

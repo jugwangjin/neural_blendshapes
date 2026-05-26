@@ -16,8 +16,13 @@ from processing.ict_mediapipe_lmk.landmark_routing import CHART_LEFT_EYE, CHART_
 from processing.ict_mediapipe_lmk.mediapipe_connections import connections_for_landmarks
 from processing.ict_mediapipe_lmk.metrical import load_metrical_mediapipe_embedding
 from processing.ict_obj_materials import normalize_material_name
+from utils.ict_texture_maps import (
+    all_texture_materials as all_viz_texture_chart_materials,
+    face_indices_for_material,
+    material_names_from_ict as material_names_from_npy,
+)
 
-# Omit from combined UV QA (separate per-chart exports for eyes).
+# Combined overview PNG only (per-usemtl charts exported separately for every material).
 VIZ_SKIP_MATERIALS = frozenset(
     {
         "M_Teeth",
@@ -30,11 +35,11 @@ VIZ_SKIP_MATERIALS = frozenset(
         "M_EyeOcclusion",
         "M_EyeBlend",
         "M_EyeLashes",
+        "M_BackHead",
+        "M_ScleraLeft",
+        "M_ScleraRight",
     }
 )
-
-# Face skin chart; eye iris QA uses dedicated eyeball exports (see export_eyeball_iris5_texture).
-VIZ_PER_CHART_MATERIALS = ("M_Face",)
 
 
 def parse_obj_uv(path):
@@ -185,6 +190,35 @@ def eyeball_sclera_face_indices(ict_npy_dict, side, f_ict, n_verts):
     return np.where(mask)[0].astype(np.int64)
 
 
+def eye_occlusion_side_face_indices(ict_npy_dict, side, f_ict):
+    """``M_EyeOcclusion`` triangles for one eye (parts #13 / #14 verts)."""
+    from utils.ict_regions import eye_occlusion_layout_face_indices
+
+    fi_all = eye_occlusion_layout_face_indices(ict_npy_dict)
+    if fi_all.size == 0:
+        return fi_all
+    key = "left_eye_occlusion_indices" if side == "left" else "right_eye_occlusion_indices"
+    vids = set(np.asarray(ict_npy_dict[key], dtype=np.int64).tolist())
+    tri = f_ict[fi_all]
+    keep = np.all(np.isin(tri, list(vids)), axis=1)
+    return fi_all[keep].astype(np.int64)
+
+
+def embedding_iris_on_eye_occlusion(embedding, ict_npy_dict):
+    """True when baked iris 468–477 lie on ``M_EyeOcclusion`` faces (ray_occ bake)."""
+    if ict_npy_dict is None or "face_texture_map_id" not in ict_npy_dict:
+        return False
+    fi_occ = set(face_indices_for_material(ict_npy_dict, "M_EyeOcclusion").tolist())
+    if not fi_occ:
+        return False
+    mp = np.asarray(embedding["mp_landmark_indices"], dtype=np.int64)
+    fi = np.asarray(embedding["ict_lmk_face_idx"], dtype=np.int64)
+    iris = np.isin(mp, np.arange(468, 478))
+    if not iris.any():
+        return False
+    return all(int(f) in fi_occ for f in fi[iris])
+
+
 def landmark_uv_from_vertex_corners(vertex_idx, faces, uv_faces, uvs):
     out = []
     for vid in np.asarray(vertex_idx, dtype=np.int64):
@@ -199,27 +233,6 @@ def uv_to_pixel(uv, size):
     x = int(round(u * (size - 1)))
     y = int(round((1.0 - v) * (size - 1)))
     return x, y
-
-
-def material_names_from_npy(ict_npy_dict):
-    if ict_npy_dict is None:
-        return []
-    if "material_names" in ict_npy_dict:
-        return [normalize_material_name(m) for m in ict_npy_dict["material_names"]]
-    if "face_material_name" in ict_npy_dict:
-        uniq = sorted({normalize_material_name(m) for m in ict_npy_dict["face_material_name"]})
-        return uniq
-    return []
-
-
-def face_indices_for_material(ict_npy_dict, material_name):
-    names = material_names_from_npy(ict_npy_dict)
-    mat = normalize_material_name(material_name)
-    if mat not in names:
-        return np.array([], dtype=np.int64)
-    tid = names.index(mat)
-    ftmi = np.asarray(ict_npy_dict["face_texture_map_id"], dtype=np.int64)
-    return np.where(ftmi == tid)[0].astype(np.int64)
 
 
 def face_indices_excluding_materials(ict_npy_dict, skip_materials):
@@ -425,8 +438,8 @@ def bake_iris_pentagon_texture_zoomed(landmark_uv, mp_indices, size, base_bgr, m
     """
     Magnified iris QA: map a UV window around the pentagon centroid onto the full image.
 
-    On ``M_Sclera*``, iris landmarks sit near chart center (0.5, 0.5); full-disk PNGs look
-    like a single point — this export makes the pentagon visible.
+    On ``M_Sclera*`` / ``M_EyeOcclusion``, iris landmarks can cluster in UV; this export
+    magnifies the pentagon for QA.
     """
     landmark_uv = np.asarray(landmark_uv, dtype=np.float64)
     mp_indices = [int(m) for m in mp_indices]
@@ -516,6 +529,79 @@ def bake_iris_pentagon_texture(landmark_uv, mp_indices, size, base_bgr):
     return img
 
 
+def _export_iris5_texture_on_chart(
+    debug_dir,
+    v_ict,
+    f_ict,
+    uvs,
+    uv_faces,
+    embedding,
+    ict_npy_dict,
+    side,
+    *,
+    chart_face_indices,
+    label_prefix,
+    fill_bgr,
+    size=2048,
+):
+    debug_dir = Path(debug_dir)
+    side = str(side).lower()
+    if side not in ("left", "right"):
+        raise ValueError(f"side must be left|right, got {side!r}")
+    mp_order = np.array(LEFT_IRIS_MP if side == "left" else RIGHT_IRIS_MP, dtype=np.int64)
+    if "triangle_uv_local" not in ict_npy_dict:
+        raise ValueError("ict_npy_dict missing triangle_uv_local — re-run ict_facekit_to_npy_full_head.py")
+
+    fi_chart = np.asarray(chart_face_indices, dtype=np.int64)
+    if fi_chart.size == 0:
+        print(f"  WARNING: no chart faces for {side} {label_prefix} — skip iris texture")
+        return None
+
+    tuv = np.asarray(ict_npy_dict["triangle_uv_local"], dtype=np.float64)
+    base = bake_triangle_uv_local_chart(tuv, fi_chart, size, fill_bgr=fill_bgr)
+    mp_all, lmk_uv_all = ict_mediapipe_landmark_uv(
+        embedding, f_ict, uv_faces, uvs, ict_npy_dict=ict_npy_dict
+    )
+    mp_all = np.asarray(mp_all, dtype=np.int64)
+    rows = []
+    for mp in mp_order:
+        hit = np.where(mp_all == mp)[0]
+        if hit.size == 0:
+            print(f"  WARNING: missing iris MP {mp} in embedding for {side} {label_prefix}")
+            continue
+        rows.append(int(hit[0]))
+    if len(rows) != 5:
+        print(f"  WARNING: {side} {label_prefix} iris: expected 5 landmarks, got {len(rows)}")
+    mp_ids = mp_all[rows]
+    lmk_uv = lmk_uv_all[rows]
+    tex = bake_iris_pentagon_texture(lmk_uv, mp_order[: len(rows)], size, base)
+    tex_zoom = bake_iris_pentagon_texture_zoomed(lmk_uv, mp_order[: len(rows)], size, base)
+
+    label = f"{label_prefix}_{side}_iris5"
+    out = debug_dir / f"ict_{label}_textured.obj"
+    tex_path = export_textured_mesh(out, v_ict, f_ict, uvs, uv_faces, tex)
+    png_path = debug_dir / f"ict_{label}_texture.png"
+    png_zoom_path = debug_dir / f"ict_{label}_texture_zoom.png"
+    cv2.imwrite(str(png_path), tex)
+    cv2.imwrite(str(png_zoom_path), tex_zoom)
+    u_rng = lmk_uv[:, 0].min(), lmk_uv[:, 0].max()
+    v_rng = lmk_uv[:, 1].min(), lmk_uv[:, 1].max()
+    print(
+        f"  {label_prefix} [{side}] iris×5: {png_path.name} + {png_zoom_path.name}  "
+        f"faces={fi_chart.size}  uv_u=[{u_rng[0]:.3f},{u_rng[1]:.3f}] "
+        f"uv_v=[{v_rng[0]:.3f},{v_rng[1]:.3f}]"
+    )
+    return {
+        "side": side,
+        "obj": out,
+        "texture": png_path,
+        "texture_zoom": png_zoom_path,
+        "mp_indices": mp_ids,
+        "landmark_uv": lmk_uv,
+        "n_chart_faces": int(fi_chart.size),
+    }
+
+
 def export_eyeball_iris5_texture(
     debug_dir,
     v_ict,
@@ -529,66 +615,57 @@ def export_eyeball_iris5_texture(
     size=2048,
 ):
     """
-    Eyeball texture map QA: **only** MP iris 468–472 (L) or 473–477 (R) on ``triangle_uv_local``.
-
-    Background = ``M_Sclera*`` ∩ eyeball tris (same as bake / EyeTextureGaussians chart).
+    Eyeball texture map QA: MP iris 468–472 (L) or 473–477 (R) on ``M_Sclera*`` ∩ eyeball.
     """
-    debug_dir = Path(debug_dir)
-    side = str(side).lower()
-    if side not in ("left", "right"):
-        raise ValueError(f"side must be left|right, got {side!r}")
-    mp_order = np.array(LEFT_IRIS_MP if side == "left" else RIGHT_IRIS_MP, dtype=np.int64)
-    if "triangle_uv_local" not in ict_npy_dict:
-        raise ValueError("ict_npy_dict missing triangle_uv_local — re-run ict_facekit_to_npy_full_head.py")
-
-    tuv = np.asarray(ict_npy_dict["triangle_uv_local"], dtype=np.float64)
     fi_eye = eyeball_sclera_face_indices(ict_npy_dict, side, f_ict, len(v_ict))
-    if fi_eye.size == 0:
-        print(f"  WARNING: no sclera∩eyeball faces for {side} eye — skip iris texture")
-        return None
-
-    base = bake_triangle_uv_local_chart(tuv, fi_eye, size, fill_bgr=(35, 40, 48))
-    mp_all, lmk_uv_all = ict_mediapipe_landmark_uv(
-        embedding, f_ict, uv_faces, uvs, ict_npy_dict=ict_npy_dict
+    return _export_iris5_texture_on_chart(
+        debug_dir,
+        v_ict,
+        f_ict,
+        uvs,
+        uv_faces,
+        embedding,
+        ict_npy_dict,
+        side,
+        chart_face_indices=fi_eye,
+        label_prefix="eyeball",
+        fill_bgr=(35, 40, 48),
+        size=size,
     )
-    mp_all = np.asarray(mp_all, dtype=np.int64)
-    rows = []
-    for mp in mp_order:
-        hit = np.where(mp_all == mp)[0]
-        if hit.size == 0:
-            print(f"  WARNING: missing iris MP {mp} in embedding for {side} eye")
-            continue
-        rows.append(int(hit[0]))
-    if len(rows) != 5:
-        print(f"  WARNING: {side} eye iris: expected 5 landmarks, got {len(rows)}")
-    mp_ids = mp_all[rows]
-    lmk_uv = lmk_uv_all[rows]
-    tex = bake_iris_pentagon_texture(lmk_uv, mp_order[: len(rows)], size, base)
-    tex_zoom = bake_iris_pentagon_texture_zoomed(lmk_uv, mp_order[: len(rows)], size, base)
 
-    label = f"eyeball_{side}_iris5"
-    out = debug_dir / f"ict_{label}_textured.obj"
-    tex_path = export_textured_mesh(out, v_ict, f_ict, uvs, uv_faces, tex)
-    png_path = debug_dir / f"ict_{label}_texture.png"
-    png_zoom_path = debug_dir / f"ict_{label}_texture_zoom.png"
-    cv2.imwrite(str(png_path), tex)
-    cv2.imwrite(str(png_zoom_path), tex_zoom)
-    u_rng = lmk_uv[:, 0].min(), lmk_uv[:, 0].max()
-    v_rng = lmk_uv[:, 1].min(), lmk_uv[:, 1].max()
-    print(
-        f"  eyeball [{side}] iris×5: {png_path.name} + {png_zoom_path.name}  "
-        f"faces={fi_eye.size}  uv_u=[{u_rng[0]:.3f},{u_rng[1]:.3f}] "
-        f"uv_v=[{v_rng[0]:.3f},{v_rng[1]:.3f}]"
+
+def export_eye_occlusion_iris5_texture(
+    debug_dir,
+    v_ict,
+    f_ict,
+    uvs,
+    uv_faces,
+    embedding,
+    ict_npy_dict,
+    side,
+    *,
+    size=2048,
+):
+    """
+    Eye-occlusion texture map QA: MP iris 468–472 (L) or 473–477 (R) on ``M_EyeOcclusion``.
+
+    Matches ``iris_ray_occlusion`` bake (center-normal ray hits).
+    """
+    fi_occ = eye_occlusion_side_face_indices(ict_npy_dict, side, f_ict)
+    return _export_iris5_texture_on_chart(
+        debug_dir,
+        v_ict,
+        f_ict,
+        uvs,
+        uv_faces,
+        embedding,
+        ict_npy_dict,
+        side,
+        chart_face_indices=fi_occ,
+        label_prefix="eye_occlusion",
+        fill_bgr=(28, 52, 64),
+        size=size,
     )
-    return {
-        "side": side,
-        "obj": out,
-        "texture": png_path,
-        "texture_zoom": png_zoom_path,
-        "mp_indices": mp_ids,
-        "landmark_uv": lmk_uv,
-        "n_eyeball_faces": int(fi_eye.size),
-    }
 
 
 def export_flame_mediapipe_texture(
@@ -681,15 +758,16 @@ def export_ict_mediapipe_per_texture_map(
     size=2048,
 ):
     """
-    Per texture-map QA: ``M_Face`` + eyeball iris×5 (``triangle_uv_local`` on sclera∩eyeball).
+    Per ``usemtl`` texture-map QA: all materials in npy ``material_names`` (FaceKit OBJ catalog).
+
+    Plus per-eye iris×5 pentagon on sclera or ``M_EyeOcclusion`` depending on bake mode.
     """
     debug_dir = Path(debug_dir) / "texture_maps"
     debug_dir.mkdir(parents=True, exist_ok=True)
     charts = {}
+    iris_on_occ = embedding_iris_on_eye_occlusion(embedding, ict_npy_dict)
 
-    for mat in VIZ_PER_CHART_MATERIALS:
-        if mat not in material_names_from_npy(ict_npy_dict):
-            continue
+    for mat in all_viz_texture_chart_materials(ict_npy_dict):
         lmk_mask = landmark_mask_on_faces(embedding, face_indices_for_material(ict_npy_dict, mat))
         out = export_ict_mediapipe_texture_chart(
             debug_dir,
@@ -710,8 +788,10 @@ def export_ict_mediapipe_per_texture_map(
                 f"({out['n_landmarks']} landmarks)"
             )
 
+    iris_exporter = export_eye_occlusion_iris5_texture if iris_on_occ else export_eyeball_iris5_texture
+    iris_key = "eye_occlusion" if iris_on_occ else "eyeball"
     for side in ("left", "right"):
-        iris_out = export_eyeball_iris5_texture(
+        iris_out = iris_exporter(
             debug_dir,
             v_ict,
             f_ict,
@@ -723,8 +803,7 @@ def export_ict_mediapipe_per_texture_map(
             size=size,
         )
         if iris_out is not None:
-            key = f"eyeball_{side}_iris5"
-            charts[key] = iris_out
+            charts[f"{iris_key}_{side}_iris5"] = iris_out
     return charts
 
 
@@ -892,17 +971,24 @@ def export_landmark_texture_comparison(
     result["flame_texture"] = flame_tex_path
     result["comparison_png"] = compare_path
 
-    iris_l = per_chart.get("eyeball_left_iris5")
-    iris_r = per_chart.get("eyeball_right_iris5")
-    if iris_l is not None and iris_r is not None:
-        sl = cv2.imread(str(iris_l["texture"]))
-        sr = cv2.imread(str(iris_r["texture"]))
-        eye_panel = write_comparison_panel(
+    if per_chart.get("eye_occlusion_left_iris5") and per_chart.get("eye_occlusion_right_iris5"):
+        sl = cv2.imread(str(per_chart["eye_occlusion_left_iris5"]["texture"]))
+        sr = cv2.imread(str(per_chart["eye_occlusion_right_iris5"]["texture"]))
+        result["eye_occlusion_iris_comparison_png"] = write_comparison_panel(
+            debug_dir / "mediapipe_eye_occlusion_iris5_left_vs_right.png",
+            sl,
+            sr,
+            left_title="M_EyeOcclusion L — iris MP 468-472",
+            right_title="M_EyeOcclusion R — iris MP 473-477",
+        )
+    if per_chart.get("eyeball_left_iris5") and per_chart.get("eyeball_right_iris5"):
+        sl = cv2.imread(str(per_chart["eyeball_left_iris5"]["texture"]))
+        sr = cv2.imread(str(per_chart["eyeball_right_iris5"]["texture"]))
+        result["eyeball_iris_comparison_png"] = write_comparison_panel(
             debug_dir / "mediapipe_eyeball_iris5_left_vs_right.png",
             sl,
             sr,
             left_title="eyeball L — iris MP 468-472",
             right_title="eyeball R — iris MP 473-477",
         )
-        result["eyeball_iris_comparison_png"] = eye_panel
     return result

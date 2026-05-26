@@ -238,7 +238,11 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
 
             print(translation)
 
-            ict_mesh = ict_facekit(expression_weights=mp_blendshape[ict_facekit.mediapipe_to_ict][None])
+            ict_mesh = ict_facekit(
+                expression_weights=ict_facekit.mp_blendshapes_to_expression_weights(
+                    mp_blendshape[None]
+                )
+            )
 
             ict_mesh = torch.einsum('bvd, bdj -> bvj', ict_mesh, rotation_matrix)  + translation
 

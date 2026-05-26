@@ -23,11 +23,14 @@ def test_train_step_no_nan():
     from model.gaussian_avatar import GaussianAvatar
     from gaussian_splatting.renderer import GaussianRenderer
     from utils.camera import FixedCamera
-    from utils.so3 import rotation_6d_to_matrix
+    from utils.mesh_ops import rotation_6d_to_matrix
     from dataset.mediapipe_cache import default_frame_dict
 
-    ict = ICTFaceKitTorch(npy_dir=str(cfg.ict_npy), canonical=str(cfg.ict_canonical))
-    tracker = TrackerCorrectionMLP()
+    ict = ICTFaceKitTorch(npy_dir=str(cfg.ict_npy))
+    tracker = TrackerCorrectionMLP(
+        mediapipe_to_ict=ict.mediapipe_to_ict,
+        num_ict_expression=ict.num_expression,
+    )
     deformer = ICTDeformer(ict)
     avatar = GaussianAvatar.from_ict(ict, n_face_gaussians=32, n_eye_per_side=8)
     renderer = GaussianRenderer(cfg, image_size=64)
@@ -43,6 +46,7 @@ def test_train_step_no_nan():
     corr = tracker(batch["mp_blendshape"])
     verts = deformer(
         mp_coeffs_corr=corr["coeffs"],
+        expression_weights=corr["ict_expression_weights"],
         pose_rotation_6d=corr["pose_residual"],
         pose_translation=corr["translation_residual"],
     )

@@ -12,6 +12,14 @@ EXPR_WEIGHT_BY_PART_ID = {
     6: 0.0,   # teeth — no Gaussians, no deformer
     7: 1.0,   # eyeball L
     8: 1.0,   # eyeball R
+    9: 0.0,   # lacrimal — kept in npy, ignored by deformer
+    10: 0.0,  # eye blend
+    11: 0.0,
+    12: 0.0,
+    13: 1.0,  # eye occlusion L — ICT blendshapes + surface Gaussians
+    14: 1.0,  # eye occlusion R
+    15: 0.0,  # eyelashes
+    16: 0.0,
 }
 
 # L2 penalty weight on template / expression deltas (not a forward gate).
@@ -25,6 +33,14 @@ DEFORM_REG_BY_PART_ID = {
     6: 2.0,   # teeth (masked in forward; unused)
     7: 0.02,  # eyeball — light reg, field moves with lids
     8: 0.02,
+    9: 2.0,
+    10: 2.0,
+    11: 2.0,
+    12: 2.0,
+    13: 0.05,  # eye occlusion — allow lid motion
+    14: 0.05,
+    15: 2.0,
+    16: 2.0,
 }
 
 
@@ -50,8 +66,19 @@ def build_expr_region_weight(ict_facekit) -> torch.Tensor:
         w[ict_facekit.skin_face_indices] = 1.0
     if hasattr(ict_facekit, "mouth_interior_vertex_indices"):
         w[ict_facekit.mouth_interior_vertex_indices] = 1.0
-    if hasattr(ict_facekit, "teeth_indices"):
-        w[ict_facekit.teeth_indices] = 0.0
+    for key in (
+        "lacrimal_indices",
+        "eye_blend_indices",
+        "eyelashes_left_indices",
+        "eyelashes_right_indices",
+    ):
+        ids = getattr(ict_facekit, key, None)
+        if ids is not None and len(ids) > 0:
+            w[ids] = 0.0
+    for key in ("left_eye_occlusion_indices", "right_eye_occlusion_indices"):
+        ids = getattr(ict_facekit, key, None)
+        if ids is not None and len(ids) > 0:
+            w[ids] = 1.0
     return w
 
 
@@ -69,20 +96,18 @@ def build_deform_reg_weight(ict_facekit) -> torch.Tensor:
         w[ict_facekit.eye_socket_right_indices] = 1.0
     if hasattr(ict_facekit, "eyeball_indices"):
         w[ict_facekit.eyeball_indices] = 0.02
-    if hasattr(ict_facekit, "teeth_indices"):
-        w[ict_facekit.teeth_indices] = 2.0
+    for key in (
+        "lacrimal_indices",
+        "eye_blend_indices",
+        "eyelashes_left_indices",
+        "eyelashes_right_indices",
+        "teeth_indices",
+    ):
+        ids = getattr(ict_facekit, key, None)
+        if ids is not None and len(ids) > 0:
+            w[ids] = DEFORM_REG_BY_PART_ID.get(6, 2.0)
+    for key in ("left_eye_occlusion_indices", "right_eye_occlusion_indices"):
+        ids = getattr(ict_facekit, key, None)
+        if ids is not None and len(ids) > 0:
+            w[ids] = 0.05
     return w
-
-
-def build_teeth_mask(ict_facekit) -> torch.Tensor:
-    """[V] bool — teeth vertices excluded from template/expression forward."""
-    n_verts = ict_facekit.neutral_mesh.shape[1]
-    m = torch.zeros(n_verts, dtype=torch.bool)
-    if hasattr(ict_facekit, "teeth_indices"):
-        m[ict_facekit.teeth_indices] = True
-    else:
-        parts = ict_facekit.vertex_parts
-        for i, pid in enumerate(parts):
-            if int(pid) == 6:
-                m[i] = True
-    return m

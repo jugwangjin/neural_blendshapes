@@ -55,3 +55,33 @@ def closest_points_on_triangles(points, tri_v0, tri_v1, tri_v2):
     closest = a * w[..., 0:1] + b * w[..., 1:2] + c * w[..., 2:3]
     dist_sq = ((p - closest) ** 2).sum(dim=-1)
     return closest, w, dist_sq
+
+
+def rotation_matrix_to_6d(R):
+    """3×3 rotation → 6D (Zhou), inverse of ``rotation_6d_to_matrix`` (columns b1, b2)."""
+    return torch.cat([R[..., 0], R[..., 1]], dim=-1)
+
+
+def rotation_6d_to_matrix(r6):
+    """r6: [..., 6] -> [..., 3, 3] (Zhou et al.)."""
+    a1 = r6[..., 0:3]
+    a2 = r6[..., 3:6]
+    b1 = torch.nn.functional.normalize(a1, dim=-1)
+    b2 = a2 - (b1 * a2).sum(dim=-1, keepdim=True) * b1
+    b2 = torch.nn.functional.normalize(b2, dim=-1)
+    b3 = torch.cross(b1, b2, dim=-1)
+    return torch.stack([b1, b2, b3], dim=-1)
+
+
+def apply_rigid(verts, R, t, scale=None):
+    if scale is not None:
+        if scale.ndim == 0:
+            verts = verts * scale
+        else:
+            verts = verts * scale.view(-1, 1, 1)
+    return verts @ R.transpose(-1, -2) + t[:, None, :]
+
+
+def apply_rigid_about_centroid(verts, R, t):
+    c = verts.mean(dim=1, keepdim=True)
+    return (verts - c) @ R.transpose(-1, -2) + c + t[:, None, :]

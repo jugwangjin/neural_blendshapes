@@ -1,17 +1,17 @@
 """
-ICT mesh-embedded Gaussians: surface (face_idx+bary) + sclera eye UV + optional accessory.
+ICT mesh-embedded Gaussians: surface (face_idx+bary) incl. sparse sclera + eye occlusion.
 
-Holds ``ict`` (and optional ``deformer``) so ``tracker_out`` maps directly to posed mesh + gaze.
+Full-head npy: 12 ``usemtl`` texture maps (``material_names``), 17 geometry charts.
+Surface layout samples skin/sockets + ``M_Sclera*`` + ``M_EyeOcclusion``; lacrimal /
+iris / lashes / eye-blend / teeth tris are excluded from Gaussians but remain in npy.
+Gaussian ``uv`` uses ``triangle_uv_local`` (per-map 0–1) when present.
 """
 
 import torch
 import torch.nn as nn
 
-from model.accessory_gaussians import AccessoryGaussians
-from model.eye_texture_gaussians import EyeTextureGaussians
 from utils.barycentric import sample_normals, sample_surface
 from utils.sampling import build_surface_gaussian_layout
-from utils.texture_spaces import TextureSpaceMeshes
 
 
 def anchor_mask_from_triangles(face_idx, faces, anchor_vertex_ids):
@@ -23,30 +23,8 @@ def anchor_mask_from_triangles(face_idx, faces, anchor_vertex_ids):
     return v_mask[tri].any(dim=-1)
 
 
-def _random_tangent_basis(n, device):
-    a = torch.randn(n, 3, device=device)
-    a = a / a.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-    b = torch.randn(n, 3, device=device)
-    b = b - (b * a).sum(-1, keepdim=True) * a
-    b = b / b.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-    return torch.stack([a, b], dim=-1)
-
-
-def init_accessory_anchors(n, neutral_verts, device):
-    center = neutral_verts.mean(dim=0)
-    extent = neutral_verts.max(dim=0).values - neutral_verts.min(dim=0).values
-    spread = extent.max() * 0.12
-    anchor = center.unsqueeze(0) + torch.randn(n, 3, device=device) * spread
-    basis = _random_tangent_basis(n, device)
-    return anchor, basis
-
-
 class GaussianAvatar(nn.Module):
-    """
-    Single avatar module: surface Gaussians on ICT triangles + eye texture Gaussians.
-
-    ``surface`` property aliases ``self`` for training helpers that expect ``avatar.surface.h``.
-    """
+    """Surface Gaussians on ICT triangles (skin, sockets, sclera, eye occlusion)."""
 
     def __init__(
         self,
@@ -55,8 +33,8 @@ class GaussianAvatar(nn.Module):
         bary,
         *,
         uv=None,
-        eyes: EyeTextureGaussians = None,
-        accessory: AccessoryGaussians = None,
+        is_gum=None,
+        is_h_pin=None,
         deformer=None,
         sh_dim=3,
         n_semantic_classes=7,
@@ -64,11 +42,8 @@ class GaussianAvatar(nn.Module):
         super().__init__()
         self.ict = ict
         self.deformer = deformer
-        self.eyes = eyes
-        self.accessory = accessory
         self.sh_dim = sh_dim
         self.n_semantic_classes = n_semantic_classes
-
         n = face_idx.shape[0]
         self.register_buffer("face_idx", face_idx.long())
         self.register_buffer("bary", bary.float())
@@ -76,6 +51,13 @@ class GaussianAvatar(nn.Module):
             self.register_buffer("uv", uv.float())
         else:
             self.register_buffer("uv", torch.zeros(0, 2))
+
+        if is_gum is None:
+            is_gum = torch.zeros(n, dtype=torch.bool)
+        if is_h_pin is None:
+            is_h_pin = torch.zeros(n, dtype=torch.bool)
+        self.register_buffer("is_gum", is_gum.bool())
+        self.register_buffer("is_h_pin", is_h_pin.bool())
 
         self.sem_logits = None
         self.register_buffer("sem_prob_fixed", None)
@@ -88,10 +70,10 @@ class GaussianAvatar(nn.Module):
         self.log_scale = nn.Parameter(torch.zeros(n, 3))
         self.rotation = nn.Parameter(torch.zeros(n, 4))
         self.rotation.data[:, 0] = 1.0
-        self.opacity = nn.Parameter(torch.zeros(n, 1))
+        opacity_init = float(torch.logit(torch.tensor(0.75)))
+        self.opacity = nn.Parameter(torch.full((n, 1), opacity_init))
         self.color = nn.Parameter(torch.zeros(n, sh_dim))
 
-        self.texture_meshes = None
         self.register_buffer(
             "anchor_vertex_ids",
             torch.tensor(list(ict.face_indices), dtype=torch.long),
@@ -115,28 +97,23 @@ class GaussianAvatar(nn.Module):
         k_mouth_socket=1,
         k_mouth_interior=1,
         k_eye_socket=1,
+        k_eyeball_sclera=4,
+        k_eye_occlusion=4,
         k_per_face=None,
-        n_eye_per_side=2048,
-        n_accessory_gaussians=0,
         sh_dim=3,
-        gaze_uv_range=0.12,
-        learn_gaze_refine=True,
         n_semantic_classes=7,
-        eye_uv_sample_mode="hemisphere",
-        eye_sclera_min_front_dot=0.0,
-        eye_sclera_hemisphere_only=True,
+        gum_h_sigma_scale=4.0,
         gaussian_scale_knn_k=4,
         gaussian_scale_knn_factor=1.0,
-        gum_h_sigma_scale=4.0,
-        accessory_anchor_xyz=None,
-        accessory_tangent_basis=None,
+        **_,
     ):
         device = ict.neutral_mesh.device
         if k_per_face is not None:
             k_face = k_head = k_per_face
             k_mouth_socket = k_mouth_interior = k_eye_socket = max(1, k_per_face // 4)
+            k_eyeball_sclera = k_eye_occlusion = max(1, k_per_face // 2)
 
-        face_idx, bary, _, uv, is_gum = build_surface_gaussian_layout(
+        face_idx, bary, _, uv, is_gum, is_h_pin = build_surface_gaussian_layout(
             ict,
             ict.faces,
             k_face=k_face,
@@ -144,60 +121,35 @@ class GaussianAvatar(nn.Module):
             k_mouth_socket=k_mouth_socket,
             k_mouth_interior=k_mouth_interior,
             k_eye_socket=k_eye_socket,
+            k_eyeball_sclera=k_eyeball_sclera,
+            k_eye_occlusion=k_eye_occlusion,
             device=device,
         )
-
-        mirror_right_u = bool(getattr(ict, "eye_uv_mirror_right_u", False))
-        eyes = EyeTextureGaussians(
-            n_per_eye=n_eye_per_side,
-            sh_dim=sh_dim,
-            gaze_uv_range=gaze_uv_range,
-            learn_gaze_refine=learn_gaze_refine,
-            n_semantic_classes=n_semantic_classes,
-            mirror_right_u=mirror_right_u,
-            ict=ict,
-            uv_sample_mode=eye_uv_sample_mode,
-            sclera_min_front_dot=eye_sclera_min_front_dot,
-            sclera_hemisphere_only=eye_sclera_hemisphere_only,
-        )
-
-        accessory = None
-        if n_accessory_gaussians > 0:
-            verts = ict.neutral_mesh[0]
-            if accessory_anchor_xyz is None:
-                accessory_anchor_xyz, accessory_tangent_basis = init_accessory_anchors(
-                    n_accessory_gaussians, verts, device
-                )
-            accessory = AccessoryGaussians(
-                n_accessory_gaussians,
-                accessory_anchor_xyz,
-                accessory_tangent_basis,
-                sh_dim=sh_dim,
-                n_semantic_classes=n_semantic_classes,
-            )
 
         model = cls(
             ict,
             face_idx,
             bary,
             uv=uv,
-            eyes=eyes,
-            accessory=accessory,
+            is_gum=is_gum,
+            is_h_pin=is_h_pin,
             deformer=deformer,
             sh_dim=sh_dim,
             n_semantic_classes=n_semantic_classes,
         )
         h_scale = torch.ones(face_idx.shape[0], dtype=torch.float32, device=device)
         h_scale[is_gum] = float(gum_h_sigma_scale)
+        h_scale[is_h_pin] = 0.0
         model.register_buffer("h_sigma_scale", h_scale)
-        model.register_buffer("is_gum", is_gum)
 
-        model.texture_meshes = TextureSpaceMeshes.from_ict(ict)
         model._init_surface_semantics()
         model._init_knn_scales(
             k=gaussian_scale_knn_k,
             scale_factor=gaussian_scale_knn_factor,
         )
+        if ict.has_texture_maps():
+            tid = ict.face_texture_map_id[model.face_idx].long()
+            model.register_buffer("face_texture_map_id", tid)
         return model
 
     def _init_knn_scales(self, k=3, scale_factor=1.0):
@@ -211,12 +163,6 @@ class GaussianAvatar(nn.Module):
             h_sigma_scale=getattr(self, "h_sigma_scale", None),
         )
         init_module_log_scale(self, xyz, k=k, scale_factor=scale_factor)
-
-        if self.eyes is not None:
-            self.eyes.init_log_scale_from_mesh(self.ict, k=k, scale_factor=scale_factor)
-
-        if self.accessory is not None and self.accessory.n_gaussians > 0:
-            init_module_log_scale(self.accessory, self.accessory.anchor_xyz, k=k, scale_factor=scale_factor)
 
     def _init_surface_semantics(self):
         from rendering.gaussian_semantics import init_face_gaussian_semantics
@@ -244,7 +190,10 @@ class GaussianAvatar(nn.Module):
         vn = sample_normals(
             self._vertex_normals(verts, faces), faces, self.face_idx, self.bary
         )
-        xyz = xyz_base + self.h * vn
+        h_eff = self.h
+        if getattr(self, "h_sigma_scale", None) is not None:
+            h_eff = self.h * self.h_sigma_scale.unsqueeze(-1)
+        xyz = xyz_base + h_eff * vn
         scale = torch.exp(self.log_scale).clamp(max=0.05)
         opacity = torch.sigmoid(self.opacity)
         out = {
@@ -258,6 +207,7 @@ class GaussianAvatar(nn.Module):
             "bary": self.bary,
             "normals": vn,
             "group": "surface",
+            "is_h_pin": self.is_h_pin,
         }
         if self.sem_prob_fixed is not None:
             out["sem_prob"] = self.sem_prob_fixed
@@ -278,16 +228,9 @@ class GaussianAvatar(nn.Module):
         apply_expression_deform=False,
         use_pose_scale=False,
         pose_weight_fixed=None,
-        rotate_about_centroid=True,
+        rotate_about_centroid=False,
         pose_zero_tz=False,
-        gaze_uv_left=None,
-        gaze_uv_right=None,
     ):
-        """
-        Primary path: ``avatar(tracker_out=corr, apply_expression_deform=...)`` with ``deformer`` set.
-
-        Legacy path: ``avatar(verts, faces, gaze_uv_left=..., gaze_uv_right=...)``.
-        """
         verts_posed = None
         deformed = None
         if tracker_out is not None:
@@ -297,6 +240,7 @@ class GaussianAvatar(nn.Module):
             pose_scale = tracker_out.get("pose_scale") if use_pose_scale else None
             deformed = self.deformer(
                 mp_coeffs_corr=tracker_out["coeffs"],
+                expression_weights=tracker_out.get("ict_expression_weights"),
                 pose_rotation_6d=tracker_out["pose_residual"],
                 pose_translation=tracker_out["translation_residual"],
                 pose_scale=pose_scale,
@@ -309,101 +253,40 @@ class GaussianAvatar(nn.Module):
             )
             verts_posed = deformed["verts_posed"]
             verts = verts_posed[0]
-            gaze_uv_left = tracker_out["gaze_uv_left"]
-            gaze_uv_right = tracker_out["gaze_uv_right"]
 
         if verts is None:
             raise ValueError("forward requires tracker_out or verts")
         faces = self.ict.faces if faces is None else faces
 
-        device = verts.device
-        dtype = torch.float32
-        if gaze_uv_left is not None:
-            gaze_uv_left = torch.as_tensor(gaze_uv_left, device=device, dtype=dtype)
-        if gaze_uv_right is not None:
-            gaze_uv_right = torch.as_tensor(gaze_uv_right, device=device, dtype=dtype)
-
         surface_out = self._forward_surface(verts, faces)
 
         if self.anchor_vertex_ids.numel() > 0:
-            surface_out["is_anchor_surface"] = anchor_mask_from_triangles(
+            is_anchor = anchor_mask_from_triangles(
                 surface_out["face_idx"], faces, self.anchor_vertex_ids
             )
         else:
-            surface_out["is_anchor_surface"] = torch.ones(
-                surface_out["xyz"].shape[0], dtype=torch.bool, device=device
+            is_anchor = torch.ones(
+                surface_out["xyz"].shape[0], dtype=torch.bool, device=verts.device
             )
-
-        tm = self.texture_meshes
-        eye_out = self.eyes(
-            tm.left_eye,
-            tm.right_eye,
-            verts,
-            faces,
-            gaze_uv_left=gaze_uv_left,
-            gaze_uv_right=gaze_uv_right,
-        )
-
-        parts = [surface_out, eye_out]
-        if self.accessory is not None and self.accessory.n_gaussians > 0:
-            acc_out = self.accessory()
-            parts.append(acc_out)
-
-        xyz = torch.cat([p["xyz"] for p in parts], dim=0)
-        is_anchor = torch.cat(
-            [
-                surface_out["is_anchor_surface"],
-                eye_out["is_eyeball_surface"],
-            ]
-            + (
-                [torch.zeros(acc_out["xyz"].shape[0], dtype=torch.bool, device=xyz.device)]
-                if self.accessory is not None and self.accessory.n_gaussians > 0
-                else []
-            ),
-            dim=0,
-        )
 
         out = {
             "surface": surface_out,
             "face": surface_out,
-            "eyes": eye_out,
-            "texture_meshes": tm,
-            "xyz": xyz,
-            "scale": torch.cat([p["scale"] for p in parts], dim=0),
-            "rotation": torch.cat([p["rotation"] for p in parts], dim=0),
-            "opacity": torch.cat([p["opacity"] for p in parts], dim=0),
-            "color": torch.cat([p["color"] for p in parts], dim=0),
-            "h": torch.cat([p["h"] for p in parts], dim=0),
+            "xyz": surface_out["xyz"],
+            "scale": surface_out["scale"],
+            "rotation": surface_out["rotation"],
+            "opacity": surface_out["opacity"],
+            "color": surface_out["color"],
+            "h": surface_out["h"],
             "is_anchor_surface": is_anchor,
-            "is_eyeball_surface": torch.cat(
-                [
-                    torch.zeros(surface_out["xyz"].shape[0], dtype=torch.bool, device=xyz.device),
-                    eye_out["is_eyeball_surface"],
-                ]
-                + (
-                    [torch.zeros(acc_out["xyz"].shape[0], dtype=torch.bool, device=xyz.device)]
-                    if self.accessory is not None and self.accessory.n_gaussians > 0
-                    else []
-                ),
-                dim=0,
-            ),
-            "iris_control_xyz": eye_out["iris_control_xyz"],
-            "gaze_uv_left": eye_out["gaze_offset_left"],
-            "gaze_uv_right": eye_out["gaze_offset_right"],
+            "is_eyeball_surface": surface_out["is_h_pin"],
+            "iris_control_xyz": None,
         }
         if verts_posed is not None:
             out["verts_posed"] = verts_posed
             out["mesh_xyz"] = verts_posed
             if deformed is not None and "expr_delta" in deformed:
                 out["expr_delta"] = deformed["expr_delta"]
-
         if surface_out.get("sem_prob") is not None:
-            sem_parts = [surface_out["sem_prob"], eye_out["sem_prob"]]
-            if self.accessory is not None and self.accessory.n_gaussians > 0:
-                sem_parts.append(acc_out["sem_prob"])
-            out["sem_prob"] = torch.cat(sem_parts, dim=0)
-
-        if self.accessory is not None and self.accessory.n_gaussians > 0:
-            out["accessory"] = acc_out
-
+            out["sem_prob"] = surface_out["sem_prob"]
         return out

@@ -6,7 +6,8 @@
 |--------|---------|----------|
 | **Multi-PIE inner** | protocol `17..67` (51 pts) | FLAME static embedding pairing, NICP inner L1, npy `jawOpen`+`s,R,T` |
 | **Multi-PIE jawline** | protocol `0..16` (17 pts) | NICP / npy jaw KNN to FLAME mesh (no FLAME jaw embedding) |
-| **MediaPipe 478** | baked bary on ICT | Train-time 2D reprojection (`ict_mediapipe_landmark_embedding_*.npz`) |
+| **MediaPipe 478** | baked bary on ICT | Train 2D `w_mp_lmk` (face/eyes/iris; **no jaw contour**) |
+| **PIE jawline 2D** | FA 68 pts 0..16 | Train `w_pie68_jaw` on ICT jaw verts (`pie68_jaw_train_loss.md`) |
 
 MediaPipe face routing (`landmark_routing.py`) has no dedicated jaw **contour**; jaw blendshape names map to interior verts, not the PIE chin arc. Jaw shape during NICP/alignment is anchored by **PIE jawline KNN**.
 

@@ -1,25 +1,44 @@
 """
-Training schedule (bootstrap pose → mesh → expression → GS → view appearance).
+Training schedule (bootstrap pose → coarse mesh → detail → view appearance).
 
-  Stage 0 bootstrap — Landmark pose only: R+t about mesh centroid, scale=1, w(x)=1;
-             no expression deform / template / GS train.
+Loss stack on stages 1–3: RGB, silhouette, mp_lmk, pie68_jaw, gamma, GT image-space h,
+geometry, opacity, pose/template regs. Stage 0 bootstrap: landmarks only (no RGB/silhouette —
+silhouette needs template deformation). No ``w_seg`` / semantic render / expression-gap losses.
 
-  Stage 1 — Tracker + template MLP + pose weight; Gaussian color/opacity + small ``h``;
-             eye ``gaze_refine`` + tracker gaze (base UV fixed); ``w_h`` + template reg.
+  Stage 0 — Landmark pose only (R+t+global scale; mp_lmk + pie68_jaw).
 
-  Stage 2A — Tracker/template frozen; learn support-gated expression residual + ``h`` detail.
+  Stage 1 — Tracker + template + pose weight + surface GS (small geometry LR).
 
-  Stage 2B — All mesh frozen; view-independent Gaussian geometry + appearance.
+  Stage 2 — Expression residual + surface GS detail (mesh/tracker frozen).
 
-  Stage 3 — Everything frozen; view-dependent appearance only.
-
-Global pose policy (all stages unless ``apply_pose_scale=True``):
-  - Uniform ``pose_scale`` is not applied to the mesh (fixed at 1).
-  - Residual rotation + translation are learned together; rigid motion uses centroid pivot.
+  Stage 3 — View-independent GS geometry/appearance, then view-only color/opacity.
 """
 
 from dataclasses import dataclass
 from typing import Optional
+
+
+# Shared supervision for stages 0_bootstrap_pose … 3_view_appearance (no separate smoke stage).
+BASIC_LOSS = dict(
+    w_rgb=1.0,
+    w_silhouette=10.0,
+    w_mp_lmk=50.0,
+    w_pie68_jaw=25.0,
+    w_h=0.25,
+    w_geometry=0.01,
+    w_opacity=0.03,
+    w_gamma_prior=0.5,
+    w_pose_prior=0.01,
+    w_template_smooth=0.05,
+    w_seg=0.0,
+    w_sem_anchor=0.0,
+    w_expr_neutral=0.0,
+    w_expr_leak=0.0,
+    w_expr_amp=0.0,
+)
+
+# Bootstrap: pose from 2D/3D landmarks only (no template / GS appearance yet).
+BOOTSTRAP_LOSS = {**BASIC_LOSS, "w_rgb": 0.0, "w_silhouette": 0.0, "w_h": 0.0, "w_geometry": 0.0, "w_opacity": 0.0}
 
 
 @dataclass
@@ -32,37 +51,47 @@ class StageSpec:
     train_gamma: bool = False
     fix_gamma_at_one: bool = False
     train_pose_residual: bool = False
-    train_pose_scale: bool = False
-    apply_pose_scale: bool = False
-    pose_rotate_about_centroid: bool = True
+    train_pose_scale: bool = True
+    apply_pose_scale: bool = True
+    pose_rotate_about_centroid: bool = False
     pose_weight_one: bool = False
     pose_zero_tz: bool = False
     train_pose_weight: bool = False
     train_template_deformer: bool = False
     train_expression_deform: bool = False
-    train_eye_gaze: bool = False
 
     train_gaussian_appearance: bool = False
     train_gaussian_geometry: bool = False
     train_gaussian_semantic: bool = False
-    train_accessory: bool = False
     geometry_lr_scale: float = 1.0
     sh_degree: Optional[int] = None
 
     w_rgb: float = 0.0
     w_mp_lmk: float = 0.0
-    w_iris: float = 0.0
+    w_pie68_jaw: float = 0.0
     w_silhouette: float = 10.0
     w_mask: float = 0.0  # alias → w_silhouette in train_losses if w_silhouette unset
     w_seg: float = 0.0
     w_h: float = 0.0
-    w_eye_uv_barrier: float = 0.0
-    w_scale: float = 0.0
+    w_geometry: float = 0.0
     w_opacity: float = 0.0
     w_gamma_prior: float = 0.0
+    h_skin_sigma: float = 0.002
+    h_sigma_brow: float = 0.004
+    h_sigma_misc: float = 0.010
+    h_sigma_mouth: float = 0.008
+    h_w_skin: float = 1.0
+    h_w_eye: float = 1.0
+    h_w_brow: float = 0.45
+    h_w_misc: float = 0.12
+    h_w_mouth: float = 0.28
+    h_alpha_min: float = 0.08
+    geometry_max_scale: float = 0.05
+    opacity_target: float = 1.0
+    opacity_w_skin: float = 1.0
+    opacity_w_other: float = 0.05
     w_pose_prior: float = 0.0
     w_pose_tz: float = 0.0
-    w_gaze_residual: float = 0.0
     w_expr_deform_reg: float = 0.0
     w_expr_neutral: float = 0.0
     w_expr_leak: float = 0.0
@@ -78,9 +107,6 @@ class StageSpec:
     lr_gaussian_color: float = 1e-2
     lr_gaussian_opacity: float = 5e-3
     lr_gaussian_scale: float = 1e-3
-    lr_eye_uv: float = 1e-3
-    lr_accessory: float = 1e-3
-    lr_eye_gaze: float = 1e-3
 
 
 STAGE_SCHEDULE: list[StageSpec] = [
@@ -91,128 +117,71 @@ STAGE_SCHEDULE: list[StageSpec] = [
     ),
     StageSpec(
         name="0_bootstrap_pose",
-        steps=4000,
+        steps=3000,
         description=(
-            "Landmark pose only: full rigid (w=1), R+t about mesh centroid, scale fixed; "
+            "Landmark pose only: R+t+global scale (world origin), tz free; "
             "no expression deform / template / GS training."
         ),
         fix_gamma_at_one=True,
         train_pose_residual=True,
         pose_weight_one=True,
-        pose_rotate_about_centroid=True,
-        pose_zero_tz=True,
-        apply_pose_scale=False,
-        w_mp_lmk=200.0,
-        w_iris=30.0,
-        w_silhouette=5.0,
-        w_rgb=0.0,
-        w_pose_prior=0.05,
-        w_pose_tz=2.0,
+        pose_zero_tz=False,
         lr_tracker=2e-4,
+        **BOOTSTRAP_LOSS,
     ),
     StageSpec(
         name="1_coarse_mesh",
-        steps=15000,
+        steps=10000,
         description=(
-            "Tracker + template + pose weight; eye gaze refine; RGB + silhouette; "
-            "small h (distance prior pulls mesh via deformer)."
+            "Tracker + template + pose weight; surface RGB/silhouette/lmk; "
+            "optional global scale; GT image-space h (no sem render)."
         ),
         train_tracker=True,
         train_gamma=True,
         train_pose_residual=True,
+        train_pose_scale=True,
+        apply_pose_scale=True,
         train_pose_weight=True,
+        pose_zero_tz=False,
         train_template_deformer=True,
-        train_eye_gaze=True,
         train_gaussian_appearance=True,
         train_gaussian_geometry=True,
-        geometry_lr_scale=0.08,
+        geometry_lr_scale=0.1,
         sh_degree=None,
-        w_mp_lmk=100.0,
-        w_iris=50.0,
-        w_silhouette=10.0,
-        w_seg=2.0,
-        w_rgb=0.35,
-        w_h=0.6,
-        w_gamma_prior=5.0,
-        w_pose_prior=1.0,
-        w_gaze_residual=0.1,
-        w_template_smooth=0.15,
-        lr_gaussian_h=8e-5,
-        lr_eye_uv=8e-5,
-        lr_eye_gaze=1e-3,
+        lr_tracker=1e-4,
+        lr_template=1.5e-4,
+        lr_gaussian_h=2.5e-4,
+        **BASIC_LOSS,
     ),
     StageSpec(
-        name="2A_expression",
-        steps=8000,
+        name="2_expression_detail",
+        steps=10000,
         description=(
-            "Tracker/template frozen; expression residual + h detail; "
-            "blendshape gap; eye slide on."
+            "Tracker/template frozen; region-gated expression residual + surface GS h/scale/color/opacity."
         ),
         train_expression_deform=True,
-        train_eye_gaze=True,
         train_gaussian_appearance=True,
         train_gaussian_geometry=True,
-        train_gaussian_semantic=True,
         geometry_lr_scale=0.15,
         sh_degree=None,
-        w_rgb=0.85,
-        w_silhouette=5.0,
-        w_seg=2.0,
-        w_sem_anchor=0.1,
-        w_mp_lmk=35.0,
-        w_iris=25.0,
-        w_h=0.45,
-        w_expr_neutral=0.5,
-        w_expr_leak=0.2,
-        w_expr_amp=0.1,
-        w_gaze_residual=0.05,
-        w_scale=0.006,
-        w_opacity=0.006,
-        lr_expr_deform=5e-5,
-        lr_gaussian_h=6e-5,
-        lr_eye_gaze=5e-4,
-    ),
-    StageSpec(
-        name="2B_geometry_detail",
-        steps=30000,
-        description=(
-            "Mesh stack frozen; view-independent Gaussian h/scale/color/opacity; "
-            "accessory optional."
-        ),
-        train_gaussian_appearance=True,
-        train_gaussian_geometry=True,
-        train_accessory=True,
-        geometry_lr_scale=1.0,
-        sh_degree=None,
-        w_rgb=1.0,
-        w_silhouette=5.0,
-        w_seg=1.5,
-        w_mp_lmk=12.0,
-        w_iris=12.0,
-        w_h=0.55,
-        w_scale=0.01,
-        w_opacity=0.01,
-        w_eye_uv_barrier=0.001,
-        lr_gaussian_h=4e-4,
+        lr_expr_deform=1.5e-4,
+        lr_gaussian_h=2.0e-4,
         lr_gaussian_color=8e-3,
         lr_gaussian_opacity=4e-3,
+        **BASIC_LOSS,
     ),
     StageSpec(
         name="3_view_appearance",
-        steps=8000,
+        steps=5000,
         description=(
-            "All geometry/mesh frozen; view-dependent appearance "
-            "(set sh_degree>0 when color channels support SH)."
+            "All geometry/mesh frozen; color/opacity only "
+            "(set sh_degree>0 when renderer supports SH)."
         ),
         train_gaussian_appearance=True,
         sh_degree=None,
-        w_rgb=1.0,
-        w_seg=1.0,
-        w_mp_lmk=4.0,
-        w_iris=4.0,
-        w_silhouette=3.0,
         lr_gaussian_color=4e-3,
         lr_gaussian_opacity=2e-3,
+        **BASIC_LOSS,
     ),
 ]
 
@@ -233,14 +202,4 @@ def stage_at_global_step(global_step, schedule=None):
         t += spec.steps
     i = len(schedule) - 1
     spec = schedule[-1]
-    return i, spec, max(0, global_step - t)
-
-
-def iter_stages(schedule=None):
-    schedule = schedule or STAGE_SCHEDULE
-    offset = 0
-    for i, spec in enumerate(schedule):
-        if spec.steps <= 0:
-            continue
-        yield i, spec, offset, offset + spec.steps
-        offset += spec.steps
+    return i, spec, max(0, global_step 

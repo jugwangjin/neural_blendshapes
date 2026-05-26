@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 from config import Config
 from model.ict_model import ICTFaceKitTorch
 from utils.camera import FixedCamera
-from utils.default_camera import save_default_camera
+from utils.camera import save_default_camera
 
 
 def main():

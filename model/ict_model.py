@@ -8,6 +8,20 @@ import pytorch3d.ops as pt3o
 import open3d as o3d
 
 
+def _torch_pose_from_npy_dict(model_dict):
+    """ICT→FLAME map: rigid ``flame_alignment_*`` if baked, else coarse ``flame_similarity_s/T`` + R=I."""
+    if "flame_alignment_R" in model_dict:
+        s = float(model_dict["flame_alignment_s"])
+        R = np.asarray(model_dict["flame_alignment_R"], dtype=np.float32).reshape(3, 3)
+        T = np.asarray(model_dict["flame_alignment_T"], dtype=np.float32).reshape(3)
+        rigid = True
+    else:
+        s = float(model_dict.get("flame_similarity_s", 1.0))
+        R = np.eye(3, dtype=np.float32)
+        T = np.asarray(model_dict.get("flame_similarity_T", np.zeros(3, dtype=np.float32)), dtype=np.float32)
+        rigid = False
+    return s, R, T, rigid
+
 
 class ICTFaceKitTorch(torch.nn.Module):
     def __init__(
@@ -17,10 +31,19 @@ class ICTFaceKitTorch(torch.nn.Module):
         mediapipe_name_to_ict='./assets/mediapipe_name_to_indices.pkl',
     ):
         super().__init__()
-        self.load_mediapipe_idx(mediapipe_name_to_ict)
+        if canonical is not None:
+            import warnings
+
+            warnings.warn(
+                "ICTFaceKitTorch(canonical=...) is ignored. "
+                "``canonical`` mesh uses flame_alignment / flame_similarity from "
+                "ict_facekit_torch.npy (same as ict_facekit_to_npy_full_head.py).",
+                stacklevel=2,
+            )
         model_dict = np.load(npy_dir, allow_pickle=True).item()
         self.num_expression = model_dict['num_expression']
         self.num_identity = model_dict['num_identity']
+        self.load_mediapipe_idx(mediapipe_name_to_ict)
 
         neutral_mesh = model_dict['neutral_mesh']
         uv_neutral_mesh = model_dict['uv_neutral_mesh']
@@ -65,26 +88,18 @@ class ICTFaceKitTorch(torch.nn.Module):
             'right_eyeball_indices',
             'left_iris_indices',
             'right_iris_indices',
-            'face_texture_map_id',
-            'face_material_name',
-            'material_names',
-            'primary_texture_materials',
-            'face_geometry_chart_id',
-            'face_part_id',
-            'face_uv_tile_u',
-            'face_uv_tile_v',
-            'texture_map_tile',
-            'n_texture_maps',
-            'geometry_chart_part',
-            'n_geometry_charts',
-            'triangle_uv_atlas',
-            'triangle_uv_local',
-            'eye_uv_mirror_right_u',
-            'uv_tile_index_v',
-            'uv_tile_index_vt',
+            'lacrimal_indices',
+            'eye_blend_indices',
+            'left_eye_occlusion_indices',
+            'right_eye_occlusion_indices',
+            'eyelashes_left_indices',
+            'eyelashes_right_indices',
+            'auxiliary_part_indices',
         ):
             if key in model_dict:
                 setattr(self, key, model_dict[key])
+
+        self._register_texture_map_assets(model_dict)
 
         vertex_parts = model_dict['vertex_parts']
 
@@ -158,52 +173,104 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.register_buffer('expression', torch.zeros(1, self.num_expression))
         self.expression[0, jaw_index] = float(model_dict.get('flame_similarity_ict_jaw_open', 0.75))
         
-        if canonical is not None:
-            pose = np.load(canonical, allow_pickle=True).item()
-            s = pose['s'].cpu().reshape(-1)[0]
-            R = pose['R'].cpu()
-            T = pose['T'].cpu().reshape(1, 3)
-        else:
-            s = torch.tensor(1.0, dtype=torch.float32)
-            R = torch.eye(3, dtype=torch.float32)
-            T = torch.zeros(1, 3, dtype=torch.float32)
-        self.register_buffer('s', torch.tensor([float(s)], dtype=torch.float32))
-        self.register_buffer('R', R.reshape(1, 3, 3) if R.dim() == 2 else R)
-        self.register_buffer('T', T.reshape(1, 3) if T.dim() == 1 else T)
+        flame_s, flame_R, flame_T, self.use_flame_rigid = _torch_pose_from_npy_dict(model_dict)
+        self.register_buffer("flame_s", torch.tensor([flame_s], dtype=torch.float32))
+        self.register_buffer("flame_R", torch.tensor(flame_R, dtype=torch.float32).reshape(1, 3, 3))
+        self.register_buffer("flame_T", torch.tensor(flame_T, dtype=torch.float32).reshape(1, 3))
 
-        self.register_buffer(
-            'flame_similarity_s',
-            torch.tensor(model_dict.get('flame_similarity_s', 1.0), dtype=torch.float32).reshape(1),
+        # Reference mesh: jawOpen + ``flame_alignment_s,R,T`` (or coarse ``flame_similarity_s,T``)
+        # from ``ict_facekit_to_npy_full_head.py`` — same space as bake / metrical NICP.
+        canonical = self.forward(
+            expression_weights=self.expression,
+            identity_weights=self.identity,
+            apply_flame_similarity=True,
+            apply_eyeball_rotation=False,
         )
-        self.register_buffer(
-            'flame_similarity_T',
-            torch.tensor(
-                model_dict.get('flame_similarity_T', np.zeros(3, dtype=np.float32)),
+        # Template / deformer reference: jawOpen + rigid FLAME map only (never NICP verts).
+        self.register_buffer("canonical", canonical)
+        self.register_buffer("neutral_mesh_canonical", canonical.clone().detach())
+        nicp_mesh = model_dict.get("nicp_canonical_mesh")
+        if nicp_mesh is not None:
+            nicp_t = torch.tensor(
+                np.asarray(nicp_mesh, dtype=np.float32),
                 dtype=torch.float32,
-            ).reshape(1, 3),
-        )
-        if 'flame_alignment_R' in model_dict:
-            self.register_buffer(
-                'flame_alignment_s',
-                torch.tensor(model_dict['flame_alignment_s'], dtype=torch.float32).reshape(1),
-            )
-            self.register_buffer(
-                'flame_alignment_R',
-                torch.tensor(model_dict['flame_alignment_R'], dtype=torch.float32).reshape(1, 3, 3),
-            )
-            self.register_buffer(
-                'flame_alignment_T',
-                torch.tensor(model_dict['flame_alignment_T'], dtype=torch.float32).reshape(1, 3),
-            )
-            self.use_flame_alignment = True
+            ).unsqueeze(0)
+            self.register_buffer("nicp_bake_mesh", nicp_t)
+            self.has_nicp_bake_mesh = True
         else:
-            self.use_flame_alignment = False
-        self.use_flame_similarity = True
+            self.has_nicp_bake_mesh = False
 
-        # Jaw-open ICT + FLAME alignment (+ optional legacy ``to_canonical_space`` when ``canonical`` npy passed).
-        canonical = self.forward(expression_weights=self.expression, identity_weights=self.identity, to_canonical=True)
-        self.register_buffer('canonical', canonical)
-        self.register_buffer('neutral_mesh_canonical', canonical.clone().detach())
+    def _register_texture_map_assets(self, model_dict):
+        """``usemtl`` index arrays from ``ict_facekit_to_npy_full_head.py`` (K texture maps)."""
+        import warnings
+
+        for key in ("material_names", "primary_texture_materials"):
+            if key in model_dict:
+                setattr(self, key, list(model_dict[key]))
+
+        if "face_material_name" in model_dict:
+            setattr(self, "face_material_name", model_dict["face_material_name"])
+
+        for key in ("n_texture_maps", "n_geometry_charts", "eye_uv_mirror_right_u"):
+            if key in model_dict:
+                setattr(self, key, int(model_dict[key]))
+
+        if "geometry_chart_part" in model_dict:
+            setattr(self, "geometry_chart_part", model_dict["geometry_chart_part"])
+
+        long_keys = ("face_texture_map_id", "face_geometry_chart_id", "face_part_id")
+        float_keys = (
+            "triangle_uv_atlas",
+            "triangle_uv_local",
+            "face_uv_tile_u",
+            "face_uv_tile_v",
+            "texture_map_tile",
+            "uv_tile_index_v",
+            "uv_tile_index_vt",
+        )
+        for key in long_keys:
+            if key in model_dict:
+                self.register_buffer(key, torch.tensor(model_dict[key], dtype=torch.long))
+        for key in float_keys:
+            if key in model_dict:
+                self.register_buffer(key, torch.tensor(model_dict[key], dtype=torch.float32))
+
+        if not hasattr(self, "face_material_name"):
+            warnings.warn(
+                "ict_facekit_torch.npy missing face_material_name — rebuild with "
+                "ict_facekit_to_npy_full_head.py (generic_neutral_mesh.obj usemtl)",
+                stacklevel=2,
+            )
+        elif self.vertex_count >= 26718:
+            k = int(getattr(self, "n_texture_maps", 0))
+            if k != 12:
+                warnings.warn(
+                    f"full_head asset: expected n_texture_maps=12 (FaceKit OBJ), got {k}",
+                    stacklevel=2,
+                )
+
+    def has_texture_maps(self):
+        return hasattr(self, "face_texture_map_id") and hasattr(self, "material_names")
+
+    def texture_material_names(self):
+        from utils.ict_texture_maps import all_texture_materials
+
+        return list(all_texture_materials(self))
+
+    def faces_for_material(self, material_name):
+        from utils.ict_texture_maps import face_indices_for_material
+
+        return face_indices_for_material(self, material_name)
+
+    def chart_uv_from_bary(self, face_idx, bary):
+        from utils.ict_texture_maps import bary_to_texture_chart_uv
+
+        return bary_to_texture_chart_uv(face_idx, bary, self)
+
+    def build_material_uv_mesh(self, material_name, device=None):
+        from utils.ict_texture_maps import build_material_uv_mesh
+
+        return build_material_uv_mesh(self, material_name, device=device)
 
     def update_eyeball_centers(self, template_mesh):
         self.register_buffer(
@@ -214,64 +281,45 @@ class ICTFaceKitTorch(torch.nn.Module):
             'right_eyeball_center',
             torch.mean(template_mesh[None, self.right_eyeball_idx], dim=1).clone().detach(),
         )
-        
 
-    def to_canonical_space(self, mesh):
-        """
-        Transform the deformed mesh to canonical space.
-
-        Args:
-            mesh: Tensor of shape (B, num_vertices, 3) representing the deformed mesh.
-
-        Returns:
-            mesh: Tensor of shape (B, num_vertices, 3) representing the mesh in canonical space.
-        """
-        mesh = self.s * (torch.einsum('bvd, bmd -> bvm', mesh, self.R)) + self.T
-        return mesh
+    @property
+    def use_flame_alignment(self):
+        """Alias: npy baked rigid map (``flame_alignment_R`` present)."""
+        return self.use_flame_rigid
 
     def apply_flame_similarity(self, mesh):
-        """Map deformed ICT mesh to FLAME space (``flame_alignment_s,R,T`` if baked, else coarse ``s,T``)."""
-        if not self.use_flame_similarity:
-            return mesh
-        if getattr(self, 'use_flame_alignment', False):
-            return (
-                self.flame_alignment_s * torch.matmul(mesh, self.flame_alignment_R)
-                + self.flame_alignment_T
-            )
-        return self.flame_similarity_s * mesh + self.flame_similarity_T
+        """Map deformed ICT mesh to FLAME space: ``flame_s * (mesh @ flame_R) + flame_T`` (R=I if coarse bake)."""
+        if self.use_flame_rigid:
+            return self.flame_s * torch.matmul(mesh, self.flame_R) + self.flame_T
+        return self.flame_s * mesh + self.flame_T
 
     def transform_displacement(self, delta):
-        """Apply the linear part of the FLAME map to per-vertex displacements ``[..., V, 3]``."""
-        if not self.use_flame_similarity:
-            return delta
-        if getattr(self, 'use_flame_alignment', False):
-            return self.flame_alignment_s * torch.matmul(delta, self.flame_alignment_R)
-        return self.flame_similarity_s * delta
+        """Linear part of the FLAME map on per-vertex displacements ``[..., V, 3]``."""
+        if self.use_flame_rigid:
+            return self.flame_s * torch.matmul(delta, self.flame_R)
+        return self.flame_s * delta
 
     def alignment_info(self):
-        """Human-readable alignment state (npy mesh is always raw ICT; transform applied at runtime)."""
+        """Human-readable alignment state (npy mesh is always raw ICT; transforms applied at runtime)."""
         jaw = float(self.expression[0, self.jaw_index].item())
         info = {
             "neutral_mesh_prealigned": False,
-            "use_flame_alignment": bool(getattr(self, "use_flame_alignment", False)),
-            "use_flame_similarity": bool(self.use_flame_similarity),
+            "use_flame_rigid": bool(self.use_flame_rigid),
+            "use_flame_alignment": bool(self.use_flame_rigid),
+            "has_nicp_bake_mesh": bool(self.has_nicp_bake_mesh),
             "flame_similarity_ict_jaw_open": jaw,
+            "flame_s": float(self.flame_s.item()),
+            "flame_T": self.flame_T.reshape(-1).tolist(),
         }
-        if getattr(self, "use_flame_alignment", False):
-            info["flame_alignment_s"] = float(self.flame_alignment_s.item())
-            info["flame_alignment_T"] = self.flame_alignment_T.reshape(-1).tolist()
-        else:
-            info["flame_similarity_s"] = float(self.flame_similarity_s.item())
-            info["flame_similarity_T"] = self.flame_similarity_T.reshape(-1).tolist()
-        info["legacy_canonical_s"] = float(self.s.item())
-        info["legacy_canonical_T"] = self.T.reshape(-1).tolist()
+        if self.use_flame_rigid:
+            info["flame_R"] = self.flame_R.reshape(3, 3).tolist()
         return info
 
     def forward(
         self,
         expression_weights=None,
         identity_weights=None,
-        to_canonical=True,
+        to_canonical=False,
         apply_eyeball_rotation=False,
         apply_flame_similarity=True,
     ):
@@ -281,7 +329,8 @@ class ICTFaceKitTorch(torch.nn.Module):
         Args:
             expression_weights: Tensor of shape (B, num_expression) representing the expression weights.
             identity_weights: Tensor of shape (B, num_identity) representing the identity weights.
-            to_canonical: Boolean indicating whether to transform the deformed mesh to canonical space.
+            to_canonical: Deprecated, no-op (kept for API compat). Use ``apply_flame_similarity``.
+            apply_flame_similarity: Apply npy ``flame_alignment_*`` / ``flame_similarity_*`` (FLAME space).
 
         Returns:
             deformed_mesh: Tensor of shape (B, num_vertices, 3) representing the deformed mesh.
@@ -305,8 +354,6 @@ class ICTFaceKitTorch(torch.nn.Module):
             deformed_mesh = self.apply_flame_similarity(deformed_mesh)
 
         if not apply_eyeball_rotation:
-            if to_canonical:
-                return self.to_canonical_space(deformed_mesh)
             return deformed_mesh
 
         left_eyeball_rotation = torch.zeros(bsize, 3).to(expression_weights.device)
@@ -328,9 +375,6 @@ class ICTFaceKitTorch(torch.nn.Module):
         right_eyeball = deformed_mesh[:, ri] - self.right_eyeball_center
         right_eyeball_rotated = torch.einsum('bvd, bmd -> bvm', right_eyeball, right_eyeball_matrix)
         deformed_mesh[:, ri] = deformed_mesh[:, ri] + right_eyeball_rotated - right_eyeball
-
-        if to_canonical:
-            deformed_mesh = self.to_canonical_space(deformed_mesh)
 
         return deformed_mesh
     
@@ -443,7 +487,7 @@ class ICTFaceKitTorch(torch.nn.Module):
         Sample Multi-PIE 68 landmarks on ``mesh`` (B,V,3) or (V,3).
 
         ``region``: ``all`` | ``inner`` (FLAME-pairable [17:]) | ``jawline`` ([0:17]).
-        Training supervision uses baked MediaPipe bary embedding, not these vertex picks.
+        Train: MP bary (inner face) + PIE jawline verts 0:16 via ``w_pie68_jaw`` (FA detections).
         """
         idx = self.landmark_indices
         if region == 'inner':
@@ -457,27 +501,22 @@ class ICTFaceKitTorch(torch.nn.Module):
         return mesh[:, idx]
 
     def load_mediapipe_idx(self, mediapipe_name_to_ict):
+        from utils.mediapipe_blendshapes import load_mediapipe_mapping
 
-        with open(mediapipe_name_to_ict, 'rb') as f:
-            mediapipe_indices = pickle.load(f)
-            self.mediapipe_indices = mediapipe_indices
+        mp_map = load_mediapipe_mapping(
+            mediapipe_name_to_ict, num_expression=self.num_expression
+        )
+        self.mediapipe_indices = mp_map.name_to_idx
+        self.register_buffer("mediapipe_to_ict", mp_map.mediapipe_to_ict)
 
-            self.mediapipe_to_ict = np.array([mediapipe_indices['browDownLeft'], mediapipe_indices['browDownRight'], mediapipe_indices['browInnerUp'], mediapipe_indices['browInnerUp'], 
-                                    mediapipe_indices['browOuterUpLeft'], mediapipe_indices['browOuterUpRight'], mediapipe_indices['cheekPuff'], mediapipe_indices['cheekPuff'], 
-                                    mediapipe_indices['cheekSquintLeft'], mediapipe_indices['cheekSquintRight'], mediapipe_indices['eyeBlinkLeft'], mediapipe_indices['eyeBlinkRight'], 
-                                    mediapipe_indices['eyeLookDownLeft'], mediapipe_indices['eyeLookDownRight'], mediapipe_indices['eyeLookInLeft'], mediapipe_indices['eyeLookInRight'], 
-                                    mediapipe_indices['eyeLookOutLeft'], mediapipe_indices['eyeLookOutRight'], mediapipe_indices['eyeLookUpLeft'], mediapipe_indices['eyeLookUpRight'], 
-                                    mediapipe_indices['eyeSquintLeft'], mediapipe_indices['eyeSquintRight'], mediapipe_indices['eyeWideLeft'], mediapipe_indices['eyeWideRight'], 
-                                    mediapipe_indices['jawForward'], mediapipe_indices['jawLeft'], mediapipe_indices['jawOpen'], mediapipe_indices['jawRight'], 
-                                    mediapipe_indices['mouthClose'], mediapipe_indices['mouthDimpleLeft'], mediapipe_indices['mouthDimpleRight'], mediapipe_indices['mouthFrownLeft'], 
-                                    mediapipe_indices['mouthFrownRight'], mediapipe_indices['mouthFunnel'], mediapipe_indices['mouthLeft'], mediapipe_indices['mouthLowerDownLeft'], 
-                                    mediapipe_indices['mouthLowerDownRight'], mediapipe_indices['mouthPressLeft'], mediapipe_indices['mouthPressRight'], mediapipe_indices['mouthPucker'], 
-                                    mediapipe_indices['mouthRight'], mediapipe_indices['mouthRollLower'], mediapipe_indices['mouthRollUpper'], mediapipe_indices['mouthShrugLower'], 
-                                    mediapipe_indices['mouthShrugUpper'], mediapipe_indices['mouthSmileLeft'], mediapipe_indices['mouthSmileRight'], mediapipe_indices['mouthStretchLeft'], 
-                                    mediapipe_indices['mouthStretchRight'], mediapipe_indices['mouthUpperUpLeft'], mediapipe_indices['mouthUpperUpRight'], mediapipe_indices['noseSneerLeft'], 
-                                    mediapipe_indices['noseSneerRight'],]).astype(np.int32)        
-            
-            
+    def mp_blendshapes_to_expression_weights(self, mp_coeffs):
+        """[B, 52] MP cache → [B, 53] via ``mp[:, mediapipe_to_ict]``."""
+        from utils.mediapipe_blendshapes import mp_to_ict_expression_weights
+
+        return mp_to_ict_expression_weights(
+            mp_coeffs, self.mediapipe_to_ict, self.num_expression
+        )
+
     def debug_indices(self):
         # debug
         import open3d as o3d

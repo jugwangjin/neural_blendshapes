@@ -12,13 +12,18 @@
 #
 # For commercial licensing contact, please contact ps-license@tuebingen.mpg.de
 
+from pathlib import Path
+
 import torch
 import imageio
 import numpy as np
 import cv2
 import skimage
+from tqdm import tqdm
 
 import mediapipe as mp
+
+from utils.mediapipe_blendshapes import MP_EYE_BLINK_L, MP_EYE_BLINK_R, MP_EYE_WIDE_L, MP_EYE_WIDE_R
 
 def parse_mediapipe_output(face_landmarker_result):
     if len(face_landmarker_result.face_landmarks) == 0:
@@ -168,4 +173,163 @@ def srgb_to_rgb(f: torch.Tensor) -> torch.Tensor:
     out = torch.cat((_srgb_to_rgb(f[..., 0:3]), f[..., 3:4]), dim=-1) if f.shape[-1] == 4 else _srgb_to_rgb(f)
     assert out.shape[0] == f.shape[0] and out.shape[1] == f.shape[1] and out.shape[2] == f.shape[2]
     return out
+
+
+# -----------------------------------------------------------------------------
+# FLARE layout paths
+# -----------------------------------------------------------------------------
+
+def list_split_images(subject_root: Path, split: str):
+    """Sorted ``.png`` under ``subject_root / split / image``."""
+    img_dir = Path(subject_root) / split / "image"
+    if not img_dir.is_dir():
+        return []
+    return sorted(img_dir.glob("*.png"))
+
+
+def paths_for_image(img_path: Path):
+    """``.../split/image/<stem>.png`` → mask / semantic siblings."""
+    img_path = Path(img_path)
+    split_root = img_path.parent.parent
+    stem = img_path.stem
+    return {
+        "image": img_path,
+        "mask": split_root / "mask" / f"{stem}.png",
+        "semantic": split_root / "semantic" / f"{stem}.png",
+        "semantic_color": split_root / "semantic_color" / f"{stem}.png",
+    }
+
+
+# -----------------------------------------------------------------------------
+# Blendshape mode + AU/pose sampling weights
+# -----------------------------------------------------------------------------
+
+def matrix_to_pose_feat(T: torch.Tensor) -> torch.Tensor:
+    """4×4 MP facial transform → [6 rot6d | 3 translation] (11-D)."""
+    from utils.mesh_ops import rotation_matrix_to_6d
+
+    R = T[:3, :3].float()
+    t = T[:3, 3].float()
+    scale = R.norm(dim=0).mean().clamp(min=1e-8)
+    R = R / scale
+    r6 = rotation_matrix_to_6d(R)
+    return torch.cat([r6, t], dim=0)
+
+
+def compute_bshapes_mode(blendshapes_stack: np.ndarray, percentile: float = 10.0) -> torch.Tensor:
+    """Per-AU percentile (FLARE: 10th) — resting face; eyeBlink low ≈ eyes open."""
+    percentiles = [
+        float(np.percentile(blendshapes_stack[:, au], percentile))
+        for au in range(blendshapes_stack.shape[1])
+    ]
+    return torch.tensor(percentiles, dtype=torch.float32)
+
+
+def compute_distribution_weights(
+    blendshapes: np.ndarray,
+    pose_feats: np.ndarray,
+    bshapes_mode: torch.Tensor = None,
+    *,
+    coeffs_are_calibrated: bool = False,
+    var_eps: float = 5e-2,
+    low_weight: float = 0.05,
+    high_cap: float = 1.0,
+) -> np.ndarray:
+    """Near mean → low weight; AU+pose outliers → high (FLARE importance-style)."""
+    if coeffs_are_calibrated:
+        feat = np.concatenate([blendshapes, pose_feats], axis=1).astype(np.float64)
+    else:
+        bs = blendshapes - bshapes_mode.cpu().numpy()[None, :]
+        feat = np.concatenate([bs, pose_feats], axis=1).astype(np.float64)
+    mean = feat.mean(axis=0, keepdims=True)
+    var = feat.var(axis=0, keepdims=True) + var_eps
+    score = np.sum((feat - mean) ** 2 / var, axis=1)
+    score = score / (np.amax(score) / 2.0 + 1e-8)
+    return np.clip(score, low_weight, high_cap).astype(np.float32)
+
+
+def compute_eye_au_calibration(
+    blendshapes_stack: np.ndarray,
+    bshapes_mode: torch.Tensor,
+    *,
+    blink_lo_percentile: float = 10.0,  # 눈을 뜬 상태 (작은 눈 베이스라인 커버)
+    blink_hi_percentile: float = 98.0,  # 눈을 완전히 감은 상태 (Blink 피크)
+    min_range: float = 0.4,             # 블링크 변화량의 최소 보장폭
+):
+    """
+    Eye Blink 캘리브레이션: 하위 백분위수를 0으로, 상위 백분위수를 1.0으로 스케일링.
+    eyeWide: 일반 FAU로 처리되므로 (raw - mode).clamp(0,1) 사용.
+    """
+    lo_list = []
+    hi_list = []
+    for j in (MP_EYE_BLINK_L, MP_EYE_BLINK_R):
+        col = blendshapes_stack[:, j]
+        lo_v = float(np.percentile(col, blink_lo_percentile))
+        hi_v = float(np.percentile(col, blink_hi_percentile))
+        span = hi_v - lo_v
+        if span < min_range:
+            hi_v = lo_v + min_range
+        lo_list.append(lo_v)
+        hi_list.append(hi_v)
+    return {
+        "blink_idx": [MP_EYE_BLINK_L, MP_EYE_BLINK_R],
+        "blink_lo": torch.tensor(lo_list, dtype=torch.float32),
+        "blink_hi": torch.tensor(hi_list, dtype=torch.float32),
+    }
+
+
+def _calibrate_eye_channel(raw_v: float, lo: float, hi: float) -> float:
+    return float(np.clip((raw_v - lo) / (hi - lo + 1e-6), 0.0, 1.0))
+
+
+def apply_mp_blendshape_calibration(
+    raw: torch.Tensor,
+    bshapes_mode: torch.Tensor,
+    eye_cal: dict,
+) -> torch.Tensor:
+    """
+    Default: ``(raw - mode).clamp(0,1)``; **eyeBlink** only gets median→0.9 range remap.
+    """
+    mode = bshapes_mode.to(device=raw.device, dtype=raw.dtype)
+    out = (raw - mode).clamp(0.0, 1.0)
+    if eye_cal is None or "blink_idx" not in eye_cal:
+        return out
+    for j, lo, hi in zip(eye_cal["blink_idx"], eye_cal["blink_lo"], eye_cal["blink_hi"]):
+        out[j] = _calibrate_eye_channel(float(raw[j]), float(lo), float(hi))
+    return out
+
+
+def apply_mp_blendshape_calibration_np(raw: np.ndarray, bshapes_mode: torch.Tensor, eye_cal: dict) -> np.ndarray:
+    return apply_mp_blendshape_calibration(
+        torch.tensor(raw, dtype=torch.float32),
+        bshapes_mode,
+        eye_cal,
+    ).numpy()
+
+
+def eye_au_stats_note(
+    blendshapes_stack: np.ndarray,
+    bshapes_mode: torch.Tensor,
+    eye_cal: dict = None,
+):
+    for name, idx in [
+        ("eyeBlink_L", MP_EYE_BLINK_L),
+        ("eyeBlink_R", MP_EYE_BLINK_R),
+        ("eyeWide_L", MP_EYE_WIDE_L),
+        ("eyeWide_R", MP_EYE_WIDE_R),
+    ]:
+        col = blendshapes_stack[:, idx]
+        line = (
+            f"  {name}: raw median={np.median(col):.3f} mode={float(bshapes_mode[idx]):.3f} "
+            f"p90={np.percentile(col, 90):.3f} min={col.min():.3f}"
+        )
+        if eye_cal is not None and "Blink" in name and idx in eye_cal.get("blink_idx", []):
+            k = eye_cal["blink_idx"].index(idx)
+            lo = float(eye_cal["blink_lo"][k])
+            hi = float(eye_cal["blink_hi"][k])
+            cal_med = _calibrate_eye_channel(float(np.median(col)), lo, hi)
+            cal_p90 = _calibrate_eye_channel(float(np.percentile(col, 90)), lo, hi)
+            cal_p98 = _calibrate_eye_channel(float(np.percentile(col, 98)), lo, hi)
+            line += f" | blink cal lo={lo:.3f} hi={hi:.3f} median→{cal_med:.3f} p90→{cal_p90:.3f} p98→{cal_p98:.3f}"
+        print(line)
 

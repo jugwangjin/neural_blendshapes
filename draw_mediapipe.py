@@ -312,7 +312,9 @@ def main(args, device, dataset_train, dataloader_train):
         mesh = ict_canonical_mesh
 
 
-        blendshape = views_subset['mp_blendshape'][..., ict_facekit.mediapipe_to_ict].reshape(-1, 53).detach()
+        blendshape = ict_facekit.mp_blendshapes_to_expression_weights(
+            views_subset["mp_blendshape"].detach()
+        ).reshape(-1, ict_facekit.num_expression)
 
         transform_matrix = views_subset['mp_transform_matrix'].reshape(-1, 4, 4).detach()
         scale = torch.norm(transform_matrix[:, :3, :3], dim=-1).mean(dim=-1, keepdim=True)

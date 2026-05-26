@@ -1,4 +1,4 @@
-"""Fixed camera for 3DGS + MediaPipe projection (no FLARE Camera class)."""
+"""Fixed camera for 3DGS + MediaPipe projection (ICT / training stack)."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,7 +6,75 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from utils.default_camera import DEFAULT_CAMERA_NPZ, load_default_camera
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CAMERA_NPZ = REPO_ROOT / "assets" / "default_camera.npz"
+DEFAULT_CAMERA_TXT = REPO_ROOT / "assets" / "default_camera.txt"
+
+
+def load_default_camera(path=None):
+    path = Path(path or DEFAULT_CAMERA_NPZ)
+    if not path.is_file():
+        return None
+    data = np.load(path, allow_pickle=True)
+    return {key: data[key] for key in data.files}
+
+
+def save_default_camera(
+    R,
+    t,
+    K,
+    path=None,
+    *,
+    train_view_corrected: bool = False,
+    image_size: int | None = None,
+    bbox_scale: float | None = None,
+):
+    path = Path(path or DEFAULT_CAMERA_NPZ)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "K_mean": np.asarray(K, dtype=np.float64),
+        "R_mean": np.asarray(R, dtype=np.float64),
+        "t_mean": np.asarray(t, dtype=np.float64).reshape(3),
+        "train_view_corrected": np.array(bool(train_view_corrected)),
+    }
+    if image_size is not None:
+        payload["image_size"] = np.array(int(image_size))
+    if bbox_scale is not None:
+        payload["bbox_scale"] = np.array(float(bbox_scale))
+    np.savez(str(path), **payload)
+    return path
+
+
+def _train_view_baked(meta: dict | None) -> bool:
+    if meta is None or "train_view_corrected" not in meta:
+        return False
+    return bool(np.asarray(meta["train_view_corrected"]).item())
+
+
+def load_training_camera(verts, *, path, width: int, height: int, device=None):
+    path = Path(path)
+    meta = load_default_camera(path) if path.is_file() else None
+    cam = FixedCamera.from_default_or_mesh(
+        verts,
+        path=path,
+        width=width,
+        height=height,
+        device=device,
+    )
+    if meta is not None and _train_view_baked(meta):
+        return cam
+    pivot = verts.detach().float().reshape(-1, 3).mean(dim=0)
+    return cam.with_view_correction(pivot)
+
+
+def training_camera_status(path) -> str:
+    path = Path(path)
+    if not path.is_file():
+        return f"missing ({path}) — mesh-bounds + runtime view correction"
+    meta = load_default_camera(path)
+    if _train_view_baked(meta):
+        return f"{path} (train view baked in R_mean)"
+    return f"{path} (legacy — runtime view correction applied)"
 
 
 @dataclass
@@ -41,7 +109,7 @@ class FixedCamera:
         if d is None:
             raise FileNotFoundError(
                 f"default camera not found: {path or DEFAULT_CAMERA_NPZ}. "
-                "Use FixedCamera.from_mesh_bounds(verts) or scripts/bake_default_camera.py"
+                "Run processing/compute_camera_for_metrical_crop.py --apply-train-view --write-npz"
             )
         k = d["K_mean"]
         dev = torch.device("cpu") if device is None else torch.device(device)

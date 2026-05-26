@@ -2,13 +2,13 @@
 
 ## Tracker (`model/tracker_mlp.py`)
 
-MediaPipe activation pattern is **preserved**; gamma only scales intensity on active AUs.
+Gamma scales ICT expression intensity after MP→ICT gather.
 
 ```text
 C_raw = clamp(mp_blendshape)
-active = smoothstep(C_raw, 0.02, 0.08).detach()
+I_raw = mp[:, mediapipe_to_ict]   # [B, 53] ICT FaceKit coeffs
 gamma = gamma_min + (gamma_max - gamma_min) * sigmoid(raw_gamma)
-C_eff = active * C_raw ** gamma
+C_eff = I_raw ** gamma
 ```
 
 Defaults: `gamma_min=0.4`, `gamma_max=2.5`. Prior: `mean(log(gamma)^2)`.
@@ -30,7 +30,7 @@ Weak losses only: `expr_neutral`, `expr_leak`, `expr_amp`.
 ## Training order
 
 - Stage 1: expression deformer **off**; tracker + template deformer align coarse geometry
-- Stage 2A/2B: expression deformer **on**; template/tracker mostly frozen
+- Stage 2: expression deformer **on**; template/tracker frozen
 
 ## Data
 

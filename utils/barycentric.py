@@ -23,6 +23,10 @@ def vertices2landmarks(vertices, faces, lmk_face_idx, lmk_bary_coords):
     lmk_bary_coords: [L, 3]
     returns: [B, L, 3]
     """
+    dev = vertices.device
+    faces = faces.to(device=dev)
+    lmk_face_idx = lmk_face_idx.to(device=dev)
+    lmk_bary_coords = lmk_bary_coords.to(device=dev, dtype=vertices.dtype)
     tri = faces[lmk_face_idx]
     lmk_vertices = vertices[:, tri]
     return (lmk_vertices * lmk_bary_coords[None, :, :, None]).sum(dim=2)

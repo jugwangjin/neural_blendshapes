@@ -1,15 +1,14 @@
-"""Unified training losses for MP + UVH + 3DGS stack."""
+"""Training losses — basic test stack + optional extras via weights."""
 
 import torch
 
-from losses.eye_uv_barrier import soft_uv_box_barrier
-from losses.gaussian_regularization import loss_opacity, loss_scale
-from losses.h_regularization import loss_h_anchor_surface, loss_h_semantic
-from losses.segmentation import loss_segmentation_logits, loss_segmentation_soft
-from losses.iris_landmark import loss_iris_landmarks_2d
+from losses.gaussian_regularization import loss_geometry_log_scale, loss_opacity_toward_one
+from losses.h_regularization import loss_h_image_space
 from losses.mediapipe_landmark_478 import loss_mediapipe_landmarks_478
+from losses.pie68_jaw_landmark import loss_pie68_jawline
 from losses.rgb import l1_loss
 from losses.silhouette import loss_silhouette
+from rendering.pack import surface_avatar_out
 
 
 def _get_w(cfg, key, default=0.0):
@@ -19,7 +18,6 @@ def _get_w(cfg, key, default=0.0):
 
 
 def _silhouette_weight(cfg):
-    """``w_silhouette`` primary; ``w_mask`` / ``w_mp_mask`` kept as aliases."""
     w = _get_w(cfg, "w_silhouette", 0.0)
     if w <= 0.0:
         w = _get_w(cfg, "w_mask", 0.0)
@@ -28,195 +26,195 @@ def _silhouette_weight(cfg):
     return w
 
 
+def _image_size(cfg, batch):
+    sz = _get_w(cfg, "image_size", None)
+    if sz is not None:
+        return int(sz)
+    img = batch.get("image")
+    if img is not None and img.ndim >= 3:
+        return int(img.shape[-1])
+    return 512
+
+
+def _align_batch_device(batch, device):
+    dev = torch.device(device)
+    return {k: v.to(dev) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+
+
+def _surface_sem_prob(avatar_out):
+    surf = avatar_out.get("surface")
+    if surf is None:
+        return None
+    return surf.get("sem_prob")
+
+
 def compute_losses(
     cfg,
     batch,
     render,
     avatar_out,
     camera,
-    mp_embedding,
+    mp_lmk_emb,
     ict_faces,
+    pie68_jaw_vertex_idx=None,
     corr=None,
     deformer=None,
     expr_delta=None,
     avatar=None,
+    renderer=None,
 ):
+    ref = avatar_out["xyz"]
+    batch = _align_batch_device(batch, ref.device)
+    image_size = _image_size(cfg, batch)
     losses = {}
 
     if render is not None and "rgb" in render and batch.get("image") is not None:
         losses["rgb"] = l1_loss(render["rgb"], batch["image"])
 
-    if render is not None and "alpha" in render:
-        w_sil = _silhouette_weight(cfg)
-        if batch.get("mask") is None:
-            if w_sil > 0.0:
-                raise ValueError(
-                    "silhouette loss enabled (w_silhouette>0) but batch has no 'mask' — "
-                    "check dataset *_mask.png caches"
-                )
-        else:
-            losses["silhouette"] = loss_silhouette(render["alpha"], batch["mask"])
+    w_sil = _silhouette_weight(cfg)
+    if render is not None and "alpha" in render and batch.get("mask") is not None and w_sil > 0:
+        losses["silhouette"] = loss_silhouette(render["alpha"], batch["mask"])
 
-    if render is not None and (
-        render.get("semantic_prob") is not None or render.get("semantic") is not None
-    ):
-        pred_sem = render.get("semantic_prob", render["semantic"])
-        if batch.get("seg_label") is not None and _get_w(cfg, "w_seg", 0.0) > 0:
-            target = batch["seg_label"]
-            if target.ndim == 4:
-                target = target[0]
-            if target.ndim == 3:
-                target = target[0]
-            losses["seg"] = loss_segmentation_logits(pred_sem, target)
-        elif batch.get("seg_onehot") is not None and _get_w(cfg, "w_seg", 0.0) > 0:
-            target = batch["seg_onehot"]
-            if target.ndim == 3:
-                target = target.unsqueeze(0)
-            losses["seg"] = loss_segmentation_soft(pred_sem, target)
-
-    if batch.get("mp_landmarks_2d") is not None and mp_embedding is not None:
+    if batch.get("mp_landmarks_2d") is not None and mp_lmk_emb is not None and _get_w(cfg, "w_mp_lmk") > 0:
         mesh_xyz = avatar_out.get("mesh_xyz")
         if mesh_xyz is None:
-            raise ValueError("mp_lmk loss requires avatar_out['mesh_xyz'] (ICT deformed vertices)")
+            raise ValueError("mp_lmk loss requires avatar_out['mesh_xyz']")
         losses["mp_lmk"] = loss_mediapipe_landmarks_478(
             mesh_xyz,
             ict_faces,
             batch["mp_landmarks_2d"],
-            mp_embedding,
+            mp_lmk_emb,
             camera,
-            cfg.image_size,
+            image_size,
             mp_valid=batch.get("mp_valid"),
-            mp_ids=mp_embedding.get("_mp_ids"),
-            face_idx=mp_embedding.get("_face_idx"),
-            bary=mp_embedding.get("_bary"),
         )
-
-    iris_xyz = avatar_out.get("iris_control_xyz")
-    if (
-        iris_xyz is not None
-        and iris_xyz.numel() > 0
-        and batch.get("mp_landmarks_2d") is not None
-    ):
-        if iris_xyz.ndim == 3:
-            iris_xyz = iris_xyz[0]
-        mp_uv = batch["mp_landmarks_2d"]
-        if mp_uv.ndim == 3:
-            mp_uv = mp_uv[0]
-        losses["iris"] = loss_iris_landmarks_2d(iris_xyz, mp_uv, camera, cfg.image_size)
-
-    n_face = avatar_out["surface"]["xyz"].shape[0]
-    eyeball_mask = torch.zeros(avatar_out["h"].shape[0], dtype=torch.bool, device=avatar_out["h"].device)
-    eyeball_mask[n_face:] = True
-    if avatar_out.get("sem_prob") is not None and _get_w(cfg, "w_h", 0.0) > 0:
-        h_scale = None
-        if avatar is not None and getattr(avatar, "h_sigma_scale", None) is not None:
-            h_scale = avatar.h_sigma_scale
-        losses["h"] = loss_h_semantic(
-            avatar_out["h"],
-            avatar_out["sem_prob"],
-            class_sigma=getattr(cfg, "h_class_sigma", None),
-            class_weight=getattr(cfg, "h_class_weight", None),
-            h_sigma_scale=h_scale,
-        )
-    else:
-        losses["h"] = loss_h_anchor_surface(
-            avatar_out["h"],
-            avatar_out["is_anchor_surface"],
-            eyeball_mask=eyeball_mask,
-        )
-
-    losses["eye_uv"] = soft_uv_box_barrier(avatar_out["eyes"]["left"]["uv"]) + soft_uv_box_barrier(
-        avatar_out["eyes"]["right"]["uv"]
-    )
-
-    losses["scale"] = loss_scale(avatar_out["scale"])
-    losses["opacity"] = loss_opacity(avatar_out["opacity"])
 
     if (
-        avatar is not None
-        and getattr(avatar, "sem_logits", None) is not None
-        and getattr(avatar, "sem_anchor", None) is not None
-        and _get_w(cfg, "w_sem_anchor", 0.0) > 0
+        pie68_jaw_vertex_idx is not None
+        and batch.get("landmark") is not None
+        and _get_w(cfg, "w_pie68_jaw") > 0
     ):
-        from rendering.gaussian_semantics import loss_semantic_anchor
+        mesh_xyz = avatar_out.get("mesh_xyz")
+        if mesh_xyz is None:
+            raise ValueError("pie68_jaw loss requires avatar_out['mesh_xyz']")
+        losses["pie68_jaw"] = loss_pie68_jawline(
+            mesh_xyz,
+            pie68_jaw_vertex_idx,
+            batch["landmark"],
+            camera,
+            image_size,
+        )
 
-        losses["sem_anchor"] = loss_semantic_anchor(
-            avatar.sem_logits, avatar.sem_anchor, avatar.sem_frozen_dims
+    if (
+        renderer is not None
+        and _get_w(cfg, "w_h") > 0
+        and batch.get("h_reg_skin") is not None
+    ):
+        surf_out = surface_avatar_out(avatar_out)
+        h_render = renderer.render_expected_signal(surf_out, camera, surf_out["h"])
+        losses["h"] = loss_h_image_space(
+            h_render["accum"],
+            h_render["alpha"],
+            batch,
+            cfg,
+            _get_w,
+        )
+
+    sem_prob = _surface_sem_prob(avatar_out)
+
+    if sem_prob is not None and avatar is not None and _get_w(cfg, "w_geometry") > 0:
+        losses["geometry"] = loss_geometry_log_scale(
+            avatar.surface.log_scale,
+            sem_prob,
+            max_scale=_get_w(cfg, "geometry_max_scale", 0.05),
+            skin_only=True,
+        )
+
+    if sem_prob is not None and avatar is not None and _get_w(cfg, "w_opacity") > 0:
+        losses["opacity"] = loss_opacity_toward_one(
+            avatar.surface.opacity,
+            sem_prob,
+            target=_get_w(cfg, "opacity_target", 1.0),
+            w_skin=_get_w(cfg, "opacity_w_skin", 1.0),
+            w_other=_get_w(cfg, "opacity_w_other", 0.05),
         )
 
     if corr is not None and corr.get("gamma") is not None and _get_w(cfg, "w_gamma_prior") > 0:
         losses["gamma_prior"] = torch.log(corr["gamma"].clamp(min=1e-4)).pow(2).mean()
 
     if corr is not None and _get_w(cfg, "w_pose_prior") > 0:
-        pr = corr["pose_residual"]
-        tr = corr["translation_residual"]
-        losses["pose_prior"] = pr.pow(2).mean() + tr.pow(2).mean()
-        if _get_w(cfg, "apply_pose_scale", False) and corr.get("pose_scale") is not None:
-            losses["pose_prior"] = losses["pose_prior"] + (corr["pose_scale"] - 1.0).pow(2).mean()
+        rot_delta = corr.get("pose_rotation_delta", corr["pose_residual"])
+        losses["pose_prior"] = rot_delta.pow(2).mean() + corr["translation_residual"].pow(2).mean()
 
     if corr is not None and _get_w(cfg, "w_pose_tz", 0.0) > 0:
         losses["pose_tz"] = corr["translation_residual"][..., 2].pow(2).mean()
 
-    if corr is not None and _get_w(cfg, "w_gaze_residual", 0.0) > 0:
-        from utils.gaze_uv import gaze_residual_prior_loss
+    if deformer is not None and expr_delta is not None and corr is not None and _get_w(cfg, "w_expr_deform_reg", 0.0) > 0:
+        from losses.deformer_regularization import deformer_regularization_loss
 
-        losses["gaze_residual"] = gaze_residual_prior_loss(corr["gaze_residual_left"]) + gaze_residual_prior_loss(
-            corr["gaze_residual_right"]
-        )
-
-    if deformer is not None and expr_delta is not None and corr is not None:
         c_raw = corr.get("coeffs_raw", corr["coeffs"])
-        reg = deformer.regularization_loss(corr["coeffs"], c_raw, expr_delta=expr_delta)
-        if _get_w(cfg, "w_expr_neutral", 0.0) > 0:
-            losses["expr_neutral"] = reg["expr_neutral"]
-        if _get_w(cfg, "w_expr_leak", 0.0) > 0:
-            losses["expr_leak"] = reg["expr_leak"]
-        if _get_w(cfg, "w_expr_amp", 0.0) > 0:
-            losses["expr_amp"] = reg["expr_amp"]
-        if _get_w(cfg, "w_expr_amp", 0.0) > 0 and "expr_socket" in reg:
-            losses["expr_socket"] = reg["expr_socket"]
-        if _get_w(cfg, "w_expr_deform_reg", 0.0) > 0:
-            losses["expr_deform_reg"] = (
-                reg["expr_neutral"] + reg["expr_leak"] + reg["expr_amp"] + reg["expr_socket"]
-            )
+        reg = deformer_regularization_loss(deformer, corr["coeffs"], c_raw, expr_delta=expr_delta)
+        losses["expr_deform_reg"] = (
+            reg["expr_neutral"] + reg["expr_leak"] + reg["expr_amp"] + reg["expr_socket"]
+        )
 
     w_tpl = _get_w(cfg, "w_template_smooth", _get_w(cfg, "w_identity_smooth", 0.0))
     if deformer is not None and w_tpl > 0:
-        losses["template_smooth"] = deformer.template_regularization_loss()
+        from losses.deformer_regularization import template_smooth_loss
 
-    w_silhouette = _silhouette_weight(cfg)
+        losses["template_smooth"] = template_smooth_loss(deformer)
+
+    if (
+        avatar is not None
+        and getattr(avatar.surface, "sem_logits", None) is not None
+        and _get_w(cfg, "w_sem_anchor", 0.0) > 0
+    ):
+        from rendering.gaussian_semantics import loss_semantic_anchor
+
+        losses["sem_anchor"] = loss_semantic_anchor(
+            avatar.surface.sem_logits, avatar.surface.sem_anchor, avatar.surface.sem_frozen_dims
+        )
+
+    if render is not None and batch.get("seg_label") is not None and _get_w(cfg, "w_seg", 0.0) > 0:
+        from losses.segmentation import loss_segmentation_logits
+
+        pred_sem = render.get("semantic_prob", render.get("semantic"))
+        if pred_sem is not None:
+            target = batch["seg_label"]
+            if target.ndim == 4:
+                target = target[0]
+            if target.ndim == 3:
+                target = target[0]
+            target = target.to(device=pred_sem.device, dtype=torch.long)
+            losses["seg"] = loss_segmentation_logits(pred_sem, target)
+
     terms = [
         ("rgb", "w_rgb"),
-        ("mp_lmk", "w_mp_lmk"),
         ("silhouette", None),
-        ("seg", "w_seg"),
-        ("iris", "w_iris"),
+        ("mp_lmk", "w_mp_lmk"),
+        ("pie68_jaw", "w_pie68_jaw"),
         ("h", "w_h"),
-        ("eye_uv", "w_eye_uv_barrier"),
-        ("scale", "w_scale"),
+        ("geometry", "w_geometry"),
         ("opacity", "w_opacity"),
         ("gamma_prior", "w_gamma_prior"),
         ("pose_prior", "w_pose_prior"),
         ("pose_tz", "w_pose_tz"),
-        ("gaze_residual", "w_gaze_residual"),
         ("expr_deform_reg", "w_expr_deform_reg"),
-        ("expr_neutral", "w_expr_neutral"),
-        ("expr_leak", "w_expr_leak"),
-        ("expr_amp", "w_expr_amp"),
-        ("expr_socket", "w_expr_amp"),
         ("sem_anchor", "w_sem_anchor"),
+        ("seg", "w_seg"),
         ("template_smooth", None),
         ("identity_smooth", "w_identity_smooth"),
     ]
-    ref = avatar_out["xyz"]
     total = torch.zeros((), device=ref.device, dtype=ref.dtype)
     for key, wkey in terms:
         if key not in losses:
             continue
         if key == "silhouette":
-            w = w_silhouette
+            w = w_sil
         elif key == "template_smooth":
             w = w_tpl
+        elif key == "identity_smooth":
+            w = _get_w(cfg, "w_identity_smooth", 0.0)
         else:
             w = _get_w(cfg, wkey, 0.0)
         total = total + w * losses[key]

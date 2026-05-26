@@ -16,6 +16,7 @@ from processing.ict_flame_similarity import (
 from processing.ict_landmarks import landmark_jawline_vertex_indices
 from processing.ict_mediapipe_lmk.constants import ICT_FACE_VERTEX_END
 from processing.ict_mediapipe_lmk.landmarks import sample_bary
+from processing.ict_mediapipe_lmk.nicp_template import apply_nicp_extension_to_full_mesh
 
 
 def _add_large_steps_to_path(large_steps_root: Path):
@@ -369,6 +370,9 @@ def fit_ict_face_to_flame(
     stage3_iters=None,
     w_idt_reg=0.05,
     jaw_init=None,
+    regions=None,
+    propagate_extension=True,
+    extension_iters=12,
 ):
     v_flame = np.asarray(v_flame, dtype=np.float64)
     f_flame = np.asarray(f_flame, dtype=np.int64)
@@ -458,6 +462,18 @@ def fit_ict_face_to_flame(
 
     v_ict_fit = np.asarray(v_ict_full, dtype=np.float64).copy()
     v_ict_fit[:ICT_FACE_VERTEX_END] = v_face_fit
+    if propagate_extension and regions is not None:
+        v_ict_fit = apply_nicp_extension_to_full_mesh(
+            v_ict_full,
+            v_ict_fit,
+            f_ict_full,
+            regions,
+            n_iters=extension_iters,
+        )
+        from processing.ict_mediapipe_lmk.nicp_template import nicp_extension_vertex_indices
+
+        n_ext = len(nicp_extension_vertex_indices(regions))
+        print(f"  NICP extension: propagated displacement to {n_ext} verts (mouth/eye-socket/occlusion)")
     return v_ict_fit, v_face_fit
 
 

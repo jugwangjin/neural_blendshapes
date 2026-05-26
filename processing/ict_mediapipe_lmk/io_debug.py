@@ -315,5 +315,7 @@ def export_debug(
         print(f"Comparison panel: {out['comparison_png']}")
         for mat, info in (out.get("ict_texture_charts") or {}).items():
             print(f"  ICT texture map [{mat}]: {info['texture']}")
+        if "eye_occlusion_iris_comparison_png" in out:
+            print(f"Eye occlusion iris×5: {out['eye_occlusion_iris_comparison_png']}")
         if "eyeball_iris_comparison_png" in out:
             print(f"Eyeball iris×5 panel: {out['eyeball_iris_comparison_png']}")

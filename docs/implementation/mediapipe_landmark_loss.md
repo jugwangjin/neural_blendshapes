@@ -29,7 +29,7 @@ fitted FLAME iris seeds → project to ICT sclera-chart triangles
 Bake uses ``v_ict_fit`` for eye transplant projection (eyeball = post-global-align ICT).
 Log ``iris seed spread`` / ``fitted iris spread`` — if min≈max≈0, anchors collapsed (check npy align).
 
-Matches training: `EyeTextureGaussians` samples on `M_Sclera*` filled disk; `M_Iris*` is UV annulus (empty center).
+Training: surface Gaussians on sclera + `M_EyeOcclusion`; iris 468–477 via mesh bary (`w_mp_lmk`).
 
 Sanity: `check_projected_faces_are_in_eye()` — iris faces on eyeball verts only.
 
@@ -39,13 +39,14 @@ Output also includes `geometry_chart_id` (0=face, 1=left eye, 2=right eye) for t
 
 ## Bake texture QA (`bake_mediapipe_to_ict.py`)
 
-- Combined PNG: **M_Face** (+ skin) only — teeth / `M_GumsTongue` / iris annulus omitted.
-- Per-map under `debug/texture_maps/`:
-  - `ict_mediapipe_M_Face_texture.png` — face MP (no teeth/gums)
-  - `ict_eyeball_left_iris5_texture.png` — **only** MP 468–472 on eyeball `triangle_uv_local` (sclera∩eyeball tris)
-  - `ict_eyeball_right_iris5_texture.png` — **only** MP 473–477
-  - `mediapipe_eyeball_iris5_left_vs_right.png` — side-by-side iris QA
-- Uses `triangle_uv_local` (per texture map 0–1), not seam VT — iris pentagon + labels visible on chart.
+- Combined PNG: face-focused overview (`VIZ_SKIP_MATERIALS` — teeth, eyes, occlusion, etc. omitted from one atlas).
+- Per-map under `processing/ict_mediapipe_lmk/debug/texture_maps/` — **every** `usemtl` in npy `material_names` (from `ICT_FaceKit/.../generic_neutral_mesh.obj`):
+  - `ict_mediapipe_M_Face_texture.png`, `ict_mediapipe_M_Teeth_texture.png`, `ict_mediapipe_M_EyeOcclusion_texture.png`, `ict_mediapipe_M_EyeBlend_texture.png`, … (all catalog materials present in mesh)
+  - Landmark count may be 0 on unused charts (layout wireframe only).
+  - Iris pentagon extras: `ict_eye_occlusion_*_iris5_texture.png` (ray_occ bake) or `ict_eyeball_*_iris5_texture.png` (legacy sclera bake).
+- Uses `triangle_uv_local` (per texture map 0–1), not seam VT.
+
+Npy build (`ict_facekit_to_npy_full_head.py`) also writes layout charts under `debugs/ict_facekit_uv/texture_charts/` by default (`--no_export_uv_debug` to skip).
 
 Fields used at train time:
 
@@ -55,13 +56,13 @@ Fields used at train time:
 
 ## Dual landmarks (PIE 68 + MP)
 
-- **Train**: MP bary embedding only (`mp_landmark_indices` → 2D loss).
-- **Bake / NICP / npy align**: Multi-PIE **inner** `[17:]` ↔ FLAME embedding + **jawline** `[0:16]` KNN to FLAME mesh (MP has no chin contour). See `pie68_jaw_and_mediapipe_landmarks.md`.
+- **Train MP**: `mp_landmark_indices` → `w_mp_lmk` (no chin contour in MP).
+- **Train jaw**: PIE protocol `0..16` on ICT verts → `w_pie68_jaw` vs FA 68 detections (`losses/pie68_jaw_landmark.py`). See `pie68_jaw_train_loss.md`.
+- **Bake / NICP / npy**: inner `[17:]` + jawline KNN (`pie68_jaw_and_mediapipe_landmarks.md`).
 
 ## Not used for training
 
-- `ict_facekit.landmark_indices` — 68 vertex picks (jawline + inner); not wired to `train_losses` MP path
-- `losses/legacy_landmark_68.py` — old gbuffer + 68-vertex path (FLARE)
+- `legacy/flare/losses/legacy_landmark_68.py` — FLARE gbuffer clip-space (all 68)
 
 ## Implementation
 

@@ -14,6 +14,8 @@ class PoseWeightMLP(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(hidden, 1),
         )
+        nn.init.zeros_(self.mlp[-1].weight)
+        nn.init.zeros_(self.mlp[-1].bias)
 
     def forward(self, canonical_xyz):
         """

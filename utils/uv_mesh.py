@@ -100,24 +100,41 @@ def uv_points_to_chart_triangle_bary(
 
     miss = score[torch.arange(g, device=device), tri_idx] < -eps
     if miss.any():
-        centers = tri_uv.mean(dim=1)
-        dist = (centers.unsqueeze(0) - uv[miss].unsqueeze(1)).pow(2).sum(-1)
-        tri_idx_miss = dist.argmin(dim=1)
-        tri_m = tri_uv[tri_idx_miss]
-        p_m = uv[miss]
-        clipped = torch.maximum(torch.minimum(p_m, tri_m.max(dim=1).values), tri_m.min(dim=1).values)
-        bary_m = _barycentric_2d_batch(
-            clipped.unsqueeze(1),
-            tri_m[:, 0].unsqueeze(1),
-            tri_m[:, 1].unsqueeze(1),
-            tri_m[:, 2].unsqueeze(1),
-            eps=eps,
-        ).squeeze(1)
-        tri_idx[miss] = tri_idx_miss
-        br_out[miss] = bary_m.clamp(min=0.0)
-        br_out[miss] = br_out[miss] / br_out[miss].sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        tri_idx_m, bary_m = _closest_uv_triangle_hit(uv[miss], tri_uv, eps=eps)
+        tri_idx[miss] = tri_idx_m
+        br_out[miss] = bary_m
 
     return ChartTriangleHit(tri_idx=tri_idx, bary=br_out)
+
+
+def _closest_uv_triangle_hit(uv_points, tri_uv, eps=1e-4):
+    """UV outside all triangles → nearest point on closest triangle (not chart centroid)."""
+    uv = uv_points.detach().float()
+    device = uv.device
+    tri_uv = tri_uv.to(device=device, dtype=uv.dtype)
+    g, t = uv.shape[0], tri_uv.shape[0]
+    if g == 0:
+        zl = torch.zeros(0, dtype=torch.long, device=device)
+        return zl, torch.zeros(0, 3, dtype=uv.dtype, device=device)
+
+    a = tri_uv[:, 0].unsqueeze(0)
+    b = tri_uv[:, 1].unsqueeze(0)
+    c = tri_uv[:, 2].unsqueeze(0)
+    p = uv.unsqueeze(1)
+    bary_all = _barycentric_2d_batch(p, a, b, c, eps=eps)
+    w = bary_all.clamp(min=0.0)
+    w = w / w.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+    closest = (
+        tri_uv[:, 0].unsqueeze(0) * w[..., 0:1]
+        + tri_uv[:, 1].unsqueeze(0) * w[..., 1:2]
+        + tri_uv[:, 2].unsqueeze(0) * w[..., 2:3]
+    )
+    dist = (p - closest).pow(2).sum(-1)
+    tri_idx = dist.argmin(dim=1)
+    br_out = bary_all[torch.arange(g, device=device), tri_idx]
+    br_out = br_out.clamp(min=0.0)
+    br_out = br_out / br_out.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+    return tri_idx, br_out
 
 
 def chart_triangle_to_mesh_face(

@@ -6,9 +6,9 @@ Pipeline:
   B. NICP: inner 68[17:]+PIE jawline[0:16] KNN -> FLAME (eyeball untouched)
   C. Sample FLAME MediaPipe face/eyelid points -> project to fitted ICT
   D. Eye s,T (R=I): bidirectional chamfer + front/back anchors
-  E. Transplant iris MP 468–477 onto ICT eyeball barycentric coords
+  E. Iris MP 468–477: center-normal ray → M_EyeOcclusion (default ``--iris-bake ray_occ``)
   F. Save canonical ICT (FLAME space) + FLAME meshes; 68-point UV QA
-  G. ICT + FLAME MediaPipe landmark UV texture maps (``--no_texture_viz`` to skip)
+  G. ICT + FLAME MP landmark UV textures + per-usemtl charts (all ``material_names``)
 
 Run from repo root:
   python processing/ict_mediapipe_lmk/bake_mediapipe_to_ict.py
@@ -55,7 +55,9 @@ from processing.ict_mediapipe_lmk.io_debug import (
 )
 from processing.ict_mediapipe_lmk.metrical import build_flame_mp_points, load_flame_static_embedding
 from processing.ict_mediapipe_lmk.nicp import fit_ict_face_to_flame
+from processing.ict_mediapipe_lmk.nicp_template import merge_nicp_canonical_into_npy
 from processing.ict_mediapipe_lmk.eye_transplant import merge_iris_into_embedding, run_eye_transplant
+from processing.ict_mediapipe_lmk.iris_ray_occlusion import run_iris_ray_to_occlusion
 from processing.ict_mediapipe_lmk.transfer import transfer_mediapipe_to_ict, validate_embedding
 
 setup_import_paths()
@@ -240,7 +242,27 @@ def main():
         help="FLAME zero pose (default: canonical jaw-open, matches npy similarity fit)",
     )
     parser.add_argument("--skip_nicp", action="store_true", help="Skip face NICP (use ICT neutral as fit)")
-    parser.add_argument("--skip_eye_transplant", action="store_true", help="Skip eye rigid iris bake")
+    parser.add_argument(
+        "--no_nicp_extension",
+        action="store_true",
+        help="Do not propagate NICP displacement to mouth/eye-socket/occlusion verts",
+    )
+    parser.add_argument(
+        "--skip_nicp_npy_merge",
+        action="store_true",
+        help="Do not write nicp_canonical_mesh back into ict_npy (runtime will lack NICP template)",
+    )
+    parser.add_argument(
+        "--iris-bake",
+        choices=("ray_occ", "eye_transplant"),
+        default="ray_occ",
+        help="Iris 468–477: ray_occ=center normal ray→M_EyeOcclusion; eye_transplant=sclera NICP",
+    )
+    parser.add_argument(
+        "--skip_eye_transplant",
+        action="store_true",
+        help="Legacy: closest-point iris on ICT eyeball (ignores --iris-bake)",
+    )
     parser.add_argument("--eye_rigid_iters", type=int, default=300)
     parser.add_argument("--eye_rigid_lr", type=float, default=1e-2)
     parser.add_argument("--eye_w_chamfer", type=float, default=1.0)
@@ -324,7 +346,7 @@ def main():
     eye_mirror = bool(ict_npy_dict.get("eye_uv_mirror_right_u", False))
     print(
         f"eye_uv_mirror_right_u={eye_mirror} "
-        f"(EyeTextureGaussians; iris bake is 3D eye NICP, independent of UV mirror)"
+        f"(iris bake: M_EyeOcclusion ray; mirror flag is legacy/eye_uv_slide only)"
     )
 
     flame_lmk_face_idx, flame_lmk_bary = load_flame_static_embedding(args.flame_lmk_embedding)
@@ -383,7 +405,13 @@ def main():
             stage3_iters=s3,
             w_idt_reg=args.nicp_w_idt_reg,
             jaw_init=float(jaw),
+            regions=regions,
+            propagate_extension=not args.no_nicp_extension,
         )
+
+    if not args.skip_nicp and not args.skip_nicp_npy_merge:
+        merge_nicp_canonical_into_npy(args.ict_npy, v_ict_fit, jaw_open=float(jaw))
+        print(f"Merged nicp_canonical_mesh into {args.ict_npy} (re-run train after npy update)")
 
     eye = np.asarray(regions["eyeball_indices"], dtype=np.int64)
     if eye.size > 0:
@@ -422,7 +450,7 @@ def main():
     if args.skip_eye_transplant:
         from processing.ict_mediapipe_lmk.iris_ict import bake_iris_landmarks_ict
 
-        print("WARNING: --skip_eye_transplant uses legacy ict-native iris bake (no FLAME eye NICP)")
+        print("WARNING: --skip_eye_transplant uses legacy ict-native iris bake (closest on eyeball)")
         iris_bake = bake_iris_landmarks_ict(
             v_ict_fit,
             f_ict,
@@ -438,6 +466,16 @@ def main():
             "source": np.array(["ict_eyeball_native"] * 10, dtype=object),
             "geometry_chart_id": np.array([1] * 5 + [2] * 5, dtype=np.int32),
         }
+        embedding = merge_iris_into_embedding(face_embedding, eye_embedding)
+    elif args.iris_bake == "ray_occ":
+        print("Iris bake: FLAME center normal ray → M_EyeOcclusion (5 pts/side, shared direction)")
+        eye_embedding = run_iris_ray_to_occlusion(
+            v_flame,
+            f_flame,
+            None,
+            f_ict,
+            ict_npy_dict,
+        )
         embedding = merge_iris_into_embedding(face_embedding, eye_embedding)
     else:
         eye_embedding = run_eye_transplant(
@@ -489,6 +527,8 @@ def main():
         charts = tex_out.get("ict_texture_charts") or {}
         for mat, info in charts.items():
             print(f"  per-map [{mat}]: {info['texture']}")
+        if "eye_occlusion_iris_comparison_png" in tex_out:
+            print(f"Eye occlusion iris×5: {tex_out['eye_occlusion_iris_comparison_png']}")
         if "eyeball_iris_comparison_png" in tex_out:
             print(f"Eyeball iris×5 panel:  {tex_out['eyeball_iris_comparison_png']}")
 

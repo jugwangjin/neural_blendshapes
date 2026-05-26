@@ -2,7 +2,7 @@
 
 import torch
 
-from utils.smoothstep import smoothstep
+from utils.tracker import smoothstep
 
 
 def dilate_vertex_mask(mask, faces, n_ring=2):
@@ -40,14 +40,13 @@ def precompute_expression_support(
     return mag, support
 
 
-def build_mp_gates(ict, region_weight, mag_e, support_e):
+def build_mp_gates(ict, region_weight, mag_e, support_e, mp_to_ict):
     """
     Map ICT expression support to MediaPipe AU indices.
 
-    gate: [J, V] = support[ict_j] * region_weight
+    gate: [J, V] = support[ict_j] * region_weight (per-vertex region gate)
     mag: [J, V] = mag[ict_j]
     """
-    mp_to_ict = torch.tensor(ict.mediapipe_to_ict, dtype=torch.long)
     gate = support_e[mp_to_ict] * region_weight.unsqueeze(0)
     mag = mag_e[mp_to_ict]
-    return gate, mag, mp_to_ict
+    return gate, mag

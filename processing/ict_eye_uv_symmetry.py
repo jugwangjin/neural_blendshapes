@@ -1,7 +1,7 @@
 """
 Check whether left/right eyeball UV charts share orientation or need u-mirror on the right eye.
 
-Used at npy bake time; result stored as eye_uv_mirror_right_u for EyeTextureGaussians.
+Npy bake only; stored as eye_uv_mirror_right_u (legacy UV-slide experiment under legacy/eye_uv_slide/).
 """
 
 from __future__ import annotations
@@ -84,7 +84,7 @@ def print_eye_uv_symmetry_report(report):
     mirror = report.get("mirror_right_u", False)
     print(f"  eye_uv_mirror_right_u = {mirror}")
     if mirror:
-        print("  -> EyeTextureGaussians will apply u' = 1 - u on right eye UV.")
+        print("  -> legacy/eye_uv_slide would mirror U on right (not used in train).")
     else:
         print("  -> Left/right charts appear co-oriented; no u-mirror.")
     print("===================================================\n")

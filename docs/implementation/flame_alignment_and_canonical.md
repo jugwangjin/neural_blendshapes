@@ -14,17 +14,27 @@ Convention matches `processing/ict_flame_similarity.py` and `ICTFaceKitTorch.app
 
 **NICP** vertex displacement from bake is only for MP landmark transfer / debug meshes — **not** loaded in `ICTFaceKitTorch` or `ICTDeformer`.
 
-## `ICTFaceKitTorch` usage
+## `ICTFaceKitTorch` runtime buffers (unified)
+
+Npy keys are unchanged (`flame_alignment_*` / `flame_similarity_*`). At load, `_torch_pose_from_npy_dict` merges them into one rigid map:
+
+| Buffer | Source |
+|--------|--------|
+| `flame_s`, `flame_R`, `flame_T` | `flame_alignment_*` if `flame_alignment_R` in npy, else `flame_similarity_s/T` + `R=I` |
+| `use_flame_rigid` | `True` iff baked `flame_alignment_R` |
+| `canonical_s`, `canonical_R`, `canonical_T` | optional `ict_identity.npy` (`canonical=` arg); default identity |
+
+`use_flame_alignment` is a read-only alias of `use_flame_rigid`.
 
 Two independent transforms:
 
-1. **`apply_flame_similarity`** (default `True` in `forward`): uses npy `flame_alignment_*` if present, else `flame_similarity_s/T`. Applied to the **FACS-deformed** mesh (expression weights from caller).
-2. **`to_canonical_space`**: legacy `s,R,T` from optional `ict_identity.npy` (`canonical=` arg). Default when omitted: identity (`s=1`, `R=I`, `T=0`).
+1. **`apply_flame_similarity`**: `flame_s * (mesh @ flame_R) + flame_T` on the **FACS-deformed** mesh (default `True` in `forward`).
+2. **`to_canonical_space`**: second stage `canonical_s * (mesh @ canonical_R) + canonical_T`.
 
 Init:
 
 - `self.expression[0, jaw_index] = flame_similarity_ict_jaw_open`
-- `self.canonical` = `forward(default expression, to_canonical=True)` → jaw-open + FLAME alignment (+ legacy pose if provided)
+- `self.canonical` = `forward(default expression, to_canonical=True)` → jaw-open + FLAME map (+ legacy canonical pose if provided)
 - `neutral_mesh_canonical` = same as `canonical` (jaw-open reference for normals / MLP coords)
 
 ## `ICTDeformer`
@@ -44,7 +54,7 @@ Do not use closed-mouth `neutral_mesh` alone as MLP input; lips collapse.
 
 Runtime: **one** `apply_flame_similarity` at the end of `ICTFaceKitTorch.forward` when `apply_flame_similarity=True`.
 
-Legacy `to_canonical_space` (`s,R,T` from optional `ict_identity.npy`) is a **second**, independent pose — default identity when omitted. Do not pass `ict_identity.npy` together with full npy alignment unless you intend both.
+Legacy `to_canonical_space` (`canonical_s/R/T` from optional `ict_identity.npy`) is a **second**, independent pose — default identity when omitted. Do not pass `ict_identity.npy` together with full npy alignment unless you intend both.
 
 NICP per-vertex displacement from bake is **not** loaded into the train stack.
 
@@ -63,4 +73,4 @@ Expression weights are dimensionless; they are **not** multiplied by `flame_alig
 
 ## Sanity script
 
-`scripts/sanity_gaussian_layout.py` renders via `forward`, not raw `neutral_mesh`. Use `--compare-raw-neutral` to see misalignment from skipping FACS/alignment. Use `--sweep-jaw` / `--expr` for visual FACS checks.
+`debug/sanity_gaussian_layout.py` renders via `forward`, not raw `neutral_mesh`. Use `--compare-raw-neutral` for contrast.

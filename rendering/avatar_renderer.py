@@ -134,6 +134,33 @@ class AvatarRenderer(nn.Module):
             "meta": meta,
         }
 
+    def render_expected_signal(self, avatar_out, camera, signal, signal_dim=1):
+        """
+        Alpha-weighted signal render (depth ``ED``-style, **no background composite**).
+
+        ``signal``: ``[G]`` or ``[G, C]`` per-Gaussian values (e.g. ``h``).
+        Returns ``accum`` = Σ w_i s_i, ``expected`` = accum / alpha, ``alpha`` = Σ w_i.
+        Use ``accum`` with pixel mask ``alpha * gt_mask`` to avoid low-alpha blow-up;
+        do **not** use RGB-style ``accum + (1-alpha)*bg``.
+        """
+        packed = pack_gaussians(avatar_out, rgb_activation=None)
+        sig = signal.reshape(-1, signal.shape[-1] if signal.ndim > 1 else 1).float()
+        if sig.shape[-1] < signal_dim:
+            pad = sig.new_zeros(sig.shape[0], signal_dim - sig.shape[-1])
+            sig = torch.cat([sig, pad], dim=-1)
+        sig = sig[:, :signal_dim]
+        if sig.shape[-1] == 1:
+            colors = sig.expand(-1, 3)
+        else:
+            colors = sig
+            if colors.shape[-1] == 2:
+                colors = torch.cat([colors, colors.new_zeros(colors.shape[0], 1)], dim=-1)
+        colors, alphas, meta = self._rasterize(packed, camera, colors)
+        accum, alpha = self._to_nchw(colors, alphas)
+        accum = accum[:, :signal_dim]
+        expected = accum / alpha.clamp(min=1e-6)
+        return {"accum": accum, "expected": expected, "alpha": alpha, "meta": meta}
+
     def forward(self, avatar_out, camera, render_semantic=True, background=None):
         out = self.render_rgb(avatar_out, camera, background=background)
         if render_semantic and avatar_out.get("sem_prob") is not None:

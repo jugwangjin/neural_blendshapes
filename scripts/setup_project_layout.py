@@ -23,9 +23,6 @@ COPY_MAP = [
     ("dataset/dataset.py", "dataset/collate.py"),
     ("losses/image.py", "losses/rgb.py"),
     ("losses/landmark.py", "losses/mediapipe_landmark.py"),
-    ("utils/default_camera.py", "utils/default_camera.py"),
-    ("utils/geometry.py", "utils/geometry.py"),
-    ("utils/io.py", "utils/io.py"),
 ]
 
 IMPORT_REPLACEMENTS = [

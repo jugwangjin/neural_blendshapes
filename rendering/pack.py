@@ -14,6 +14,19 @@ def normalize_quaternion_wxyz(q):
     return q
 
 
+def surface_avatar_out(avatar_out):
+    """Mesh surface Gaussians (same as full avatar output today)."""
+    surf = avatar_out["surface"]
+    return {
+        "xyz": surf["xyz"],
+        "scale": surf["scale"],
+        "rotation": surf["rotation"],
+        "opacity": surf["opacity"],
+        "color": surf["color"],
+        "h": surf["h"],
+    }
+
+
 def pack_gaussians(avatar_out, rgb_activation=torch.sigmoid):
     xyz = avatar_out["xyz"].reshape(-1, 3)
     scale = avatar_out["scale"].reshape(-1, 3)

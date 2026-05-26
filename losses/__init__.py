@@ -1,4 +1,1 @@
-from losses.h_regularization import loss_h_anchor_surface
-from losses.iris_landmark import loss_iris_landmarks_2d
-from losses.eye_uv_barrier import soft_uv_box_barrier
-from losses.train_losses import compute_losses
+from losses.h_regularization import loss_h_image_space

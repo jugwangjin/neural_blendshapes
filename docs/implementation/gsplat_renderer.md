@@ -54,4 +54,4 @@ Dataset: `{frame}_seg.png` next to cache, or under `cfg.segmentation_dir`.
 
 ## Stage weights
 
-`w_seg` active from stage **2B_gaussian_detail** onward (`training/stages.py`).
+`w_seg` is **0** for all stages 0–3 (`training/stages.py`); semantic render not used in the default schedule.

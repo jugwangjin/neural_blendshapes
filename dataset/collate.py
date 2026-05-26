@@ -1,52 +1,63 @@
-# -*- coding: utf-8 -*-
-#
-# Max-Planck-Gesellschaft zur Förderung der Wissenschaften e.V. (MPG) is
-# holder of all proprietary rights on this computer program.
-# Using this computer program means that you agree to the terms 
-# in the LICENSE file included with this software distribution. 
-# Any use not explicitly granted by the LICENSE is prohibited.
-#
-# Copyright©2019 Max-Planck-Gesellschaft zur Förderung
-# der Wissenschaften e.V. (MPG). acting on behalf of its Max Planck Institute
-# for Intelligent Systems. All rights reserved.
-#
-# For commercial licensing contact, please contact ps-license@tuebingen.mpg.de
+"""Batch collation for ``train.py`` (ImageDataset / mp_npz keys)."""
 
+import numpy as np
 import torch
 
-# Select the device
-device = torch.device('cpu')
-devices = 0
-if torch.cuda.is_available() and devices >= 0:
-    device = torch.device(f'cuda:{devices}')
+# Tensor keys consumed by tracker / loss (must share training device).
+LOSS_BATCH_TENSOR_KEYS = (
+    "image",
+    "mask",
+    "mp_blendshape",
+    "mp_blendshape_raw",
+    "mp_landmarks_2d",
+    "mp_landmarks_3d",
+    "mp_valid",
+    "mp_pose_raw",
+    "mp_transform_matrix",
+    "pose_feat",
+    "landmark",
+    "seg_label",
+    "skin_mask",
+    "h_reg_skin",
+    "h_reg_eye",
+    "h_reg_brow",
+    "h_reg_misc",
+    "h_reg_mouth",
+    "semantic_fg",
+    "part_label",
+    "part_onehot",
+    "seg_onehot",
+    "world_to_cam",
+)
 
-class Dataset(torch.utils.data.Dataset):
-    """Basic dataset interface"""
-    def __init__(self): 
-        super().__init__()
 
-    def __len__(self):
-        raise NotImplementedError
+def move_batch_to_device(batch, device):
+    """Move every ``torch.Tensor`` in a collated batch to ``device``."""
+    dev = torch.device(device)
+    out = {}
+    for k, v in batch.items():
+        if isinstance(v, torch.Tensor):
+            out[k] = v.to(dev, non_blocking=(dev.type == "cuda"))
+        else:
+            out[k] = v
+    return out
 
-    def __getitem__(self):
-        raise NotImplementedError
 
-    def collate(self, batch):
-        return {
-            'img' : torch.cat(list([item['img'] for item in batch]), dim=0).to(device),
-            'img_path' : list([item['img_path'] for item in batch]),
-            'mask' : torch.cat(list([item['mask'] for item in batch]), dim=0).to(device),
-            'skin_mask' : torch.cat(list([item['skin_mask'] for item in batch]), dim=0).to(device),
-            'camera': list([item['camera'] for item in batch]),
-            'frame_name': list([item['frame_name'] for item in batch]),
-            'idx': torch.LongTensor(list([item['idx'] for item in batch])).to(device),
-            'landmark' : torch.cat(list([item['landmark'] for item in batch]), dim=0).to(device),
-            'mp_landmark': torch.cat(list([item['mp_landmark'] for item in batch]), dim=0).to(device),
-            'mp_blendshape' : torch.cat(list([item['mp_blendshape'] for item in batch]), dim=0).to(device),
-            'mp_transform_matrix' : torch.cat(list([item['mp_transform_matrix'] for item in batch]), dim=0).to(device),
-            'normal' : torch.cat(list([item['normal'] for item in batch]), dim=0).to(device),
-            'flame_expression' : torch.cat(list([item['flame_expression'] for item in batch]), dim=0).to(device),
-            'flame_pose' : torch.cat(list([item['flame_pose'] for item in batch]), dim=0).to(device),
-            'flame_camera': list([item['flame_camera'] for item in batch]),
-            'img_deca': torch.cat(list([item['img_deca'] for item in batch]), dim=0).to(device),
-        }
+def collate_batch(items):
+    """Training stack (``image``, ``mask``, MP tensors, optional seg)."""
+    batch = {}
+    for key in items[0]:
+        if key in ("path", "frame_idx", "img_path", "frame_name"):
+            batch[key] = [x[key] for x in items]
+            continue
+        vals = [x[key] for x in items]
+        v0 = vals[0]
+        if isinstance(v0, torch.Tensor):
+            batch[key] = torch.stack(vals, dim=0)
+        elif isinstance(v0, np.ndarray):
+            batch[key] = torch.from_numpy(np.stack(vals, axis=0))
+        else:
+            batch[key] = vals
+    if "image" not in batch and "img" in batch:
+        batch["image"] = batch["img"]
+    return batch

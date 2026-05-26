@@ -2,7 +2,10 @@
 
 import numpy as np
 
-from processing.ict_region_dict import build_official_region_indices
+from processing.ict_region_dict import (
+    build_full_head_region_indices,
+    build_official_region_indices,
+)
 
 
 def load_ict_npy_dict(npy_path):
@@ -10,7 +13,12 @@ def load_ict_npy_dict(npy_path):
 
 
 def regions_from_npy_dict(model_dict):
-    official = build_official_region_indices()
+    n_verts = int(model_dict.get("vertex_count", len(model_dict["neutral_mesh"])))
+    official = (
+        build_full_head_region_indices()
+        if n_verts >= 26718
+        else build_official_region_indices()
+    )
     keys = [
         "face_indices",
         "not_face_indices",
@@ -21,7 +29,11 @@ def regions_from_npy_dict(model_dict):
         "left_iris_indices",
         "right_iris_indices",
         "face_material_name",
+        "face_texture_map_id",
+        "material_names",
+        "n_texture_maps",
         "triangle_uv_local",
+        "triangle_uv_atlas",
         "eye_socket_left_indices",
         "eye_socket_right_indices",
         "surface_sample_vertex_indices",
@@ -31,6 +43,13 @@ def regions_from_npy_dict(model_dict):
         "mouth_interior_vertex_indices",
         "gums_tongue_indices",
         "teeth_indices",
+        "lacrimal_indices",
+        "eye_blend_indices",
+        "left_eye_occlusion_indices",
+        "right_eye_occlusion_indices",
+        "eyelashes_left_indices",
+        "eyelashes_right_indices",
+        "auxiliary_part_indices",
     ]
     regions = {}
     for k in keys:

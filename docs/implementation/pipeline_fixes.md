@@ -18,7 +18,7 @@
 
 **Critical:** eye texture must use parts **7, 8** — not 6, 7 (6 is teeth).
 
-Hair/accessory are **not** in ICT; use segmentation + `AccessoryGaussians`.
+Hair/accessory are **not** in ICT mesh topology; glasses/hat handled via GT image-space **h** on surface Gaussians (see `losses/h_regularization.py`). Seg class `accessory` remains for `w_seg` only.
 
 ## Code updates
 

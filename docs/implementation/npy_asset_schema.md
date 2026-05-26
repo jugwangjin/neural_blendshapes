@@ -39,7 +39,7 @@ python processing/ict_facekit_to_npy_full_head.py
 | `teeth_indices` | excluded from surface sampling |
 | `left_eyeball_indices` / `right_eyeball_indices` | eye UV texture space |
 
-**No hair/accessory** in ICT topology — accessory = optional free Gaussians from segmentation.
+**No hair/accessory** in ICT topology — off-mesh detail via image-space h on surface Gaussians.
 
 ## Gaussian sampling (`utils/sampling.py`)
 

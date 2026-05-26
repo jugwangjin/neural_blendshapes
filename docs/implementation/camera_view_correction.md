@@ -13,7 +13,7 @@
 1. **Yaw 180°** about world **+Y** at mesh pivot (`with_azimuth_y`) — camera orbits to the face side.
 2. **Roll 180°** about camera **+Z** (`with_roll_forward_deg`) — upright image.
 
-Applied in `scripts/sanity_gaussian_layout.py` and `train.py` unless `--no-view-correction`.
+Applied in `debug/sanity_gaussian_layout.py` (via baked npz) and `train.py` via `load_training_camera`.
 
 `assets/default_camera.npz` from `bake_default_camera.py` is **uncorrected** mesh-bounds fit; do not bake the 180°/180° into the npz if runtime correction is enabled (avoids double application).
 
@@ -22,12 +22,11 @@ Applied in `scripts/sanity_gaussian_layout.py` and `train.py` unless `--no-view-
 Orbit is **not** applied to the camera. Sanity sweeps ``head_yaw_deg`` via ``ICTDeformer.apply_head_yaw`` with ``pose_weight_fixed=1.0``:
 
 ```bash
-python scripts/sanity_gaussian_layout.py --sweep-yaw -30,0,30
+python debug/sanity_gaussian_layout.py --sweep-yaw -30,0,30
 ```
 
 ## Compare old renders
 
 ```bash
-python scripts/sanity_gaussian_layout.py --no-view-correction   # back / flipped (old)
-python scripts/sanity_gaussian_layout.py                        # frontal
+python debug/sanity_gaussian_layout.py
 ```

@@ -1,6 +1,8 @@
 """
 MediaPipe → tracker MLP → ICT deformer → surface/eye Gaussians → gsplat.
 
+Dataset: ``dataset.image_dataset.ImageDataset`` (image split layout under ``Config.input_dir``).
+
 Stages: 0 bootstrap pose → 1 mesh+tracker → 2A expression → 2B GS detail → 3 view appearance
 
 Run from repo root:
@@ -8,16 +10,18 @@ Run from repo root:
 """
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from config import Config
-from dataset.video_dataset import VideoDataset, collate_batch
+from dataset import build_train_dataset, collate_batch, move_batch_to_device
 from rendering import GaussianRenderer
 from losses.train_losses import compute_losses
 from model.expr_regions import build_expr_region_weight
@@ -31,49 +35,104 @@ from training.apply import (
     init_training_state,
     stage_loss_cfg,
 )
+from training.checkpoint_io import save_checkpoint
+from training.code_dump import dump_training_code
+from training.eval_render import render_eval_set
 from training.stages import STAGE_SCHEDULE, iter_stages, total_training_steps
-from utils.accessory_detect import segmentation_has_accessory
-from utils.camera import FixedCamera
-from losses.mediapipe_landmark_478 import embedding_tensors, load_mediapipe_ict_embedding
+from utils.camera import load_training_camera, training_camera_status
+from losses.mediapipe_landmark_478 import build_mp_lmk_embedding
+from losses.pie68_jaw_landmark import build_pie68_jaw_vertex_indices
 from utils.sampling import count_surface_gaussians
 
 
-def load_mp_embedding(path, device):
-    emb = load_mediapipe_ict_embedding(path)
-    mp_ids, face_idx, bary = embedding_tensors(emb, device)
-    emb["_mp_ids"] = mp_ids
-    emb["_face_idx"] = face_idx
-    emb["_bary"] = bary
-    n = len(emb["mp_landmark_indices"])
-    print(f"MP→ICT landmark embedding: {path} ({n} landmarks)")
-    return emb
+def _code_dump_dir(cfg: Config) -> Path:
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return cfg.codes_dir / stamp
+
+
+def _tqdm_postfix(losses, global_step: int, n_show: int = 6) -> dict:
+    items = [(k, losses[k].item()) for k in losses if k != "total"]
+    items.sort(key=lambda x: -abs(x[1]))
+    out = {"step": global_step, "loss": f"{losses['total'].item():.4f}"}
+    for k, v in items[:n_show]:
+        out[k] = f"{v:.4f}"
+    return out
+
+
+@torch.no_grad()
+def save_landmark_debug_image(path, vertices, faces, mp_landmarks_2d, mp_lmk_emb, camera, image_size, gt_image):
+    import cv2
+    import numpy as np
+    from losses.mediapipe_landmark_478 import vertices2landmarks_barycentric
+
+    # 1. Get predicted and target UVs
+    mp_ids = mp_lmk_emb["mp_ids"]
+    face_idx = mp_lmk_emb["face_idx"]
+    bary = mp_lmk_emb["bary"]
+
+    lmk_xyz = vertices2landmarks_barycentric(vertices, faces, face_idx, bary)
+    proj = camera.project_world_points(lmk_xyz.reshape(-1, 3)).reshape(vertices.shape[0], -1, 2)
+    pred_uv = (proj / float(image_size))[0].detach().cpu().numpy() # [N, 2]
+
+    target_uv = mp_landmarks_2d[0, mp_ids].detach().cpu().numpy() # [N, 2]
+
+    # 2. Get GT image and convert to HWC BGR uint8
+    img = gt_image.detach().cpu().permute(1, 2, 0).numpy()
+    img = (img.clip(0, 1) * 255.0).round().astype(np.uint8)
+    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    # 3. Draw dots
+    h, w = img_bgr.shape[:2]
+    for i in range(len(target_uv)):
+        tx, ty = int(target_uv[i, 0] * w), int(target_uv[i, 1] * h)
+        px, py = int(pred_uv[i, 0] * w), int(pred_uv[i, 1] * h)
+        cv2.circle(img_bgr, (tx, ty), 2, (0, 0, 255), -1) # Red for GT
+        cv2.circle(img_bgr, (px, py), 2, (0, 255, 0), -1) # Green for Rendered
+
+    cv2.imwrite(str(path), img_bgr)
 
 
 def main():
     cfg = Config()
+    from processing.ict_mediapipe_lmk.embedding_io import resolve_embedding_path
+
+    cfg.mp_embedding = resolve_embedding_path(cfg.mp_embedding)
     assert cfg.batch_size == 1, "avatar/render path is single-mesh; set batch_size=1"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cfg.output_root.mkdir(parents=True, exist_ok=True)
     cfg.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    cfg.eval_render_dir.mkdir(parents=True, exist_ok=True)
 
     schedule = STAGE_SCHEDULE
     cfg.iterations = total_training_steps(schedule)
 
-    dataset = VideoDataset(cfg, train=True, au_active_boost=True)
+    dump_training_code(ROOT, _code_dump_dir(cfg), cfg, schedule)
+
+    dataset = build_train_dataset(cfg, train=True)
+    split = cfg.flare_train_split
+    n_frames = len(dataset)
+    print(
+        f"dataset: ImageDataset ({cfg.dataset_type}) "
+        f"{cfg.input_dir}/{split} — {n_frames} frames, image_size={cfg.image_size}"
+    )
+
     loader = DataLoader(
         dataset,
         batch_size=cfg.batch_size,
         shuffle=True,
         collate_fn=collate_batch,
-        num_workers=0,
+        num_workers=cfg.num_workers,
+        pin_memory=cfg.pin_memory,
     )
 
     ict = ICTFaceKitTorch(npy_dir=str(cfg.ict_npy)).to(device)
 
     tracker = TrackerCorrectionMLP(
+        mediapipe_to_ict=ict.mediapipe_to_ict,
+        num_ict_expression=ict.num_expression,
         n_blendshapes=cfg.num_mp_blendshapes,
         gamma_min=cfg.gamma_min,
         gamma_max=cfg.gamma_max,
-        gaze_uv_range=cfg.gaze_uv_range,
         use_landmarks=True,
     ).to(device)
 
@@ -81,37 +140,9 @@ def main():
     deformer = ICTDeformer(
         ict,
         expr_region_weight,
-        n_coeffs=cfg.num_mp_blendshapes,
+        mediapipe_name_to_ict=str(cfg.mediapipe_name_to_ict),
+        n_coeffs=cfg.num_ict_expressions,
     ).to(device)
-
-    n_acc = cfg.n_accessory_gaussians
-    if cfg.auto_detect_accessory and n_acc == 0:
-        if segmentation_has_accessory(
-            cfg.segmentation_dir,
-            cfg.train_scenes,
-            min_pixel_ratio=cfg.accessory_min_pixel_ratio,
-        ):
-            n_acc = 512
-            print(f"accessory detected in segmentation — using n_accessory_gaussians={n_acc}")
-
-    n_surface = count_surface_gaussians(
-        ict,
-        ict.faces,
-        k_face=cfg.n_surface_gaussians_per_face,
-        k_head=cfg.n_surface_gaussians_per_head,
-        k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
-        k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
-        k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
-    )
-    print(
-        f"surface Gaussians: {n_surface} "
-        f"(face/head={cfg.n_surface_gaussians_per_face}/{cfg.n_surface_gaussians_per_head} "
-        f"mouth_socket={cfg.n_surface_gaussians_per_mouth_socket} "
-        f"mouth_interior={cfg.n_surface_gaussians_mouth_interior} "
-        f"eye_socket={cfg.n_surface_gaussians_per_eye_socket}; "
-        f"gum/k={cfg.n_surface_gaussians_mouth_interior} h_sigma×{cfg.gum_h_sigma_scale}; "
-        f"teeth/eyeball mesh skipped)"
-    )
 
     avatar = GaussianAvatar.from_ict(
         ict,
@@ -121,48 +152,104 @@ def main():
         k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
         k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
         k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
-        n_eye_per_side=cfg.n_eye_gaussians_per_side,
-        n_accessory_gaussians=n_acc,
-        gaze_uv_range=cfg.gaze_uv_range,
-        learn_gaze_refine=cfg.learn_gaze_refine,
+        k_eyeball_sclera=cfg.n_surface_gaussians_per_eyeball_sclera,
+        k_eye_occlusion=cfg.n_surface_gaussians_per_eye_occlusion,
         n_semantic_classes=cfg.n_semantic_classes,
         gum_h_sigma_scale=cfg.gum_h_sigma_scale,
-        eye_uv_sample_mode=cfg.eye_uv_sample_mode,
-        eye_sclera_min_front_dot=cfg.eye_sclera_min_front_dot,
-        eye_sclera_hemisphere_only=cfg.eye_sclera_hemisphere_only,
         gaussian_scale_knn_k=cfg.gaussian_scale_knn_k,
         gaussian_scale_knn_factor=cfg.gaussian_scale_knn_factor,
     ).to(device)
 
+    n_surface = count_surface_gaussians(
+        ict,
+        ict.faces,
+        k_face=cfg.n_surface_gaussians_per_face,
+        k_head=cfg.n_surface_gaussians_per_head,
+        k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
+        k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
+        k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
+        k_eyeball_sclera=cfg.n_surface_gaussians_per_eyeball_sclera,
+        k_eye_occlusion=cfg.n_surface_gaussians_per_eye_occlusion,
+    )
+    print(
+        f"surface Gaussians: {n_surface} "
+        f"(face/head={cfg.n_surface_gaussians_per_face}/{cfg.n_surface_gaussians_per_head} "
+        f"mouth_socket={cfg.n_surface_gaussians_per_mouth_socket} "
+        f"mouth_interior={cfg.n_surface_gaussians_mouth_interior} "
+        f"eye_socket={cfg.n_surface_gaussians_per_eye_socket} "
+        f"sclera/occlusion={cfg.n_surface_gaussians_per_eyeball_sclera}/"
+        f"{cfg.n_surface_gaussians_per_eye_occlusion} per face; "
+        f"gum h_sigma×{cfg.gum_h_sigma_scale}; eye sclera h=0)"
+    )
+
     init_training_state(avatar)
 
+    # Initialize layout colors for Gaussians from region_colors.py
+    try:
+        from debug.sanity.region_colors import surface_gaussian_rgb, rgb_to_logit
+        colors = surface_gaussian_rgb(avatar, ict, ict.canonical[0], device, mp_embedding_path=cfg.mp_embedding)
+        avatar.color.data.copy_(rgb_to_logit(colors))
+        print("Initialized Gaussian surface colors with layout region colors.")
+    except Exception as e:
+        print(f"Warning: Could not initialize surface layout colors ({e})")
+
     renderer = GaussianRenderer(cfg, image_size=cfg.image_size, sh_degree=None).to(device)
-    camera = FixedCamera.from_default_or_mesh(
+    camera = load_training_camera(
         ict.canonical[0],
         path=cfg.camera_npz,
         width=cfg.image_size,
         height=cfg.image_size,
         device=device,
     )
-    pivot = ict.canonical[0].mean(dim=0)
-    camera = camera.with_view_correction(pivot)
+    print(f"camera: {training_camera_status(cfg.camera_npz)}")
     if not cfg.camera_npz.is_file():
         print(
-            f"note: {cfg.camera_npz} missing — using mesh-bounds camera; "
-            "bake with: python scripts/bake_default_camera.py"
+            "  bake metrical crop: python processing/compute_camera_for_metrical_crop.py "
+            "--apply-train-view --write-npz"
         )
 
-    mp_embedding = load_mp_embedding(cfg.mp_embedding, device)
-    ict_faces = ict.faces
+    mp_lmk_emb = build_mp_lmk_embedding(cfg.mp_embedding, device)
+    print(f"MP→ICT landmark embedding: {cfg.mp_embedding} ({mp_lmk_emb['mp_ids'].numel()} landmarks)")
+    pie68_jaw_vertex_idx = build_pie68_jaw_vertex_indices(ict, device)
+    print(
+        f"PIE-68 jawline: {pie68_jaw_vertex_idx.numel()} ICT verts "
+        f"(protocol 0:{ict.landmark_start}, FA batch['landmark'][:, :{ict.landmark_start}])"
+    )
+    ict_faces = ict.faces.to(device)
 
     global_step = 0
     mesh_optim = None
     gaussian_optim = None
     current_spec = None
 
+    eval_ds = build_train_dataset(cfg, train=False)
+    eval_loader = DataLoader(
+        eval_ds,
+        batch_size=1,
+        shuffle=False,
+        collate_fn=collate_batch,
+        num_workers=0,
+    ) if len(eval_ds) > 0 else None
+
     for stage_idx, spec, stage_start, stage_end in iter_stages(schedule):
         if spec.steps <= 0:
             continue
+
+        if stage_idx == 1 and global_step == 0:
+            
+            render_eval_set(
+                cfg,
+                spec,
+                tracker,
+                avatar,
+                renderer,
+                camera,
+                device,
+                out_dir=cfg.eval_render_dir,
+                global_step=global_step,
+                max_frames=cfg.eval_max_frames,
+                eval_loader=eval_loader,
+            )
 
         print(f"\n=== Stage {stage_idx}: {spec.name} ({spec.steps} steps) ===")
         print(spec.description)
@@ -173,96 +260,147 @@ def main():
         apply_stage_requires_grad(spec, tracker, deformer, avatar)
         mesh_optim, gaussian_optim = build_optimizers(spec, tracker, deformer, avatar)
         loss_cfg = stage_loss_cfg(spec)
+        loss_cfg.image_size = cfg.image_size
         stage_local = 0
 
-        while stage_local < spec.steps:
-            for batch in loader:
-                stage_local += 1
-                global_step += 1
+        pbar = tqdm(
+            total=spec.steps,
+            desc=f"stage {stage_idx} {spec.name}",
+            unit="step",
+            dynamic_ncols=True,
+        )
+        loader_iter = iter(loader)
+        for _ in range(spec.steps):
+            if stage_local >= spec.steps:
+                break
+            try:
+                batch = next(loader_iter)
+            except StopIteration:
+                loader_iter = iter(loader)
+                batch = next(loader_iter)
+            stage_local += 1
+            global_step += 1
 
-                batch = {
-                    k: v.to(device) if isinstance(v, torch.Tensor) else v
-                    for k, v in batch.items()
-                }
+            batch = move_batch_to_device(batch, device)
 
-                corr = tracker(
-                    mp_blendshape=batch["mp_blendshape"],
-                    mp_landmarks_2d=batch.get("mp_landmarks_2d"),
-                    mp_pose_raw=batch.get("mp_pose_raw"),
-                    force_gamma_one=spec.fix_gamma_at_one,
-                )
+            corr = tracker(
+                mp_blendshape=batch["mp_blendshape"],
+                mp_landmarks_2d=batch.get("mp_landmarks_2d"),
+                mp_landmarks_3d=batch.get("mp_landmarks_3d"),
+                world_to_cam=batch.get("world_to_cam"),
+                mp_pose_raw=batch.get("mp_pose_raw"),
+                mp_transform_matrix=batch.get("mp_transform_matrix"),
+                force_gamma_one=spec.fix_gamma_at_one,
+            )
 
-                pose_weight_fixed = 1.0 if spec.pose_weight_one else None
-                avatar_out = avatar(
-                    tracker_out=corr,
-                    apply_expression_deform=spec.train_expression_deform,
-                    use_pose_scale=spec.apply_pose_scale,
-                    pose_weight_fixed=pose_weight_fixed,
-                    rotate_about_centroid=spec.pose_rotate_about_centroid,
-                    pose_zero_tz=spec.pose_zero_tz,
-                )
-                expr_delta = avatar_out.get("expr_delta")
+            pose_weight_fixed = 1.0 if spec.pose_weight_one else None
+            avatar_out = avatar(
+                tracker_out=corr,
+                apply_expression_deform=spec.train_expression_deform,
+                use_pose_scale=spec.apply_pose_scale,
+                pose_weight_fixed=pose_weight_fixed,
+                rotate_about_centroid=spec.pose_rotate_about_centroid,
+                pose_zero_tz=spec.pose_zero_tz,
+            )
+            expr_delta = avatar_out.get("expr_delta")
 
-                render_semantic = spec.w_seg > 0
-                render = renderer(
-                    avatar_out,
-                    camera,
-                    render_semantic=render_semantic,
-                )
-                losses = compute_losses(
-                    loss_cfg,
-                    batch,
-                    render,
-                    avatar_out,
-                    camera,
-                    mp_embedding,
+            render_semantic = loss_cfg.w_seg > 0
+            render = renderer(
+                avatar_out,
+                camera,
+                render_semantic=render_semantic,
+            )
+            losses = compute_losses(
+                loss_cfg,
+                batch,
+                render,
+                avatar_out,
+                camera,
+                mp_lmk_emb,
+                ict_faces,
+                pie68_jaw_vertex_idx=pie68_jaw_vertex_idx,
+                corr=corr,
+                deformer=deformer,
+                expr_delta=expr_delta,
+                avatar=avatar,
+                renderer=renderer,
+            )
+
+            if mesh_optim is not None:
+                mesh_optim.zero_grad(set_to_none=True)
+            if gaussian_optim is not None:
+                gaussian_optim.zero_grad(set_to_none=True)
+
+            losses["total"].backward()
+
+            if spec.name == "0_bootstrap_pose" and global_step % 100 == 0:
+                dbg_dir = cfg.eval_render_dir / "bootstrap_debug"
+                dbg_dir.mkdir(parents=True, exist_ok=True)
+                dbg_path = dbg_dir / f"step_{global_step:06d}.png"
+                save_landmark_debug_image(
+                    dbg_path,
+                    avatar_out["mesh_xyz"],
                     ict_faces,
-                    corr=corr,
-                    deformer=deformer,
-                    expr_delta=expr_delta,
-                    avatar=avatar,
+                    batch["mp_landmarks_2d"],
+                    mp_lmk_emb,
+                    camera,
+                    cfg.image_size,
+                    batch["image"][0],
                 )
 
-                if mesh_optim is not None:
-                    mesh_optim.zero_grad(set_to_none=True)
-                if gaussian_optim is not None:
-                    gaussian_optim.zero_grad(set_to_none=True)
+            if mesh_optim is not None:
+                mesh_optim.step()
+            if gaussian_optim is not None:
+                gaussian_optim.step()
 
-                losses["total"].backward()
+            pbar.update(1)
+            if global_step % cfg.log_every == 0 or stage_local >= spec.steps:
+                pbar.set_postfix(_tqdm_postfix(losses, global_step), refresh=False)
 
-                if mesh_optim is not None:
-                    mesh_optim.step()
-                if gaussian_optim is not None:
-                    gaussian_optim.step()
+            if global_step % 500 == 0:
+                active_losses = [f"total: {losses['total'].item():.4f}"]
+                for k, v in sorted(losses.items()):
+                    if k != "total" and abs(v.item()) > 1e-6:
+                        active_losses.append(f"{k}: {v.item():.4f}")
+                tqdm.write(f"[Step {global_step:06d}] stage {stage_idx} ({spec.name}): " + ", ".join(active_losses))
 
-                if global_step % cfg.log_every == 0:
-                    parts = " ".join(
-                        f"{k}={v.item():.4f}" for k, v in losses.items() if k != "total"
-                    )
-                    print(
-                        f"step {global_step} [{spec.name}:{stage_local}] "
-                        f"loss={losses['total'].item():.4f} {parts}"
-                    )
+            if global_step % cfg.save_every == 0:
+                save_checkpoint(
+                    cfg.checkpoint_dir / f"step_{global_step:06d}_{spec.name}.pt",
+                    global_step=global_step,
+                    stage_name=spec.name,
+                    tracker=tracker,
+                    deformer=deformer,
+                    avatar=avatar,
+                    cfg=cfg,
+                )
 
-                if global_step % cfg.save_every == 0:
-                    ckpt = cfg.checkpoint_dir / f"step_{global_step:06d}_{spec.name}.pt"
-                    torch.save(
-                        {
-                            "step": global_step,
-                            "stage": spec.name,
-                            "tracker": tracker.state_dict(),
-                            "deformer": deformer.state_dict(),
-                            "avatar": avatar.state_dict(),
-                            "cfg": cfg,
-                        },
-                        ckpt,
-                    )
-                    print(f"saved {ckpt}")
-
-                if stage_local >= spec.steps:
-                    break
-
+        pbar.close()
         current_spec = spec
+        stage_ckpt = cfg.checkpoint_dir / f"stage_{spec.name}_end_step_{global_step:06d}.pt"
+        save_checkpoint(
+            stage_ckpt,
+            global_step=global_step,
+            stage_name=spec.name,
+            tracker=tracker,
+            deformer=deformer,
+            avatar=avatar,
+            cfg=cfg,
+            extra={"stage_end": True, "stage_steps": spec.steps},
+        )
+        render_eval_set(
+            cfg,
+            spec,
+            tracker,
+            avatar,
+            renderer,
+            camera,
+            device,
+            out_dir=cfg.eval_render_dir,
+            global_step=global_step,
+            max_frames=cfg.eval_max_frames,
+            eval_loader=eval_loader,
+        )
 
     print(f"\nDone. Total steps: {global_step}. Last stage: {current_spec.name if current_spec else 'n/a'}")
 

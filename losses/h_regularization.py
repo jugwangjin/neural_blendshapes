@@ -1,48 +1,57 @@
 """
-h regularization: anchor surface (legacy) or semantic class-conditioned prior.
+Image-space h (distance) regularization — GT part masks + alpha-weighted h render.
+
+No Gaussian ``sem_prob`` or semantic rendering required for ``w_h``.
 """
 
 import torch
-
-from rendering.semantic import DEFAULT_H_SIGMA, h_prior_tensors
 
 
 def charbonnier(x, eps=1e-3):
     return torch.sqrt(x * x + eps * eps)
 
 
-def loss_h_semantic(h, sem_prob, class_sigma=None, class_weight=None, h_sigma_scale=None):
+def loss_h_image_space(accum_h, alpha, batch, cfg, _get_w):
     """
-    h: [G, 1]
-    sem_prob: [G, K] softmax over semantic classes
-    class_sigma: [K] allowed |h| scale per class
-    class_weight: [K] loss multiplier (accessory=0 → no prior)
-    h_sigma_scale: optional [G] multiplier on sigma (e.g. gum Gaussians > 1 → looser |h|)
-    """
-    if class_sigma is None or class_weight is None:
-        sigma_t, weight_t = h_prior_tensors(h.device, h.dtype)
-    else:
-        sigma_t = torch.tensor(class_sigma, device=h.device, dtype=h.dtype)
-        weight_t = torch.tensor(class_weight, device=h.device, dtype=h.dtype)
+    Pixel loss on ED-style ``accum_h = Σ w_i h_i`` (surface Gaussians only).
 
-    r = h.squeeze(-1).abs().unsqueeze(-1)
-    sigma = sigma_t.view(1, -1)
-    if h_sigma_scale is not None:
-        sigma = sigma * h_sigma_scale.view(-1, 1)
-    per_class = charbonnier(r / sigma) * weight_t.view(1, -1)
-    return (sem_prob * per_class).sum(dim=-1).mean()
-
-
-def loss_h_anchor_surface(h, is_anchor_surface, eyeball_mask=None):
+    GT tiers (mutually exclusive part ids in ``flare_semantic``):
+      skin / eye (strong) > brow > mouth > misc (weakest)
     """
-    h: [G, 1]
-    is_anchor_surface: [G] bool — face skin anchor (h→0)
-    eyeball_mask: optional [G] bool — eye texture Gaussians (h already 0, skip)
-    """
-    if eyeball_mask is not None:
-        is_anchor_surface = is_anchor_surface & (~eyeball_mask)
-    mask = is_anchor_surface.float()
-    if mask.sum() < 1:
-        return h.sum() * 0.0
-    r = h.squeeze(-1)[is_anchor_surface]
-    return charbonnier(r).mean()
+    accum = accum_h[:, 0]
+    a = alpha[:, 0]
+
+    m_skin = batch["h_reg_skin"][:, 0].float()
+    m_eye = batch["h_reg_eye"][:, 0].float()
+    m_brow = batch["h_reg_brow"][:, 0].float()
+    m_misc = batch["h_reg_misc"][:, 0].float()
+    m_mouth = batch["h_reg_mouth"][:, 0].float()
+
+    w_skin = _get_w(cfg, "h_w_skin", 1.0)
+    w_eye = _get_w(cfg, "h_w_eye", 1.0)
+    w_brow = _get_w(cfg, "h_w_brow", 0.45)
+    w_misc = _get_w(cfg, "h_w_misc", 0.12)
+    w_mouth = _get_w(cfg, "h_w_mouth", 0.28)
+
+    s_skin = _get_w(cfg, "h_skin_sigma", 0.002)
+    s_brow = _get_w(cfg, "h_sigma_brow", 0.004)
+    s_misc = _get_w(cfg, "h_sigma_misc", 0.010)
+    s_mouth = _get_w(cfg, "h_sigma_mouth", 0.008)
+
+    r = accum.abs()
+    per_pix = (
+        m_skin * w_skin * charbonnier(r / s_skin)
+        + m_eye * w_eye * charbonnier(r / s_skin)
+        + m_brow * w_brow * charbonnier(r / s_brow)
+        + m_misc * w_misc * charbonnier(r / s_misc)
+        + m_mouth * w_mouth * charbonnier(r / s_mouth)
+    )
+
+    alpha_min = _get_w(cfg, "h_alpha_min", 0.08)
+    mask = a * (a > alpha_min).float()
+    if batch.get("mask") is not None:
+        mask = mask * batch["mask"][:, 0].float()
+
+    region = (m_skin + m_eye + m_brow + m_misc + m_mouth).clamp(max=1.0)
+    w = mask * region
+    return (per_pix * w).sum() / w.sum().clamp(min=1e-6)

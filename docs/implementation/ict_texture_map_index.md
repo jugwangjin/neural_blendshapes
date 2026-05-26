@@ -35,10 +35,21 @@ infer_face_uv_tiles → triangle_uv_local → build_uv_seam_mesh
 
 Eye: texture는 material별, geometry chart는 L/R eyeball part 분리.
 
-## Bake
+## Bake / QA exports
+
+**Npy build** (default: all usemtl layout charts):
 
 ```bash
-python processing/ict_facekit_to_npy_full_head.py --export_uv_debug
+python processing/ict_facekit_to_npy_full_head.py
+# → debugs/ict_facekit_uv/texture_charts/chart_*_{M_Face,M_Teeth,...}_local.png
+# --no_export_uv_debug to skip
+```
+
+**MediaPipe bake** (default: landmark overlay per material):
+
+```bash
+python processing/ict_mediapipe_lmk/bake_mediapipe_to_ict.py
+# → debug/texture_maps/ict_mediapipe_{material}_texture.png for every material_names[]
 ```
 
 ## 샘플링

@@ -1,27 +1,21 @@
 """
-ICT FACS deformer: template MLP + MP coeffs → mesh + support-gated expression + pose weight.
+ICT FACS deformer: template MLP + MP coeffs → mesh + region-gated expression + pose weight.
 
-Template / expression fields are smooth functions of canonical ``xyz`` on all skin +
-eyeball vertices (same MLP input). Eye-socket orbit is not hard-gated; large deltas there
-are penalized via ``deform_reg_weight``. Teeth stay hard-off (separate rigid part).
+Template / expression MLPs take jaw-open ICT in FLAME space (``ict.canonical`` =
+jawOpen + ``flame_alignment_s,R,T`` / ``flame_similarity_s,T`` from npy; NICP bake mesh is
+not used as template). ``expr_gate`` limits
+which vertices each AU can move (eye occlusion on; teeth / lashes / lacrimal off).
 """
 
 import torch
 import torch.nn as nn
 
 from model.blendshape_support import build_mp_gates, precompute_expression_support
-from model.expr_regions import (
-    build_deform_reg_weight,
-    build_expr_region_weight,
-    build_teeth_mask,
-)
+from model.expr_regions import build_deform_reg_weight, build_expr_region_weight
 from model.pose_weight import PoseWeightMLP
 from utils.camera import rotation_matrix_y_deg
-from utils.so3 import apply_rigid, apply_rigid_about_centroid, rotation_6d_to_matrix
-
-
-def charbonnier(x, eps=1e-3):
-    return torch.sqrt(x * x + eps * eps)
+from utils.mediapipe_blendshapes import load_mediapipe_mapping, mp_to_ict_expression_weights
+from utils.mesh_ops import apply_rigid, apply_rigid_about_centroid, rotation_6d_to_matrix
 
 
 class ICTDeformer(nn.Module):
@@ -30,9 +24,10 @@ class ICTDeformer(nn.Module):
         ict_facekit,
         region_weight=None,
         *,
+        mediapipe_name_to_ict="./assets/mediapipe_name_to_indices.pkl",
         template_hidden=128,
         max_template_delta=1e-2,
-        n_coeffs=52,
+        n_coeffs=53,
         expr_hidden=64,
         delta_ratio=0.75,
         delta_floor=1e-4,
@@ -47,14 +42,13 @@ class ICTDeformer(nn.Module):
         self.delta_ratio = delta_ratio
         self.delta_floor = delta_floor
 
-        # Jaw-open reference (``flame_similarity_ict_jaw_open`` + ``apply_flame_similarity``), not closed neutral.
         canonical = ict_facekit.canonical[0].detach()
         self.register_buffer("canonical_xyz", canonical)
 
         if region_weight is None:
             region_weight = build_expr_region_weight(ict_facekit)
+        region_weight = region_weight.to(device=ict_facekit.canonical.device)
         self.register_buffer("deform_reg_weight", build_deform_reg_weight(ict_facekit))
-        self.register_buffer("teeth_mask", build_teeth_mask(ict_facekit))
 
         self.template_mlp = nn.Sequential(
             nn.Linear(3, template_hidden),
@@ -78,10 +72,16 @@ class ICTDeformer(nn.Module):
             support_hi=support_hi,
             dilate_rings=dilate_rings,
         )
-        gate, mag_mp, mp_to_ict = build_mp_gates(ict_facekit, region_weight, mag_e, support_e)
+        if getattr(ict_facekit, "mediapipe_to_ict", None) is not None:
+            mp_to_ict = ict_facekit.mediapipe_to_ict
+        else:
+            mp_to_ict = load_mediapipe_mapping(
+                mediapipe_name_to_ict, num_expression=ict_facekit.num_expression
+            ).mediapipe_to_ict
+        gate, mag_mp = build_mp_gates(ict_facekit, region_weight, mag_e, support_e, mp_to_ict)
+        self.register_buffer("mp_to_ict", mp_to_ict)
         self.register_buffer("expr_gate", gate)
         self.register_buffer("expr_mag", mag_mp)
-        self.register_buffer("mp_to_ict", mp_to_ict)
 
         self.expr_au_embed = nn.Embedding(n_coeffs, expr_hidden)
         self.expr_mlp = nn.Sequential(
@@ -93,118 +93,45 @@ class ICTDeformer(nn.Module):
         nn.init.zeros_(self.expr_mlp[-1].bias)
         nn.init.normal_(self.expr_au_embed.weight, std=0.01)
 
-    def _apply_teeth_mask(self, delta):
-        if self.teeth_mask.any():
-            delta = delta.clone()
-            delta[self.teeth_mask] = 0.0
-        return delta
-
     def template_delta(self):
-        """[V, 3] smooth identity corrective from canonical coords (all verts except teeth)."""
+        """[V, 3] smooth identity corrective from canonical coords."""
         raw = self.template_mlp(self.canonical_xyz)
         scale = torch.exp(self.log_max_template_delta)
-        delta = scale * torch.tanh(raw)
-        return self._apply_teeth_mask(delta)
-
-    def weighted_delta_penalty(self, delta):
-        """delta [B,V,3] or [V,3] — region-weighted L2 (eye socket high)."""
-        if delta.ndim == 2:
-            delta = delta.unsqueeze(0)
-        w = self.deform_reg_weight.unsqueeze(0).unsqueeze(-1)
-        return (w * delta.pow(2)).mean()
-
-    def template_regularization_loss(self):
-        return self.weighted_delta_penalty(self.template_delta())
+        return scale * torch.tanh(raw)
 
     def mp_to_ict_expression(self, mp_coeffs):
-        """mp_coeffs [B, 52] -> ICT expression [B, num_expression]."""
-        B = mp_coeffs.shape[0]
-        n_exp = self.ict.num_expression
-        out = torch.zeros(B, n_exp, device=mp_coeffs.device, dtype=mp_coeffs.dtype)
-        idx = self.ict.mediapipe_to_ict
-        n = min(len(idx), mp_coeffs.shape[1])
-        out[:, idx[:n]] = mp_coeffs[:, :n]
-        return out
-
-    def _expr_delta_one_au(self, j, c_eff_j):
-        emb = self.expr_au_embed.weight[j]
-        inp = torch.cat(
-            [self.canonical_xyz, emb.unsqueeze(0).expand(self.canonical_xyz.shape[0], -1)],
-            dim=-1,
+        return mp_to_ict_expression_weights(
+            mp_coeffs, self.mp_to_ict, self.ict.num_expression
         )
-        raw = self.expr_mlp(inp) # TODO: Inference only인 경우 precomputed raw 사용할 수 있게 하기기
-        gate = self.expr_gate[j]
-        max_delta = self.delta_ratio * self.expr_mag[j] + self.delta_floor * gate
-        delta_j = gate.unsqueeze(-1) * max_delta.unsqueeze(-1) * torch.tanh(raw)
-        return c_eff_j.view(-1, 1, 1) * delta_j.unsqueeze(0)
+
+    def expression_raw_tanh(self):
+        """[J, V, 3] shared MLP, all AUs (before gate × magnitude × c_eff)."""
+        j = self.n_coeffs
+        v = self.canonical_xyz.shape[0]
+        xyz = self.canonical_xyz.unsqueeze(0).expand(j, -1, -1)
+        emb = self.expr_au_embed.weight.unsqueeze(1).expand(-1, v, -1)
+        inp = torch.cat([xyz, emb], dim=-1).reshape(j * v, -1)
+        raw = torch.tanh(self.expr_mlp(inp)).reshape(j, v, 3)
+        return raw, self.expr_gate
+
+    def expression_delta_basis(self):
+        """[J, V, 3] per-AU displacement field (region-gated, unit c_eff=1)."""
+        raw, gate = self.expression_raw_tanh()
+        max_delta = self.delta_ratio * self.expr_mag + self.delta_floor * gate
+        return gate.unsqueeze(-1) * max_delta.unsqueeze(-1) * raw
 
     def expression_delta(self, c_eff, return_aux=False):
         """
-        c_eff: [B, J] gamma-gated effective coefficients (active * C**gamma)
+        c_eff: [B, J] gamma-corrected ICT expression coefficients
         """
-        b = c_eff.shape[0]
-        total = c_eff.new_zeros(b, self.canonical_xyz.shape[0], 3)
-        raw_list = []
-        for j in range(self.n_coeffs):
-            if self.expr_gate[j].max() < 1e-6:
-                continue
-            d_j = self._expr_delta_one_au(j, c_eff[:, j])
-            total = total + d_j
-            if return_aux:
-                emb = self.expr_au_embed.weight[j]
-                inp = torch.cat(
-                    [
-                        self.canonical_xyz,
-                        emb.unsqueeze(0).expand(self.canonical_xyz.shape[0], -1),
-                    ],
-                    dim=-1,
-                )
-                raw_list.append(torch.tanh(self.expr_mlp(inp)))
-
+        basis = self.expression_delta_basis()
+        active = self.expr_gate.amax(dim=1) >= 1e-6
+        basis = basis * active.to(basis.dtype).view(-1, 1, 1)
+        total = torch.einsum("bj,jvd->bvd", c_eff, basis)
         if not return_aux:
             return total
-
-        return total, {"raw_tanh": raw_list, "gate": self.expr_gate}
-
-    def regularization_loss(self, c_eff, c_raw, expr_delta=None):
-        """Weak priors: neutral zero, support leakage, amplitude, socket-weighted expr."""
-        losses = {}
-        neutral_mask = c_raw.abs().sum(dim=-1) < 0.05
-        if neutral_mask.any():
-            losses["expr_neutral"] = self.expression_delta(c_eff[neutral_mask]).pow(2).mean()
-        else:
-            losses["expr_neutral"] = c_eff.new_zeros(())
-
-        leak = c_eff.new_zeros(())
-        amp = c_eff.new_zeros(())
-        n_terms = 0
-        for j in range(self.n_coeffs):
-            if self.expr_gate[j].max() < 1e-6:
-                continue
-            emb = self.expr_au_embed.weight[j]
-            inp = torch.cat(
-                [
-                    self.canonical_xyz,
-                    emb.unsqueeze(0).expand(self.canonical_xyz.shape[0], -1),
-                ],
-                dim=-1,
-            )
-            raw = torch.tanh(self.expr_mlp(inp))
-            outside = (1.0 - self.expr_gate[j]).clamp(min=0.0)
-            leak = leak + (outside.unsqueeze(-1) * raw).pow(2).mean()
-            max_delta = self.delta_ratio * self.expr_mag[j] + self.delta_floor * self.expr_gate[j]
-            amp = amp + charbonnier(raw / (max_delta.unsqueeze(-1) + 1e-6)).mean()
-            n_terms += 1
-        if n_terms > 0:
-            leak = leak / n_terms
-            amp = amp / n_terms
-        losses["expr_leak"] = leak
-        losses["expr_amp"] = amp
-        if expr_delta is not None:
-            losses["expr_socket"] = self.weighted_delta_penalty(expr_delta)
-        else:
-            losses["expr_socket"] = c_eff.new_zeros(())
-        return losses
+        raw, gate = self.expression_raw_tanh()
+        return total, {"raw_tanh": raw, "gate": gate}
 
     def apply_weighted_pose(
         self,
@@ -213,23 +140,27 @@ class ICTDeformer(nn.Module):
         t,
         scale=None,
         pose_weight_fixed=None,
+        pose_w=None,
         rotate_about_centroid=False,
     ):
         """verts [B,V,3], R [B,3,3], t [B,3]; optional uniform scale (usually disabled)."""
-        if pose_weight_fixed is not None:
-            w = torch.full(
-                (self.canonical_xyz.shape[0], 1),
-                float(pose_weight_fixed),
-                device=verts.device,
-                dtype=verts.dtype,
-            )
+        if pose_w is None:
+            if pose_weight_fixed is not None:
+                w = torch.full(
+                    (self.canonical_xyz.shape[0], 1),
+                    float(pose_weight_fixed),
+                    device=verts.device,
+                    dtype=verts.dtype,
+                )
+            else:
+                w = self.pose_weight_net(self.canonical_xyz)
         else:
-            w = self.pose_weight_net(self.canonical_xyz)
+            w = pose_w
         if rotate_about_centroid:
             rigid = apply_rigid_about_centroid(verts, R, t)
         else:
             rigid = apply_rigid(verts, R, t, scale=scale)
-        return (1.0 - w.unsqueeze(0)) * verts + w.unsqueeze(0) * rigid
+        return (1.0 - w.unsqueeze(0)) * verts + w.unsqueeze(0) * rigid, w
 
     # NOTE: only for debug
     def apply_head_yaw(self, verts, yaw_deg, pivot=None):
@@ -263,19 +194,19 @@ class ICTDeformer(nn.Module):
         apply_flame_similarity=True,
         head_yaw_deg=None,
         pose_weight_fixed=None,
-        rotate_about_centroid=True,
+        rotate_about_centroid=False,
         pose_zero_tz=False,
     ):
         """
-        mp_coeffs_corr: [B, 52]
-        c_eff: [B, J] for support-gated expression (optional if ``expr_delta`` set)
+        mp_coeffs_corr: [B, 53] ICT expression coeffs (gamma-corrected); MP input remains [B, 52]
+        c_eff: [B, J] per MP channel for region-gated neural delta
         pose_rotation_6d: [B, 6] residual (optional)
         pose_translation: [B, 3] residual (optional)
-        expression_weights: optional [B, num_expression] (bypasses MP→ICT mapping)
+        expression_weights: optional [B, num_expression] (bypasses MP gather)
         head_yaw_deg: orbit mesh about world +Y (constant-camera sanity / debug)
         pose_weight_fixed: if set, use this w(x) instead of PoseWeightMLP (e.g. 1.0)
         rotate_about_centroid: rotate about mesh centroid (not world origin)
-        pose_zero_tz: zero translation z before applying pose
+        pose_zero_tz: if True, zero translation z (deprecated for train — use tz + perspective)
         """
         B = mp_coeffs_corr.shape[0]
         device = mp_coeffs_corr.device
@@ -308,16 +239,6 @@ class ICTDeformer(nn.Module):
         if pose_zero_tz:
             t_pose = t_pose.clone()
             t_pose[..., 2] = 0.0
-        verts_posed = self.apply_weighted_pose(
-            verts_unposed,
-            R,
-            t_pose,
-            scale=pose_scale,
-            pose_weight_fixed=pose_weight_fixed,
-            rotate_about_centroid=rotate_about_centroid,
-        )
-        if head_yaw_deg is not None and float(head_yaw_deg) != 0.0:
-            verts_posed = self.apply_head_yaw(verts_posed, head_yaw_deg)
 
         if pose_weight_fixed is not None:
             pose_w = torch.full(
@@ -328,6 +249,18 @@ class ICTDeformer(nn.Module):
             )
         else:
             pose_w = self.pose_weight_net(self.canonical_xyz)
+
+        verts_posed, _ = self.apply_weighted_pose(
+            verts_unposed,
+            R,
+            t_pose,
+            scale=pose_scale,
+            pose_weight_fixed=pose_weight_fixed,
+            pose_w=pose_w,
+            rotate_about_centroid=rotate_about_centroid,
+        )
+        if head_yaw_deg is not None and float(head_yaw_deg) != 0.0:
+            verts_posed = self.apply_head_yaw(verts_posed, head_yaw_deg)
 
         out = {
             "verts_posed": verts_posed,

@@ -1,38 +1,24 @@
 # 문서 인덱스
 
-구현·설계 문서는 **`docs/implementation/`** 에 둔다.  
-(`internal/` 은 사용하지 않음.)
+구현 문서: **`docs/implementation/`**
 
-## 아키텍처
-
-| 문서 | 내용 |
-|------|------|
-| [implementation/restructure.md](implementation/restructure.md) | FLARE → UVH 3DGS 마이그레이션, 디렉터리 |
-| [implementation/uvh_gaussian_avatar.md](implementation/uvh_gaussian_avatar.md) | UVH + `GaussianAvatar` 전체 스택 |
-| [implementation/eye_texture_spaces.md](implementation/eye_texture_spaces.md) | 좌/우 eye texture space, gaze UV, h=0 |
-
-## 에셋 / 전처리
+## 핵심
 
 | 문서 | 내용 |
 |------|------|
-| [implementation/default_camera.md](implementation/default_camera.md) | `default_camera.npz` bake·로드 |
-| [implementation/ict_mediapipe_lmk_baker.md](implementation/ict_mediapipe_lmk_baker.md) | MediaPipe → ICT landmark embedding |
-| [implementation/ict_facekit_npy.md](implementation/ict_facekit_npy.md) | `ict_facekit_torch.npy` bake (parts #0–#8) |
-| [implementation/ict_texture_map_index.md](implementation/ict_texture_map_index.md) | usemtl + UV tile → `face_texture_map_id` |
-| [implementation/save_ict_blendshapes.md](implementation/save_ict_blendshapes.md) | ICT blendshape npz export |
+| [implementation/eye_uv_slide.md](implementation/eye_uv_slide.md) | Active: surface eye Gaussians |
+| [implementation/eye_surface_gaussians.md](implementation/eye_surface_gaussians.md) | Surface vs UV-slide |
+| [implementation/training_stages.md](implementation/training_stages.md) | Stage schedule |
+| [implementation/ict_facekit_npy.md](implementation/ict_facekit_npy.md) | npy bake |
+| [implementation/ict_mediapipe_lmk_baker.md](implementation/ict_mediapipe_lmk_baker.md) | MP landmark bake |
+| [implementation/camera_metrical_crop.md](implementation/camera_metrical_crop.md) | `default_camera.npz` (metrical crop) |
+| [implementation/ict_texture_map_index.md](implementation/ict_texture_map_index.md) | 12 usemtl texture maps |
+| [implementation/runtime_texture_maps.md](implementation/runtime_texture_maps.md) | Runtime texture fields |
+| [implementation/project_layout.md](implementation/project_layout.md) | Active tree vs `legacy/` |
+| [implementation/current_status_20260526.md](implementation/current_status_20260526.md) | **최신 구현 사항 및 아키텍처 정리 (2026-05-26)** |
+| [implementation/flare_legacy_cleanup.md](implementation/flare_legacy_cleanup.md) | FLARE archive + `archive_flare_legacy.py` |
 
-## 기타
+## 아카이브
 
-- [loss_memo.txt](loss_memo.txt) — loss 실험 메모 (비정형)
-
-## 빠른 참조 (eye)
-
-```python
-from model.gaussian_avatar import GaussianAvatar
-from model.ict_model import ICTFaceKitTorch
-
-ict = ICTFaceKitTorch(npy_dir="assets/ict_facekit_torch.npy")
-avatar = GaussianAvatar.from_ict(ict, n_face_gaussians=65536, gaze_uv_range=0.12)
-verts = ict.forward(expression_weights=exp, to_canonical=False)
-out = avatar(verts[0], ict.faces, expression_weights=exp, expression_names=ict.expression_names)
-```
+- UV-slide eye experiment: `legacy/eye_uv_slide/` (+ `legacy/eye_uv_slide/docs/`)
+- FLARE: `legacy/` (see repo `legacy` tree)
