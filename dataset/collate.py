@@ -7,6 +7,8 @@ import torch
 LOSS_BATCH_TENSOR_KEYS = (
     "image",
     "mask",
+    "mask_dist_out",
+    "mask_dist_in",
     "mp_blendshape",
     "mp_blendshape_raw",
     "mp_landmarks_2d",

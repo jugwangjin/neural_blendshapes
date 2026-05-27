@@ -2,12 +2,16 @@
 
 import torch
 
-from losses.gaussian_regularization import loss_geometry_log_scale, loss_opacity_toward_one
+from losses.gaussian_regularization import (
+    loss_geometry_log_scale,
+    loss_opacity_toward_one,
+    loss_scaling_regularization,
+)
 from losses.h_regularization import loss_h_image_space
 from losses.mediapipe_landmark_478 import loss_mediapipe_landmarks_478
 from losses.pie68_jaw_landmark import loss_pie68_jawline
 from losses.rgb import l1_loss
-from losses.silhouette import loss_silhouette
+from losses.silhouette import loss_silhouette, loss_silhouette_edt
 from rendering.pack import surface_avatar_out
 
 
@@ -72,8 +76,23 @@ def compute_losses(
         losses["rgb"] = l1_loss(render["rgb"], batch["image"])
 
     w_sil = _silhouette_weight(cfg)
-    if render is not None and "alpha" in render and batch.get("mask") is not None and w_sil > 0:
-        losses["silhouette"] = loss_silhouette(render["alpha"], batch["mask"])
+    if render is not None and "alpha" in render and w_sil > 0:
+        use_edt = bool(_get_w(cfg, "silhouette_use_edt", False))
+        if (
+            use_edt
+            and batch.get("mask_dist_out") is not None
+            and batch.get("mask_dist_in") is not None
+        ):
+            losses["silhouette"] = loss_silhouette_edt(
+                render["alpha"],
+                batch["mask_dist_out"],
+                batch["mask_dist_in"],
+                w_ext=_get_w(cfg, "silhouette_edt_w_ext", 1.0),
+                w_int=_get_w(cfg, "silhouette_edt_w_int", 1.0),
+                max_dist_px=_get_w(cfg, "silhouette_edt_max_dist_px", 50.0),
+            )
+        elif batch.get("mask") is not None:
+            losses["silhouette"] = loss_silhouette(render["alpha"], batch["mask"])
 
     if batch.get("mp_landmarks_2d") is not None and mp_lmk_emb is not None and _get_w(cfg, "w_mp_lmk") > 0:
         mesh_xyz = avatar_out.get("mesh_xyz")
@@ -87,6 +106,7 @@ def compute_losses(
             camera,
             image_size,
             mp_valid=batch.get("mp_valid"),
+            iris_weight=_get_w(cfg, "mp_lmk_iris_weight", 2.5),
         )
 
     if (
@@ -122,12 +142,17 @@ def compute_losses(
 
     sem_prob = _surface_sem_prob(avatar_out)
 
-    if sem_prob is not None and avatar is not None and _get_w(cfg, "w_geometry") > 0:
+    if avatar is not None and _get_w(cfg, "w_geometry") > 0:
         losses["geometry"] = loss_geometry_log_scale(
             avatar.surface.log_scale,
-            sem_prob,
-            max_scale=_get_w(cfg, "geometry_max_scale", 0.05),
-            skin_only=True,
+            max_scale=_get_w(cfg, "geometry_max_scale", 0.008),
+        )
+
+    if avatar is not None and _get_w(cfg, "w_scaling", 0.0) > 0:
+        losses["scaling"] = loss_scaling_regularization(
+            avatar.surface.log_scale,
+            thresh_scaling_max=_get_w(cfg, "thresh_scaling_max", 0.008),
+            thresh_scaling_ratio=_get_w(cfg, "thresh_scaling_ratio", 10.0),
         )
 
     if sem_prob is not None and avatar is not None and _get_w(cfg, "w_opacity") > 0:
@@ -138,6 +163,24 @@ def compute_losses(
             w_skin=_get_w(cfg, "opacity_w_skin", 1.0),
             w_other=_get_w(cfg, "opacity_w_other", 0.05),
         )
+
+    w_opacity_decay = _get_w(cfg, "w_opacity_decay", 0.0)
+    if avatar is not None and w_opacity_decay > 0:
+        codes = getattr(avatar.surface, "face_region_code", None)
+        if codes is None:
+            from utils.ict_regions import classify_surface_triangles_batch
+            codes = classify_surface_triangles_batch(
+                avatar.surface.face_idx,
+                ict_faces,
+                avatar.ict,
+                avatar.surface.opacity.device,
+            )
+        # Apply L1 decay ONLY to head (3), face (4), sclera (5), and eye occlusion (6)
+        # Protects mouth interior (0), mouth socket (1), eye socket (2)
+        decay_mask = (codes == 3) | (codes == 4) | (codes == 5) | (codes == 6)
+        if decay_mask.any():
+            op_decay = torch.sigmoid(avatar.surface.opacity[decay_mask])
+            losses["opacity_decay"] = op_decay.mean()
 
     if corr is not None and corr.get("gamma") is not None and _get_w(cfg, "w_gamma_prior") > 0:
         losses["gamma_prior"] = torch.log(corr["gamma"].clamp(min=1e-4)).pow(2).mean()
@@ -195,7 +238,9 @@ def compute_losses(
         ("pie68_jaw", "w_pie68_jaw"),
         ("h", "w_h"),
         ("geometry", "w_geometry"),
+        ("scaling", "w_scaling"),
         ("opacity", "w_opacity"),
+        ("opacity_decay", "w_opacity_decay"),
         ("gamma_prior", "w_gamma_prior"),
         ("pose_prior", "w_pose_prior"),
         ("pose_tz", "w_pose_tz"),

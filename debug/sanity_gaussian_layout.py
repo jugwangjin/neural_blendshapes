@@ -129,9 +129,15 @@ def apply_opacity_one(avatar):
     avatar.opacity.data.fill_(OPACITY_LOGIT)
 
 
-def save_rgb(path, tensor_chw):
+def save_rgb(path, tensor_chw, alpha_chw=None):
     img = tensor_chw.detach().float().cpu().permute(1, 2, 0).numpy()
-    img = (img.clip(0, 1) * 255.0).astype(np.uint8)
+    img = img.clip(0, 1)
+    if alpha_chw is not None:
+        a = alpha_chw.detach().float().cpu().squeeze().numpy()
+        a = a.clip(0, 1)
+        if a.shape == img.shape[:2]:
+            img = np.concatenate([img, a[..., None]], axis=-1)
+    img = (img * 255.0).round().astype(np.uint8)
     path.parent.mkdir(parents=True, exist_ok=True)
     imageio.imwrite(str(path), img)
     return img
@@ -339,6 +345,7 @@ def main():
         k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
         k_eyeball_sclera=cfg.n_surface_gaussians_per_eyeball_sclera,
         k_eye_occlusion=cfg.n_surface_gaussians_per_eye_occlusion,
+        k_face_loose_factor=0.5,
     )
     print(f"device={device}  image_size={image_size}")
     print(f"mp_embedding: {cfg.mp_embedding}")
@@ -389,7 +396,7 @@ def main():
     for tag, exp, yaw, kind in render_jobs:
         v_show = mesh_for_render_deformer(deformer, ict, exp, yaw_deg=yaw, apply_flame_similarity=apply_align)
         render, depth_out, avatar_out = render_mesh(avatar, renderer, base_camera, v_show, ict.faces, device)
-        rgb_img = save_rgb(out_dir / f"{tag}_rgb.png", render["rgb"][0])
+        rgb_img = save_rgb(out_dir / f"{tag}_rgb.png", render["rgb"][0], render["alpha"][0])
         save_depth_bundle(out_dir, tag, depth_out, rgb_uint8=rgb_img)
         extra = " depth+overlay"
         if save_pcd:
@@ -405,7 +412,7 @@ def main():
     if args.compare_raw_neutral:
         verts_raw = ict.neutral_mesh[0]
         render, depth_out, _ = render_mesh(avatar, renderer, base_camera, verts_raw, ict.faces, device)
-        rgb_img = save_rgb(out_dir / "raw_neutral_rgb.png", render["rgb"][0])
+        rgb_img = save_rgb(out_dir / "raw_neutral_rgb.png", render["rgb"][0], render["alpha"][0])
         save_depth_bundle(out_dir, "raw_neutral", depth_out, rgb_uint8=rgb_img)
 
     legend = [

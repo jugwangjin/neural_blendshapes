@@ -19,24 +19,31 @@ def dilate_vertex_mask(mask, faces, n_ring=2):
 
 def precompute_expression_support(
     ict,
-    quantile=0.95,
-    support_lo=0.05,
-    support_hi=0.20,
+    alpha=0.1,
     dilate_rings=2,
+    **kwargs,  # For backward-compatibility with unused kwargs (quantile, support_lo, support_hi)
 ):
     """
+    Normalized Soft Mask Gating based on raw blendshape displacement norm.
+    Uses the formula min( ||B_j,v|| / (max_v ||B_j,v|| * alpha), 1.0 ).
+    Dilated by dilate_rings to support neighboring vertex skin sliding.
+    
     Returns:
       mag: [E, V] ICT expression mode magnitude per vertex
-      support: [E, V] soft support in [0, 1]
+      support: [E, V] soft support gate in [0, 1]
     """
     modes = ict.expression_shape_modes[0]
-    mag = modes.norm(dim=-1)
-    q = torch.quantile(mag, quantile, dim=1, keepdim=True)
-    m = mag / (q + 1e-8)
-    support = smoothstep(m, support_lo, support_hi)
+    mag = modes.norm(dim=-1) # [E, V]
+    max_mag = mag.amax(dim=1, keepdim=True) # [E, 1]
+    
+    # min( ||B_j,v|| / (max_v ||B_j,v|| * alpha), 1.0 ) soft-clamping
+    support = torch.clamp(mag / (max_mag * alpha + 1e-8), 0.0, 1.0)
+    
     faces = ict.faces
-    dilated = [dilate_vertex_mask(support[e], faces, n_ring=dilate_rings) for e in range(support.shape[0])]
-    support = torch.stack(dilated, dim=0)
+    if dilate_rings > 0:
+        dilated = [dilate_vertex_mask(support[e], faces, n_ring=dilate_rings) for e in range(support.shape[0])]
+        support = torch.stack(dilated, dim=0)
+        
     return mag, support
 
 

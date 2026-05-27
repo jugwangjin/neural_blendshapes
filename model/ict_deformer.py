@@ -28,13 +28,12 @@ class ICTDeformer(nn.Module):
         template_hidden=128,
         max_template_delta=1e-2,
         n_coeffs=53,
-        expr_hidden=64,
+        expr_hidden=128,
         delta_ratio=0.75,
         delta_floor=1e-4,
-        support_quantile=0.95,
-        support_lo=0.05,
-        support_hi=0.20,
+        gate_alpha=0.1,         # Normalized Soft Mask alpha threshold (default 0.1)
         dilate_rings=2,
+        **kwargs,               # Absorb deprecated support_quantile, support_lo, support_hi
     ):
         super().__init__()
         self.ict = ict_facekit
@@ -52,9 +51,13 @@ class ICTDeformer(nn.Module):
 
         self.template_mlp = nn.Sequential(
             nn.Linear(3, template_hidden),
-            nn.ReLU(inplace=True),
+            nn.Softplus(beta=100),
             nn.Linear(template_hidden, template_hidden),
-            nn.ReLU(inplace=True),
+            nn.Softplus(beta=100),
+            nn.Linear(template_hidden, template_hidden),
+            nn.Softplus(beta=100),
+            nn.Linear(template_hidden, template_hidden),
+            nn.Softplus(beta=100),
             nn.Linear(template_hidden, 3),
         )
         nn.init.zeros_(self.template_mlp[-1].weight)
@@ -67,9 +70,7 @@ class ICTDeformer(nn.Module):
 
         mag_e, support_e = precompute_expression_support(
             ict_facekit,
-            quantile=support_quantile,
-            support_lo=support_lo,
-            support_hi=support_hi,
+            alpha=gate_alpha,
             dilate_rings=dilate_rings,
         )
         if getattr(ict_facekit, "mediapipe_to_ict", None) is not None:
@@ -83,15 +84,18 @@ class ICTDeformer(nn.Module):
         self.register_buffer("expr_gate", gate)
         self.register_buffer("expr_mag", mag_mp)
 
-        self.expr_au_embed = nn.Embedding(n_coeffs, expr_hidden)
         self.expr_mlp = nn.Sequential(
-            nn.Linear(3 + expr_hidden, expr_hidden),
-            nn.ReLU(inplace=True),
-            nn.Linear(expr_hidden, 3),
+            nn.Linear(3, expr_hidden),
+            nn.Softplus(beta=100),
+            nn.Linear(expr_hidden, expr_hidden),
+            nn.Softplus(beta=100),
+            nn.Linear(expr_hidden, expr_hidden),
+            nn.Softplus(beta=100),
+            nn.Linear(expr_hidden, expr_hidden),
+            nn.Softplus(beta=100),
+            nn.Linear(expr_hidden, n_coeffs * 3, bias=False),
         )
         nn.init.zeros_(self.expr_mlp[-1].weight)
-        nn.init.zeros_(self.expr_mlp[-1].bias)
-        nn.init.normal_(self.expr_au_embed.weight, std=0.01)
 
     def template_delta(self):
         """[V, 3] smooth identity corrective from canonical coords."""
@@ -105,13 +109,10 @@ class ICTDeformer(nn.Module):
         )
 
     def expression_raw_tanh(self):
-        """[J, V, 3] shared MLP, all AUs (before gate × magnitude × c_eff)."""
+        """[J, V, 3] channel-wise AU basis (before gate × magnitude × c_eff)."""
         j = self.n_coeffs
-        v = self.canonical_xyz.shape[0]
-        xyz = self.canonical_xyz.unsqueeze(0).expand(j, -1, -1)
-        emb = self.expr_au_embed.weight.unsqueeze(1).expand(-1, v, -1)
-        inp = torch.cat([xyz, emb], dim=-1).reshape(j * v, -1)
-        raw = torch.tanh(self.expr_mlp(inp)).reshape(j, v, 3)
+        raw = torch.tanh(self.expr_mlp(self.canonical_xyz))
+        raw = raw.reshape(-1, j, 3).permute(1, 0, 2).contiguous()
         return raw, self.expr_gate
 
     def expression_delta_basis(self):
@@ -120,11 +121,13 @@ class ICTDeformer(nn.Module):
         max_delta = self.delta_ratio * self.expr_mag + self.delta_floor * gate
         return gate.unsqueeze(-1) * max_delta.unsqueeze(-1) * raw
 
-    def expression_delta(self, c_eff, return_aux=False):
+    def expression_delta(self, c_eff, basis=None, return_aux=False):
         """
         c_eff: [B, J] gamma-corrected ICT expression coefficients
+        basis: optional cached [J, V, 3] expression basis
         """
-        basis = self.expression_delta_basis()
+        if basis is None:
+            basis = self.expression_delta_basis()
         active = self.expr_gate.amax(dim=1) >= 1e-6
         basis = basis * active.to(basis.dtype).view(-1, 1, 1)
         total = torch.einsum("bj,jvd->bvd", c_eff, basis)
@@ -188,6 +191,7 @@ class ICTDeformer(nn.Module):
         pose_scale=None,
         c_eff=None,
         expr_delta=None,
+        expression_basis=None,
         apply_expression_deform=True,
         return_unposed=False,
         expression_weights=None,
@@ -200,6 +204,7 @@ class ICTDeformer(nn.Module):
         """
         mp_coeffs_corr: [B, 53] ICT expression coeffs (gamma-corrected); MP input remains [B, 52]
         c_eff: [B, J] per MP channel for region-gated neural delta
+        expression_basis: optional cached [J,V,3] basis from expression_delta_basis()
         pose_rotation_6d: [B, 6] residual (optional)
         pose_translation: [B, 3] residual (optional)
         expression_weights: optional [B, num_expression] (bypasses MP gather)
@@ -225,7 +230,7 @@ class ICTDeformer(nn.Module):
         verts_unposed = verts_unposed + tpl.unsqueeze(0)
 
         if expr_delta is None and apply_expression_deform and c_eff is not None:
-            expr_delta = self.expression_delta(c_eff)
+            expr_delta = self.expression_delta(c_eff, basis=expression_basis)
         if expr_delta is not None:
             verts_unposed = verts_unposed + expr_delta
 

@@ -16,7 +16,9 @@ class VideoDataset(Dataset):
         self.au_active_boost = au_active_boost and train
         self.au_active_ratio = getattr(cfg, "au_active_sample_ratio", 0.3)
         self.au_active_thresh = getattr(cfg, "au_active_thresh", 0.12)
-        scenes = cfg.train_scenes if train else cfg.eval_scenes
+        from dataset.dataset_util import normalize_split_names
+        split = cfg.train_split if train else cfg.eval_split
+        scenes = normalize_split_names(split)
         self.frames = []
         for scene in scenes:
             scene_dir = Path(cfg.input_dir) / scene / cfg.mp_cache_dir.name

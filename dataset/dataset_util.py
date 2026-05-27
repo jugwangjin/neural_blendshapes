@@ -179,12 +179,39 @@ def srgb_to_rgb(f: torch.Tensor) -> torch.Tensor:
 # FLARE layout paths
 # -----------------------------------------------------------------------------
 
-def list_split_images(subject_root: Path, split: str):
-    """Sorted ``.png`` under ``subject_root / split / image``."""
-    img_dir = Path(subject_root) / split / "image"
-    if not img_dir.is_dir():
+def normalize_split_names(split) -> list[str]:
+    """``"train"`` | ``["MVI_1797", "MVI_1801"]`` → list of scene folder names."""
+    if split is None:
         return []
-    return sorted(img_dir.glob("*.png"))
+    if isinstance(split, str):
+        return [split]
+    return [str(s) for s in split]
+
+
+def format_splits_label(split) -> str:
+    names = normalize_split_names(split)
+    if len(names) == 0:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return "+".join(names)
+
+
+def scene_tag_from_image(subject_root: Path, img_path: Path) -> str:
+    """``{subject_root}/{scene}/image/<stem>.png`` → ``scene``."""
+    rel = Path(img_path).resolve().relative_to(Path(subject_root).resolve())
+    return rel.parts[0]
+
+
+def list_split_images(subject_root: Path, split):
+    """Sorted ``.png`` merged from ``subject_root / {scene} / image`` for each scene in ``split``."""
+    subject_root = Path(subject_root)
+    out = []
+    for scene in normalize_split_names(split):
+        img_dir = subject_root / scene / "image"
+        if img_dir.is_dir():
+            out.extend(sorted(img_dir.glob("*.png")))
+    return out
 
 
 def paths_for_image(img_path: Path):
@@ -253,11 +280,10 @@ def compute_eye_au_calibration(
     bshapes_mode: torch.Tensor,
     *,
     blink_lo_percentile: float = 10.0,  # 눈을 뜬 상태 (작은 눈 베이스라인 커버)
-    blink_hi_percentile: float = 98.0,  # 눈을 완전히 감은 상태 (Blink 피크)
     min_range: float = 0.4,             # 블링크 변화량의 최소 보장폭
 ):
     """
-    Eye Blink 캘리브레이션: 하위 백분위수를 0으로, 상위 백분위수를 1.0으로 스케일링.
+    Eye Blink 캘리브레이션: 하위 백분위수를 0으로, 시퀀스 max를 1.0으로 스케일링.
     eyeWide: 일반 FAU로 처리되므로 (raw - mode).clamp(0,1) 사용.
     """
     lo_list = []
@@ -265,7 +291,7 @@ def compute_eye_au_calibration(
     for j in (MP_EYE_BLINK_L, MP_EYE_BLINK_R):
         col = blendshapes_stack[:, j]
         lo_v = float(np.percentile(col, blink_lo_percentile))
-        hi_v = float(np.percentile(col, blink_hi_percentile))
+        hi_v = float(np.max(col))
         span = hi_v - lo_v
         if span < min_range:
             hi_v = lo_v + min_range
@@ -329,7 +355,7 @@ def eye_au_stats_note(
             hi = float(eye_cal["blink_hi"][k])
             cal_med = _calibrate_eye_channel(float(np.median(col)), lo, hi)
             cal_p90 = _calibrate_eye_channel(float(np.percentile(col, 90)), lo, hi)
-            cal_p98 = _calibrate_eye_channel(float(np.percentile(col, 98)), lo, hi)
-            line += f" | blink cal lo={lo:.3f} hi={hi:.3f} median→{cal_med:.3f} p90→{cal_p90:.3f} p98→{cal_p98:.3f}"
+            cal_max = _calibrate_eye_channel(float(np.max(col)), lo, hi)
+            line += f" | blink cal lo={lo:.3f} hi={hi:.3f} median→{cal_med:.3f} p90→{cal_p90:.3f} max→{cal_max:.3f}"
         print(line)
 

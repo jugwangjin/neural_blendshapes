@@ -35,13 +35,21 @@ def vertices2landmarks_barycentric(vertices, faces, face_idx, bary):
     return vertices2landmarks(vertices, faces, face_idx, bary)
 
 
-def robust_l1(pred, target, valid=None, eps=1e-3):
+MP_IRIS_INDEX_LO = 468  # MP 468–472 (L), 473–477 (R)
+
+
+def robust_l1(pred, target, valid=None, point_weight=None, eps=1e-3):
     """Charbonnier / robust L1 on 2D points. pred/target: [B, N, 2]. valid: [B, N]."""
     diff = torch.sqrt((pred - target).pow(2).sum(dim=-1) + eps * eps)
-    if valid is None:
-        return diff.mean()
-    w = valid.float()
-    return (diff * w).sum() / w.sum().clamp(min=1.0)
+    w = torch.ones_like(diff)
+    if point_weight is not None:
+        w = w * point_weight.view(1, -1).to(device=diff.device, dtype=diff.dtype)
+    if valid is not None:
+        w = w * valid.to(device=diff.device, dtype=diff.dtype)
+    finite = torch.isfinite(pred).all(dim=-1) & torch.isfinite(target).all(dim=-1)
+    w = w * finite.to(dtype=diff.dtype)
+    denom = w.sum().clamp(min=1.0)
+    return (diff * w).sum() / denom
 
 
 def build_mp_lmk_embedding(path, device):
@@ -67,11 +75,13 @@ def loss_mediapipe_landmarks_478(
     camera,
     image_size,
     mp_valid=None,
+    iris_weight=2.5,
 ):
     """
     vertices: [B, V, 3] deformed ICT mesh (world)
     mp_landmarks_2d: [B, 478, 2] normalized UV in [0, 1]
     mp_lmk_emb: dict from ``build_mp_lmk_embedding`` (``mp_ids``, ``face_idx``, ``bary``)
+    iris_weight: per-point multiplier for MP iris indices 468–477 (face/eyelid use 1.0)
     """
     # Since mp_lmk_emb and faces are already fully initialized on the target device
     # during build_mp_lmk_embedding and main training script, we avoid calling
@@ -89,12 +99,27 @@ def loss_mediapipe_landmarks_478(
     if faces.device != vertices.device:
         faces = faces.to(device=vertices.device)
 
+    if not torch.isfinite(vertices).all():
+        return vertices.new_zeros(())
+
     lmk_xyz = vertices2landmarks_barycentric(vertices, faces, face_idx, bary)
+    from utils.camera import world_to_camera
+
+    lmk_cam = world_to_camera(lmk_xyz, camera)
+    in_front = lmk_cam[..., 2] > 1e-3
     proj = camera.project_world_points(lmk_xyz.reshape(-1, 3)).reshape(vertices.shape[0], -1, 2)
     pred_uv = proj / float(image_size)
 
     target_uv = mp_landmarks_2d[:, mp_ids].to(device=vertices.device, dtype=vertices.dtype)
-    valid = None
+    valid = in_front.to(device=vertices.device, dtype=vertices.dtype)
     if mp_valid is not None:
-        valid = mp_valid[:, mp_ids].to(device=vertices.device, dtype=vertices.dtype)
-    return robust_l1(pred_uv, target_uv, valid=valid)
+        valid = valid * mp_valid[:, mp_ids].to(device=vertices.device, dtype=vertices.dtype)
+
+    point_weight = torch.ones(mp_ids.shape[0], device=vertices.device, dtype=vertices.dtype)
+    if iris_weight != 1.0:
+        point_weight = torch.where(
+            mp_ids >= MP_IRIS_INDEX_LO,
+            point_weight.new_tensor(float(iris_weight)),
+            point_weight,
+        )
+    return robust_l1(pred_uv, target_uv, valid=valid, point_weight=point_weight)

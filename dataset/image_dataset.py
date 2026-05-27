@@ -1,9 +1,12 @@
 """
-Image-split dataset: ``root/{split}/{image,mask,semantic,...}`` (``Config.input_dir`` layout).
+Image-split dataset: ``root/{scene}/image`` (``Config.input_dir`` layout).
+
+``train_split`` / ``eval_split`` may be a scene name (``"train"``) or a list
+(``["MVI_1797", "MVI_1801"]``); images from all scenes are merged into one index.
 
 On init: run/cache MediaPipe + face_alignment (tqdm); **no-face frames are excluded** from
-the index. ``bshapes_mode`` + ``eye_au_cal`` are baked from the **train** split into
-``bshapes_mode.pt``; eval/test only load that file.
+the index. ``bshapes_mode`` + ``eye_au_cal`` are baked from the **train** scenes into
+``mp_coeff_mode.pt``; eval/test only load that file.
 Sampling up-weights AU+pose outliers vs near-mean frames (not sequential / AU-index boost).
 """
 
@@ -22,12 +25,19 @@ from dataset.dataset_util import (
     compute_distribution_weights,
     compute_eye_au_calibration,
     eye_au_stats_note,
+    format_splits_label,
     list_split_images,
     matrix_to_pose_feat,
+    normalize_split_names,
     paths_for_image,
 )
 from utils.mediapipe_blendshapes import MP_EYE_BLINK_L, MP_EYE_BLINK_R, MP_EYE_WIDE_L, MP_EYE_WIDE_R
 from dataset.frame_processor import build_split_cache
+from dataset.mask_distance_cache import (
+    build_mask_edt_cache,
+    default_mask_distance_fields,
+    load_or_compute_mask_distance,
+)
 from dataset.mediapipe_cache import default_frame_dict, load_frame_npz
 
 
@@ -66,10 +76,10 @@ def _resize_mask(mask_hwc: torch.Tensor, image_size: int) -> torch.Tensor:
 
 
 def _bshapes_mode_path(cfg, subject_root: Path) -> Path:
-    p = subject_root / "bshapes_mode.pt"
+    p = subject_root / "mp_coeff_mode.pt"
     if p.is_file():
         return p
-    return Path(cfg.mp_cache_dir) / subject_root.name / "bshapes_mode.pt"
+    return Path(cfg.mp_cache_dir) / subject_root.name / "mp_coeff_mode.pt"
 
 
 def _semantic_to_train_tensors(semantic_path, image_size: int):
@@ -95,7 +105,7 @@ class ImageDataset(Dataset):
         self.distribution_ratio = getattr(cfg, "distribution_sample_ratio", 0.35)
         self.synthetic_if_empty = synthetic_if_empty
 
-        split = cfg.flare_train_split if train else cfg.flare_eval_split
+        split = cfg.train_split if train else cfg.eval_split
         subject_root = Path(cfg.input_dir)
         all_images = list_split_images(subject_root, split)
 
@@ -108,6 +118,13 @@ class ImageDataset(Dataset):
             face_landmarker_task=cfg.face_landmarker_task,
         )
 
+        if len(self.image_paths) > 0 and getattr(cfg, "precompute_mask_edt_cache", False):
+            build_mask_edt_cache(
+                cfg,
+                self.image_paths,
+                rebuild=getattr(cfg, "rebuild_mask_edt_cache", False),
+            )
+
         if len(self.image_paths) == 0:
             if synthetic_if_empty:
                 self.image_paths = None
@@ -117,7 +134,7 @@ class ImageDataset(Dataset):
                 self.eye_au_cal = None
                 return
             raise RuntimeError(
-                f"No valid faces in {subject_root / split}/image "
+                f"No valid faces under {subject_root}/{{{format_splits_label(split)}}}/image "
                 f"(run with rebuild_mp_cache or check face_landmarker.task)"
             )
 
@@ -137,7 +154,7 @@ class ImageDataset(Dataset):
 
         if self.train and (self.bshapes_mode is None or self.eye_au_cal is None):
             stack = self._load_blendshape_stack()
-            pct = getattr(cfg, "bshapes_mode_percentile", 2.5)
+            pct = getattr(cfg, "bshapes_mode_percentile", 1.0)
             if self.bshapes_mode is None:
                 self.bshapes_mode = compute_bshapes_mode(stack, percentile=pct)
             if self.eye_au_cal is None:
@@ -145,7 +162,6 @@ class ImageDataset(Dataset):
                     stack,
                     self.bshapes_mode,
                     blink_lo_percentile=getattr(cfg, "eye_blink_lo_percentile", 10.0),
-                    blink_hi_percentile=getattr(cfg, "eye_blink_hi_percentile", 98.0),
                     min_range=getattr(cfg, "eye_au_min_range", 0.4),
                 )
             cal_path.parent.mkdir(parents=True, exist_ok=True)
@@ -237,7 +253,9 @@ class ImageDataset(Dataset):
 
     def __getitem__(self, idx):
         if self.image_paths is None:
-            return default_frame_dict(torch.device("cpu"), self.image_size)
+            out = default_frame_dict(torch.device("cpu"), self.image_size)
+            out.update(default_mask_distance_fields(self.image_size))
+            return out
 
         j = self._sample_index(idx)
         cached_out = self._get_frame_dict(j)
@@ -260,6 +278,15 @@ class ImageDataset(Dataset):
         image = _resize_chw(img, self.image_size)
         mask = _resize_mask(mask, self.image_size)
 
+        if getattr(self.cfg, "silhouette_use_edt", False) or getattr(
+            self.cfg, "precompute_mask_edt_cache", False
+        ):
+            mask_dist_out, mask_dist_in = load_or_compute_mask_distance(
+                self.cfg, img_path, mask_resized=mask
+            )
+        else:
+            mask_dist_out, mask_dist_in = None, None
+
         bs = apply_mp_blendshape_calibration(
             mp["mp_blendshape"],
             self.bshapes_mode,
@@ -272,6 +299,8 @@ class ImageDataset(Dataset):
         out = {
             "image": image,
             "mask": mask,
+            "mask_dist_out": mask_dist_out,
+            "mask_dist_in": mask_dist_in,
             "mp_blendshape": bs,
             "mp_blendshape_raw": mp["mp_blendshape"],
             "mp_landmarks_2d": mp["mp_landmarks_2d"],
@@ -284,6 +313,9 @@ class ImageDataset(Dataset):
             "img_path": str(img_path),
             "frame_name": img_path.stem,
         }
+        if mask_dist_out is not None:
+            out["mask_dist_out"] = mask_dist_out
+            out["mask_dist_in"] = mask_dist_in
 
         if semantic_path is not None:
             sem = _semantic_to_train_tensors(semantic_path, self.image_size)

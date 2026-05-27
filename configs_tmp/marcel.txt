@@ -1,7 +1,7 @@
 run_name = marcel
 
-input_dir = /Bean/data/gwangjin/2024/nbshapes/flare_2/marcel/marcel/marcel
-train_dir = ["MVI_1797", "MVI_1801"]
+input_dir = /Bean/data/gwangjin/2024/nbshapes/flare_2/marcel/marcel
+train_dir = ["MVI_1797", "MVI_1799", "MVI_1801"]
 eval_dir = ["MVI_1802"]
 working_dir = .
 output_dir = /Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise/

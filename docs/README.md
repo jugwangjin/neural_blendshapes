@@ -1,24 +1,16 @@
-# 문서 인덱스
+# Documentation index
 
-구현 문서: **`docs/implementation/`**
+| Directory | Purpose |
+|-----------|---------|
+| [`guides/`](guides/) | How to run training, CLI examples, experiment notes |
+| [`implementation/`](implementation/) | Code-level design for agents and future refactors |
 
-## 핵심
+## Guides
 
-| 문서 | 내용 |
-|------|------|
-| [implementation/eye_uv_slide.md](implementation/eye_uv_slide.md) | Active: surface eye Gaussians |
-| [implementation/eye_surface_gaussians.md](implementation/eye_surface_gaussians.md) | Surface vs UV-slide |
-| [implementation/training_stages.md](implementation/training_stages.md) | Stage schedule |
-| [implementation/ict_facekit_npy.md](implementation/ict_facekit_npy.md) | npy bake |
-| [implementation/ict_mediapipe_lmk_baker.md](implementation/ict_mediapipe_lmk_baker.md) | MP landmark bake |
-| [implementation/camera_metrical_crop.md](implementation/camera_metrical_crop.md) | `default_camera.npz` (metrical crop) |
-| [implementation/ict_texture_map_index.md](implementation/ict_texture_map_index.md) | 12 usemtl texture maps |
-| [implementation/runtime_texture_maps.md](implementation/runtime_texture_maps.md) | Runtime texture fields |
-| [implementation/project_layout.md](implementation/project_layout.md) | Active tree vs `legacy/` |
-| [implementation/current_status_20260526.md](implementation/current_status_20260526.md) | **최신 구현 사항 및 아키텍처 정리 (2026-05-26)** |
-| [implementation/flare_legacy_cleanup.md](implementation/flare_legacy_cleanup.md) | FLARE archive + `archive_flare_legacy.py` |
+- [Training & CLI](guides/training.md) — `train.py` arguments, output paths, densify options
 
-## 아카이브
+## Implementation
 
-- UV-slide eye experiment: `legacy/eye_uv_slide/` (+ `legacy/eye_uv_slide/docs/`)
-- FLARE: `legacy/` (see repo `legacy` tree)
+- [Opacity regularization](implementation/opacity_regularization.md) — stage weights, sigmoid fix, decay removal
+- [Densification & grow signal](implementation/densify_grow_signal.md) — `grad2d` vs `gradrgb`, config ↔ `training/densify.py`
+- [Train CLI wiring](implementation/train_cli.md) — `parse_train_cli` / `apply_train_cli` ↔ `Config`

@@ -7,7 +7,13 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
-from dataset.dataset_util import matrix_to_pose_feat, parse_mediapipe_output, paths_for_image
+from dataset.dataset_util import (
+    format_splits_label,
+    matrix_to_pose_feat,
+    parse_mediapipe_output,
+    paths_for_image,
+    scene_tag_from_image,
+)
 
 
 def _load_rgb_uint8(img_path: Path):
@@ -90,14 +96,15 @@ class FrameProcessor:
         return self.process_rgb(rgb)
 
 
-def cache_path_for_image(cfg, split: str, img_path: Path) -> Path:
+def cache_path_for_image(cfg, img_path: Path) -> Path:
     subject = Path(cfg.input_dir).name
-    return Path(cfg.mp_cache_dir) / subject / split / f"{img_path.stem}.npz"
+    scene = scene_tag_from_image(cfg.input_dir, img_path)
+    return Path(cfg.mp_cache_dir) / subject / scene / f"{img_path.stem}.npz"
 
 
 def build_split_cache(
     cfg,
-    split: str,
+    split,
     image_paths,
     *,
     rebuild: bool = False,
@@ -114,9 +121,10 @@ def build_split_cache(
     valid_caches = []
     skipped = 0
 
-    for img_path in tqdm(image_paths, desc=f"MP+FA cache [{split}]"):
+    split_label = format_splits_label(split)
+    for img_path in tqdm(image_paths, desc=f"MP+FA cache [{split_label}]"):
         img_path = Path(img_path)
-        out_npz = cache_path_for_image(cfg, split, img_path)
+        out_npz = cache_path_for_image(cfg, img_path)
         out_npz.parent.mkdir(parents=True, exist_ok=True)
 
         if out_npz.is_file() and not rebuild:
@@ -142,5 +150,5 @@ def build_split_cache(
         valid_images.append(img_path)
         valid_caches.append(out_npz)
 
-    print(f"[{split}] valid={len(valid_images)} skipped(no face)={skipped}")
+    print(f"[{split_label}] valid={len(valid_images)} skipped(no face)={skipped}")
     return valid_images, valid_caches

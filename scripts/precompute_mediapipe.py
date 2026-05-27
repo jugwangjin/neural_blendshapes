@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from config import Config
-from dataset.dataset_util import list_split_images
+from dataset.dataset_util import format_splits_label, list_split_images, normalize_split_names
 from dataset.frame_processor import build_split_cache
 from dataset.image_dataset import ImageDataset
 
@@ -39,11 +39,15 @@ def main():
     cfg.face_landmarker_task = args.face_landmarker
 
     images = list_split_images(cfg.input_dir, args.split)
-    print(f"{len(images)} images under {cfg.input_dir / args.split / 'image'}")
+    split_label = format_splits_label(args.split)
+    print(f"{len(images)} images under {cfg.input_dir}/{{{split_label}}}/image")
     build_split_cache(cfg, args.split, images, rebuild=args.rebuild)
 
-    if args.split != cfg.flare_train_split:
-        print(f"skip bshapes_mode (train split only; use --split {cfg.flare_train_split})")
+    if set(normalize_split_names(args.split)) != set(normalize_split_names(cfg.train_split)):
+        print(
+            f"skip bshapes_mode (pass all train scenes "
+            f"{normalize_split_names(cfg.train_split)!r} to bake calibration)"
+        )
         return
 
     ImageDataset(cfg, train=True, distribution_boost=False)

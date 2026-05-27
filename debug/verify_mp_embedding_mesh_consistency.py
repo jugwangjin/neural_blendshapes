@@ -93,4 +93,11 @@ def main():
         print(f"\n=== Bake mesh (aux v_ict_fit) vs runtime canonical ===")
         print(f"  mean dist: {dist.mean():.6f}  max: {dist.max():.6f}  p95: {np.percentile(dist, 95):.6f}")
         print(
-            "  (gap is expected: embedding on NICP bake mesh; train template
+            "  (gap is expected: embedding on NICP bake mesh; train template is rigid-aligned only)"
+        )
+    else:
+        print("\n  (pass --aux .../ict_mediapipe_bake_aux.npz to compare bake vs runtime 3D positions)")
+
+
+if __name__ == "__main__":
+    main()

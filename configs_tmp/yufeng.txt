@@ -1,7 +1,7 @@
 run_name = yufeng
 
-input_dir = /Bean/data/gwangjin/2024/nbshapes/flare_2/yufeng/yufeng/yufeng
-train_dir = ["MVI_1814", "MVI_1810"]
+input_dir = /Bean/data/gwangjin/2024/nbshapes/flare_2/yufeng/yufeng
+train_dir = ["MVI_1814", "MVI_1810", "MVI_1811"]
 eval_dir = ["MVI_1812"]
 working_dir = .
 output_dir = /Bean/log/gwangjin/2025/nbshapes_iccv_unit_wise/

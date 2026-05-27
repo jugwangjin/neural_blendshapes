@@ -31,13 +31,21 @@ def loss_pie68_jawline(
     jaw_vertex_idx: [J] long, J = landmark_start (17)
     landmark_fa: [B, 68, 4+] — x,y in normalized [0,1] (see ``ImageDataset``), score in [..., 3]
     """
+    if not torch.isfinite(vertices).all():
+        return vertices.new_zeros(())
+
     B = vertices.shape[0]
     J = jaw_vertex_idx.shape[0]
     idx = jaw_vertex_idx.to(device=vertices.device)
     jaw_xyz = vertices[:, idx]
+    from utils.camera import world_to_camera
+
+    jaw_cam = world_to_camera(jaw_xyz, camera)
+    in_front = jaw_cam[..., 2] > 1e-3
     proj = camera.project_world_points(jaw_xyz.reshape(-1, 3)).reshape(B, J, 2)
     pred_uv = proj / float(image_size)
 
     target_uv = landmark_fa[:, :J, :2].to(device=vertices.device, dtype=vertices.dtype)
     valid = landmark_fa[:, :J, 3].to(device=vertices.device, dtype=vertices.dtype) >= score_thresh
+    valid = valid & in_front
     return robust_l1(pred_uv, target_uv, valid=valid)

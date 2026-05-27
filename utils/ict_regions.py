@@ -214,37 +214,54 @@ def classify_surface_triangles_batch(tri_ids, faces, ict, device):
     Returns int64 codes: 0 mouth_interior, 1 mouth_socket, 2 eye_socket,
     3 head, 4 face, 5 eyeball_sclera, 6 eye_occlusion, -1 skip.
     """
-    fi = tri_ids.long()
-    tri = faces[fi]
+    code_by_face = surface_triangle_code_table(faces, ict, device)
+    return code_by_face[tri_ids.long()]
+
+
+def surface_triangle_code_table(faces, ict, device):
+    """Cached [F] table for ``classify_surface_triangles_batch``."""
+    cache = getattr(ict, "_surface_triangle_code_cache", None)
+    key = str(device)
+    if isinstance(cache, dict) and key in cache:
+        table = cache[key]
+        if table.device == torch.device(device) and table.shape[0] == faces.shape[0]:
+            return table
+
+    table = _build_surface_triangle_code_table(faces, ict, device)
+    if not isinstance(cache, dict):
+        cache = {}
+        setattr(ict, "_surface_triangle_code_cache", cache)
+    cache[key] = table
+    return table
+
+
+def _build_surface_triangle_code_table(faces, ict, device):
+    faces = faces.long().to(device)
+    n_faces = faces.shape[0]
     n_verts = int(faces.max().item()) + 1
-    names = _face_material_names_np(ict)
-    from processing.ict_obj_materials import normalize_material_name
+    tri = faces
 
     def any_vertex_in(ids):
         if ids is None or len(ids) == 0:
-            return torch.zeros(fi.shape[0], dtype=torch.bool, device=device)
-        m = _vertex_mask(n_verts, ids, device)
-        return m[tri].any(dim=1)
+            return torch.zeros(n_faces, dtype=torch.bool, device=device)
+        return _vertex_mask(n_verts, ids, device)[tri].any(dim=1)
 
     def all_vertices_in(ids):
-        m = _vertex_mask(n_verts, ids, device)
-        return m[tri].all(dim=1)
+        return _vertex_mask(n_verts, ids, device)[tri].all(dim=1)
 
-    on_sclera = torch.zeros(fi.shape[0], dtype=torch.bool, device=device)
-    on_occ = torch.zeros(fi.shape[0], dtype=torch.bool, device=device)
-    if names is not None:
-        for i in range(fi.shape[0]):
-            nm = normalize_material_name(str(names[int(fi[i].item())]))
-            if nm in SCLERA_MATERIALS:
-                on_sclera[i] = True
-            if nm == EYE_OCCLUSION_MATERIAL:
-                on_occ[i] = True
+    on_sclera = _material_face_mask_torch_cached(ict, SCLERA_MATERIALS, device, "sclera")
+    on_occ = _material_face_mask_torch_cached(ict, {EYE_OCCLUSION_MATERIAL}, device, "eye_occ")
+    if on_sclera is None:
+        on_sclera = torch.zeros(n_faces, dtype=torch.bool, device=device)
+    if on_occ is None:
+        on_occ = torch.zeros(n_faces, dtype=torch.bool, device=device)
 
     skip = any_vertex_in(getattr(ict, "teeth_indices", []))
     skip = skip | (any_vertex_in(ict.eyeball_indices) & ~(on_sclera | on_occ))
     mat_mask = surface_excluded_material_mask_torch(ict, device)
     if mat_mask is not None:
-        skip = skip | (mat_mask[fi] & ~(on_sclera | on_occ))
+        skip = skip | (mat_mask & ~(on_sclera | on_occ))
+
     gums = any_vertex_in(
         getattr(ict, "mouth_interior_vertex_indices", getattr(ict, "gums_tongue_indices", []))
     )
@@ -254,7 +271,7 @@ def classify_surface_triangles_batch(tri_ids, faces, ict, device):
     )
     head = all_vertices_in(ict.not_face_indices)
 
-    code = torch.full((fi.shape[0],), 4, dtype=torch.long, device=device)
+    code = torch.full((n_faces,), 4, dtype=torch.long, device=device)
     code[head] = 3
     code[eye_sock] = 2
     code[mouth_sock] = 1
@@ -263,6 +280,21 @@ def classify_surface_triangles_batch(tri_ids, faces, ict, device):
     code[on_occ] = 6
     code[skip] = -1
     return code
+
+
+def _material_face_mask_torch_cached(ict, material_names, device, cache_name):
+    cache = getattr(ict, "_material_face_mask_cache", None)
+    key = (cache_name, str(device))
+    if isinstance(cache, dict) and key in cache:
+        return cache[key]
+
+    mask = _material_face_mask(ict, material_names)
+    out = None if mask is None else torch.tensor(mask, dtype=torch.bool, device=device)
+    if not isinstance(cache, dict):
+        cache = {}
+        setattr(ict, "_material_face_mask_cache", cache)
+    cache[key] = out
+    return out
 
 
 def classify_surface_triangle(fi, faces, ict, device):

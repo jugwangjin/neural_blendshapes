@@ -15,6 +15,7 @@ MediaPipe → tracker MLP → ICT deformation → **surface Gaussians** → **gs
 | Bake | `processing/ict_facekit_to_npy_full_head.py`, `processing/ict_mediapipe_lmk/bake_mediapipe_to_ict.py` |
 | Camera | `processing/compute_camera_for_metrical_crop.py` → `assets/default_camera.npz` |
 | Debug | `debug/sanity_train_stack.py`, `debug/verify_mp_onehot_ict_render.py` |
+| Eval PNGs | `training/eval_render.py` — see `docs/guides/stage_eval_renders.md` |
 
 ## Setup
 
@@ -29,9 +30,12 @@ python processing/compute_camera_for_metrical_crop.py --apply-train-view --write
 # 3) Sanity (optional)
 python debug/sanity_train_stack.py --check all
 
-# 4) Train (edit config.py input_dir first)
+# 4) Train (edit config.py input_dir first, or use CLI)
 python train.py
+python train.py --gaussian-grow-option gradrgb --output-root /path/to/log_dir
 ```
+
+Docs: [`docs/README.md`](docs/README.md) (CLI, stages, opacity reg, densify `gradrgb`).
 
 Assets: `assets/ict_facekit_torch.npy`, `assets/mediapipe_name_to_indices.pkl`,  
 `assets/ict_mediapipe_landmark_embedding_from_metrical_tracker.npz`,  
@@ -50,4 +54,4 @@ Old FLARE / neural-shader / UV-slide code lives under **`legacy/`**:
 python scripts/archive_flare_legacy.py
 ```
 
-Index: `legacy/README.md`, `docs/implementation/project_layout.md`
+Index: `legacy/README.md`, `docs/implementation/` (implementation notes), `docs/guides/` (usage)

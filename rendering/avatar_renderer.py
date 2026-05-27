@@ -32,6 +32,8 @@ class AvatarRenderer(nn.Module):
             sh_degree = getattr(cfg, "sh_degree", None)
         self.sh_degree = sh_degree
         self.packed = bool(getattr(cfg, "gsplat_packed", False) if cfg is not None else False)
+        # gsplat antialiasing (Mip-Splatting style compensation)
+        self.rasterize_mode = str(getattr(cfg, "gsplat_rasterize_mode", "antialiased"))
 
         if bg_color is None:
             bg = torch.zeros(3)
@@ -67,6 +69,7 @@ class AvatarRenderer(nn.Module):
         cam = self._cam(camera, device=device)
         if sh_degree is None:
             sh_degree = self.sh_degree
+
         # Do not pass backgrounds into gsplat (packed=True shape assert in rasterize_to_pixels).
         return rasterization(
             means=packed["means"],
@@ -82,6 +85,7 @@ class AvatarRenderer(nn.Module):
             far_plane=cam["zfar"],
             sh_degree=sh_degree,
             render_mode=render_mode,
+            rasterize_mode=self.rasterize_mode,
             backgrounds=None,
             channel_chunk=self.channel_chunk,
             packed=self.packed,

@@ -7,6 +7,34 @@ import torch
 from training.stages import StageSpec
 
 
+def stage_needs_rasterization(cfg) -> bool:
+    """True when any loss term requires a full gsplat RGB/alpha (or seg) pass."""
+    if getattr(cfg, "w_rgb", 0.0) > 0:
+        return True
+    w_sil = getattr(cfg, "w_silhouette", 0.0)
+    if w_sil <= 0:
+        w_sil = getattr(cfg, "w_mask", 0.0)
+    if w_sil <= 0:
+        w_sil = getattr(cfg, "w_mp_mask", 0.0)
+    if w_sil > 0:
+        return True
+    if getattr(cfg, "w_seg", 0.0) > 0:
+        return True
+    if getattr(cfg, "w_h", 0.0) > 0:
+        return True
+    return False
+
+
+def stage_needs_surface_forward(cfg) -> bool:
+    """True when avatar must run surface Gaussian layout (not just deformed mesh)."""
+    if stage_needs_rasterization(cfg):
+        return True
+    for key in ("w_geometry", "w_scaling", "w_opacity", "w_opacity_decay", "w_sem_anchor"):
+        if getattr(cfg, key, 0.0) > 0:
+            return True
+    return False
+
+
 def stage_loss_cfg(spec: StageSpec):
     return SimpleNamespace(
         w_rgb=spec.w_rgb,
@@ -18,6 +46,7 @@ def stage_loss_cfg(spec: StageSpec):
         w_seg=spec.w_seg,
         w_h=spec.w_h,
         w_geometry=spec.w_geometry,
+        w_scaling=getattr(spec, "w_scaling", 0.0),
         w_opacity=spec.w_opacity,
         w_gamma_prior=spec.w_gamma_prior,
         h_skin_sigma=getattr(spec, "h_skin_sigma", 0.002),
@@ -31,6 +60,8 @@ def stage_loss_cfg(spec: StageSpec):
         h_w_mouth=getattr(spec, "h_w_mouth", 0.28),
         h_alpha_min=getattr(spec, "h_alpha_min", 0.08),
         geometry_max_scale=getattr(spec, "geometry_max_scale", 0.05),
+        thresh_scaling_max=getattr(spec, "thresh_scaling_max", 0.008),
+        thresh_scaling_ratio=getattr(spec, "thresh_scaling_ratio", 10.0),
         opacity_target=getattr(spec, "opacity_target", 1.0),
         opacity_w_skin=getattr(spec, "opacity_w_skin", 1.0),
         opacity_w_other=getattr(spec, "opacity_w_other", 0.05),
@@ -44,6 +75,7 @@ def stage_loss_cfg(spec: StageSpec):
         w_sem_anchor=spec.w_sem_anchor,
         w_identity_smooth=spec.w_template_smooth,
         w_template_smooth=spec.w_template_smooth,
+        w_opacity_decay=getattr(spec, "w_opacity_decay", 0.0),
     )
 
 
@@ -54,22 +86,38 @@ def _set_requires_grad(module, flag):
         p.requires_grad = flag
 
 
-def _set_surface_trainable(surface, appearance, geometry, semantic, geom_scale=1.0):
+def _set_surface_trainable(
+    surface,
+    appearance,
+    geometry,
+    semantic,
+    train_color_pose=False,
+    train_color_expression=False,
+    geom_scale=1.0,
+):
     if appearance:
         surface.color.requires_grad = True
+        surface.color_pose.requires_grad = bool(train_color_pose)
+        surface.color_expression.requires_grad = bool(train_color_expression)
         surface.opacity.requires_grad = True
     else:
         surface.color.requires_grad = False
+        surface.color_pose.requires_grad = False
+        surface.color_expression.requires_grad = False
         surface.opacity.requires_grad = False
 
     if geometry:
         surface.h.requires_grad = True
         surface.log_scale.requires_grad = True
         surface.rotation.requires_grad = True
+        if hasattr(surface, "bary_uv"):
+            surface.bary_uv.requires_grad = True
     else:
         surface.h.requires_grad = False
         surface.log_scale.requires_grad = False
         surface.rotation.requires_grad = False
+        if hasattr(surface, "bary_uv"):
+            surface.bary_uv.requires_grad = False
 
     if semantic and surface.sem_logits is not None:
         surface.sem_logits.requires_grad = True
@@ -110,8 +158,6 @@ def apply_stage_requires_grad(spec, tracker, deformer, avatar):
         deformer.log_max_template_delta.requires_grad = True
 
     if spec.train_expression_deform:
-        for p in deformer.expr_au_embed.parameters():
-            p.requires_grad = True
         for p in deformer.expr_mlp.parameters():
             p.requires_grad = True
 
@@ -122,6 +168,8 @@ def apply_stage_requires_grad(spec, tracker, deformer, avatar):
         spec.train_gaussian_appearance,
         spec.train_gaussian_geometry,
         spec.train_gaussian_semantic,
+        train_color_pose=getattr(spec, "train_color_pose", False),
+        train_color_expression=getattr(spec, "train_color_expression", False),
         geom_scale=g,
     )
     if spec.train_gaussian_geometry and g < 1.0:
@@ -154,9 +202,6 @@ def build_optimizers(spec, tracker, deformer, avatar):
 
     if spec.train_expression_deform:
         expr_params = []
-        for p in deformer.expr_au_embed.parameters():
-            if p.requires_grad:
-                expr_params.append(p)
         for p in deformer.expr_mlp.parameters():
             if p.requires_grad:
                 expr_params.append(p)
@@ -166,6 +211,10 @@ def build_optimizers(spec, tracker, deformer, avatar):
     def add_surface_groups(surf):
         if surf.color.requires_grad:
             gaussian_groups.append({"params": [surf.color], "lr": spec.lr_gaussian_color})
+        if hasattr(surf, "color_pose") and surf.color_pose.requires_grad:
+            gaussian_groups.append({"params": [surf.color_pose], "lr": spec.lr_gaussian_color})
+        if hasattr(surf, "color_expression") and surf.color_expression.requires_grad:
+            gaussian_groups.append({"params": [surf.color_expression], "lr": spec.lr_gaussian_color})
         if surf.opacity.requires_grad:
             gaussian_groups.append({"params": [surf.opacity], "lr": spec.lr_gaussian_opacity})
         if surf.h.requires_grad:
@@ -174,6 +223,8 @@ def build_optimizers(spec, tracker, deformer, avatar):
             gaussian_groups.append({"params": [surf.log_scale], "lr": spec.lr_gaussian_scale * gscale})
         if surf.rotation.requires_grad:
             gaussian_groups.append({"params": [surf.rotation], "lr": spec.lr_gaussian_scale * gscale})
+        if hasattr(surf, "bary_uv") and surf.bary_uv.requires_grad:
+            gaussian_groups.append({"params": [surf.bary_uv], "lr": spec.lr_gaussian_scale * gscale})
         if surf.sem_logits is not None and surf.sem_logits.requires_grad:
             gaussian_groups.append({"params": [surf.sem_logits], "lr": spec.lr_gaussian_scale * gscale})
 
@@ -182,6 +233,19 @@ def build_optimizers(spec, tracker, deformer, avatar):
     mesh_optim = torch.optim.Adam(mesh_groups) if mesh_groups else None
     gaussian_optim = torch.optim.Adam(gaussian_groups) if gaussian_groups else None
     return mesh_optim, gaussian_optim
+
+
+def clip_optimizer_grads(*optims, max_norm):
+    params = []
+    for optim in optims:
+        if optim is None:
+            continue
+        for group in optim.param_groups:
+            for p in group["params"]:
+                if p.requires_grad and p.grad is not None:
+                    params.append(p)
+    if params:
+        torch.nn.utils.clip_grad_norm_(params, max_norm=max_norm)
 
 
 def init_training_state(avatar):
