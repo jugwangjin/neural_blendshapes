@@ -12,6 +12,8 @@ cache
 ICT_FaceKit
 ICT-FaceKit
 reference_codes
+reference_codes/
+
 figures/*
 figures
 quant/*
@@ -20,14 +22,14 @@ quant
 debug/ict_facekit_uv/
 debug/out/
 debugs/
-
+debug/*.ply
 # large files
 assets
 large-steps-pytorch
 processing/large-steps-pytorch
 processing/metrical-tracker
 flame
-
+configs_tmp
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

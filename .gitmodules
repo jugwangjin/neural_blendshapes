@@ -10,9 +10,9 @@
 [submodule "reference_codes/IMAvatar"]
 	path = reference_codes/IMAvatar
 	url = https://github.com/zhengyuf/IMavatar.git
-[submodule "processing/process_video/MODNet"]
-	path = processing/process_video/MODNet
+[submodule "MODNet"]
+	path = MODNet
 	url = https://github.com/ZHKKKe/MODNet
-[submodule "processing/process_video/face-parsing.PyTorch"]
-	path = processing/process_video/face-parsing.PyTorch
+[submodule "face-parsing.PyTorch"]
+	path = face-parsing.PyTorch
 	url = https://github.com/zllrunning/face-parsing.PyTorch
