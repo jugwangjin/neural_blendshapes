@@ -24,6 +24,23 @@ from math import exp
 def l1_loss(network_output, gt):
     return torch.abs((network_output - gt)).mean()
 
+
+def rgb_l1_ssim_loss(network_output, gt, lambda_ssim: float = 0.2):
+    """
+  3DGS-style photometric loss: ``(1-λ) L1 + λ (1-SSIM)`` on ``[B,C,H,W]`` linear RGB.
+  Returns ``(total, l1, dssim)`` for logging.
+    """
+    l1 = l1_loss(network_output, gt)
+    lam = float(lambda_ssim)
+    if lam <= 0.0:
+        z = torch.zeros((), device=l1.device, dtype=l1.dtype)
+        return l1, l1, z
+    ssim_val = ssim(network_output, gt)
+    dssim = 1.0 - ssim_val
+    total = (1.0 - lam) * l1 + lam * dssim
+    return total, l1, dssim
+
+
 def l2_loss(network_output, gt):
     return ((network_output - gt) ** 2).mean()
 

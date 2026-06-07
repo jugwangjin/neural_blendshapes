@@ -1,6 +1,6 @@
 """Dataset loaders for training (default: ``ImageDataset`` / image-split layout)."""
 
-from dataset.collate import collate_batch, move_batch_to_device
+from dataset.collate import batch_has_gt_normal, collate_batch, move_batch_to_device
 from dataset.image_dataset import ImageDataset
 from dataset.video_dataset import VideoDataset
 
@@ -36,6 +36,7 @@ __all__ = [
     "ImageDataset",
     "VideoDataset",
     "build_train_dataset",
+    "batch_has_gt_normal",
     "collate_batch",
     "move_batch_to_device",
 ]

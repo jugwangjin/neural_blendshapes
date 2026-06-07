@@ -1,10 +1,8 @@
 """
-ICT FACS deformer: template MLP + MP coeffs → mesh + region-gated expression + pose weight.
+ICT FACS deformer: ICT identity PCA + template MLP + MP coeffs → mesh + expression + pose weight.
 
-Template / expression MLPs take jaw-open ICT in FLAME space (``ict.canonical`` =
-jawOpen + ``flame_alignment_s,R,T`` / ``flame_similarity_s,T`` from npy; NICP bake mesh is
-not used as template). ``expr_gate`` limits
-which vertices each AU can move (eye occlusion on; teeth / lashes / lacrimal off).
+Identity PCA is optional in this stack; ``template_mlp`` is the trainable
+per-vertex corrective term for neutral geometry.
 """
 
 import torch
@@ -12,6 +10,7 @@ import torch.nn as nn
 
 from model.blendshape_support import build_mp_gates, precompute_expression_support
 from model.expr_regions import build_deform_reg_weight, build_expr_region_weight
+from model.mouth_interior_expr_mask import mouth_interior_jaw_gate_for_deformer
 from model.pose_weight import PoseWeightMLP
 from utils.camera import rotation_matrix_y_deg
 from utils.mediapipe_blendshapes import load_mediapipe_mapping, mp_to_ict_expression_weights
@@ -25,14 +24,14 @@ class ICTDeformer(nn.Module):
         region_weight=None,
         *,
         mediapipe_name_to_ict="./assets/mediapipe_name_to_indices.pkl",
-        template_hidden=128,
-        max_template_delta=1e-2,
+        template_hidden=64,
         n_coeffs=53,
         expr_hidden=128,
         delta_ratio=0.75,
         delta_floor=1e-4,
         gate_alpha=0.1,         # Normalized Soft Mask alpha threshold (default 0.1)
         dilate_rings=2,
+        mouth_interior_jaw_only_expression=False,
         **kwargs,               # Absorb deprecated support_quantile, support_lo, support_hi
     ):
         super().__init__()
@@ -41,12 +40,19 @@ class ICTDeformer(nn.Module):
         self.delta_ratio = delta_ratio
         self.delta_floor = delta_floor
 
-        canonical = ict_facekit.canonical[0].detach()
-        self.register_buffer("canonical_xyz", canonical)
+        template_xyz = ict_facekit.template_canonical[0].detach()
+        expr_xyz = ict_facekit.expression_canonical[0].detach()
+        self.register_buffer("canonical_xyz_template", template_xyz)
+        self.register_buffer("canonical_xyz_expression", expr_xyz)
+        # Stage schedule may optionally optimize ICT identity coefficients.
+        self.identity_weights = nn.Parameter(
+            torch.zeros(1, ict_facekit.num_identity, device=template_xyz.device),
+            requires_grad=False,
+        )
 
         if region_weight is None:
             region_weight = build_expr_region_weight(ict_facekit)
-        region_weight = region_weight.to(device=ict_facekit.canonical.device)
+        region_weight = region_weight.to(device=ict_facekit.expression_canonical.device)
         self.register_buffer("deform_reg_weight", build_deform_reg_weight(ict_facekit))
 
         self.template_mlp = nn.Sequential(
@@ -62,9 +68,6 @@ class ICTDeformer(nn.Module):
         )
         nn.init.zeros_(self.template_mlp[-1].weight)
         nn.init.zeros_(self.template_mlp[-1].bias)
-        self.log_max_template_delta = nn.Parameter(
-            torch.log(torch.tensor(float(max_template_delta)))
-        )
 
         self.pose_weight_net = PoseWeightMLP()
 
@@ -80,6 +83,14 @@ class ICTDeformer(nn.Module):
                 mediapipe_name_to_ict, num_expression=ict_facekit.num_expression
             ).mediapipe_to_ict
         gate, mag_mp = build_mp_gates(ict_facekit, region_weight, mag_e, support_e, mp_to_ict)
+        interior_jaw_gate = mouth_interior_jaw_gate_for_deformer(
+            ict_facekit,
+            n_coeffs,
+            enabled=mouth_interior_jaw_only_expression,
+        )
+        if interior_jaw_gate is not None:
+            gate = gate * interior_jaw_gate
+        self.mouth_interior_jaw_only_expression = bool(mouth_interior_jaw_only_expression)
         self.register_buffer("mp_to_ict", mp_to_ict)
         self.register_buffer("expr_gate", gate)
         self.register_buffer("expr_mag", mag_mp)
@@ -97,11 +108,16 @@ class ICTDeformer(nn.Module):
         )
         nn.init.zeros_(self.expr_mlp[-1].weight)
 
+        faces = ict_facekit.faces.long()
+        tri = faces
+        edges = torch.cat([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]], dim=0)
+        edges, _ = torch.sort(edges, dim=1)
+        edges = torch.unique(edges, dim=0)
+        self.register_buffer("template_edge_idx", edges.to(device=template_xyz.device))
+
     def template_delta(self):
-        """[V, 3] smooth identity corrective from canonical coords."""
-        raw = self.template_mlp(self.canonical_xyz)
-        scale = torch.exp(self.log_max_template_delta)
-        return scale * torch.tanh(raw)
+        """[V, 3] smooth per-vertex corrective from jaw-closed template canonical coords."""
+        return self.template_mlp(self.canonical_xyz_template)
 
     def mp_to_ict_expression(self, mp_coeffs):
         return mp_to_ict_expression_weights(
@@ -111,7 +127,7 @@ class ICTDeformer(nn.Module):
     def expression_raw_tanh(self):
         """[J, V, 3] channel-wise AU basis (before gate × magnitude × c_eff)."""
         j = self.n_coeffs
-        raw = torch.tanh(self.expr_mlp(self.canonical_xyz))
+        raw = torch.tanh(self.expr_mlp(self.canonical_xyz_expression))
         raw = raw.reshape(-1, j, 3).permute(1, 0, 2).contiguous()
         return raw, self.expr_gate
 
@@ -140,30 +156,45 @@ class ICTDeformer(nn.Module):
         self,
         verts,
         R,
-        t,
+        t_local,
+        t_global=None,
         scale=None,
         pose_weight_fixed=None,
         pose_w=None,
         rotate_about_centroid=False,
     ):
-        """verts [B,V,3], R [B,3,3], t [B,3]; optional uniform scale (usually disabled)."""
+        """
+        verts [B,V,3], R [B,3,3].
+
+        ``rigid = R(verts) + t_local`` (row-vector rigid),
+        ``out = w * rigid + (1 - w) * verts``,
+        ``out = out * scale + t_global``.
+        """
         if pose_w is None:
             if pose_weight_fixed is not None:
                 w = torch.full(
-                    (self.canonical_xyz.shape[0], 1),
+                    (self.canonical_xyz_template.shape[0], 1),
                     float(pose_weight_fixed),
                     device=verts.device,
                     dtype=verts.dtype,
                 )
             else:
-                w = self.pose_weight_net(self.canonical_xyz)
+                w = self.pose_weight_net(self.canonical_xyz_template)
         else:
             w = pose_w
         if rotate_about_centroid:
-            rigid = apply_rigid_about_centroid(verts, R, t)
+            rigid = apply_rigid_about_centroid(verts, R, t_local)
         else:
-            rigid = apply_rigid(verts, R, t, scale=scale)
-        return (1.0 - w.unsqueeze(0)) * verts + w.unsqueeze(0) * rigid, w
+            rigid = apply_rigid(verts, R, t_local)
+        verts_out = w.unsqueeze(0) * rigid + (1.0 - w.unsqueeze(0)) * verts
+        if scale is not None:
+            if scale.ndim == 0:
+                verts_out = verts_out * scale
+            else:
+                verts_out = verts_out * scale.view(-1, 1, 1)
+        if t_global is not None:
+            verts_out = verts_out + t_global.unsqueeze(1)
+        return verts_out, w
 
     # NOTE: only for debug
     def apply_head_yaw(self, verts, yaw_deg, pivot=None):
@@ -175,7 +206,7 @@ class ICTDeformer(nn.Module):
         if float(yaw_deg) == 0.0:
             return verts
         if pivot is None:
-            pivot = self.canonical_xyz.mean(dim=0)
+            pivot = self.canonical_xyz_template.mean(dim=0)
         pivot = pivot.reshape(3).to(device=verts.device, dtype=verts.dtype)
         B = verts.shape[0]
         R = rotation_matrix_y_deg(float(yaw_deg), device=verts.device, dtype=verts.dtype)
@@ -188,11 +219,13 @@ class ICTDeformer(nn.Module):
         mp_coeffs_corr,
         pose_rotation_6d=None,
         pose_translation=None,
+        pose_translation_global=None,
         pose_scale=None,
         c_eff=None,
         expr_delta=None,
         expression_basis=None,
         apply_expression_deform=True,
+        apply_template_delta=True,
         return_unposed=False,
         expression_weights=None,
         apply_flame_similarity=True,
@@ -206,8 +239,10 @@ class ICTDeformer(nn.Module):
         c_eff: [B, J] per MP channel for region-gated neural delta
         expression_basis: optional cached [J,V,3] basis from expression_delta_basis()
         pose_rotation_6d: [B, 6] residual (optional)
-        pose_translation: [B, 3] residual (optional)
+        pose_translation: [B, 3] local residual, pose-weighted (optional)
+        pose_translation_global: [B, 3] global residual, added after weighted pose (optional)
         expression_weights: optional [B, num_expression] (bypasses MP gather)
+        apply_template_delta: if False, skip ``template_mlp`` vertex offset (tracker-only viz)
         head_yaw_deg: orbit mesh about world +Y (constant-camera sanity / debug)
         pose_weight_fixed: if set, use this w(x) instead of PoseWeightMLP (e.g. 1.0)
         rotate_about_centroid: rotate about mesh centroid (not world origin)
@@ -220,17 +255,31 @@ class ICTDeformer(nn.Module):
         else:
             exp_w = self.mp_to_ict_expression(mp_coeffs_corr)
 
-        tpl = self.template_delta()
+        cache = getattr(self, "_inference_cache", None)
+        if apply_template_delta:
+            if cache is not None:
+                tpl = cache.template_delta
+            else:
+                tpl = self.template_delta()
+        else:
+            tpl = None
+
+        id_w = self.identity_weights.expand(B, -1)
         verts_unposed = self.ict.forward(
             expression_weights=exp_w,
+            identity_weights=id_w,
             to_canonical=False,
             apply_eyeball_rotation=False,
             apply_flame_similarity=apply_flame_similarity,
         )
-        verts_unposed = verts_unposed + tpl.unsqueeze(0)
+        if apply_template_delta:
+            verts_unposed = verts_unposed + tpl.unsqueeze(0)
 
         if expr_delta is None and apply_expression_deform and c_eff is not None:
-            expr_delta = self.expression_delta(c_eff, basis=expression_basis)
+            basis = expression_basis
+            if basis is None and cache is not None:
+                basis = cache.expression_basis
+            expr_delta = self.expression_delta(c_eff, basis=basis)
         if expr_delta is not None:
             verts_unposed = verts_unposed + expr_delta
 
@@ -238,27 +287,36 @@ class ICTDeformer(nn.Module):
             pose_rotation_6d = torch.zeros(B, 6, device=device, dtype=mp_coeffs_corr.dtype)
         if pose_translation is None:
             pose_translation = torch.zeros(B, 3, device=device, dtype=mp_coeffs_corr.dtype)
+        if pose_translation_global is None:
+            pose_translation_global = torch.zeros(B, 3, device=device, dtype=mp_coeffs_corr.dtype)
 
         R = rotation_6d_to_matrix(pose_rotation_6d)
-        t_pose = pose_translation
+        t_local = pose_translation
+        t_global = pose_translation_global
         if pose_zero_tz:
-            t_pose = t_pose.clone()
-            t_pose[..., 2] = 0.0
+            t_local = t_local.clone()
+            t_local[..., 2] = 0.0
+            t_global = t_global.clone()
+            t_global[..., 2] = 0.0
 
         if pose_weight_fixed is not None:
             pose_w = torch.full(
-                (self.canonical_xyz.shape[0], 1),
+                (self.canonical_xyz_template.shape[0], 1),
                 float(pose_weight_fixed),
                 device=device,
                 dtype=verts_unposed.dtype,
             )
         else:
-            pose_w = self.pose_weight_net(self.canonical_xyz)
+            if cache is not None and cache.pose_weight is not None:
+                pose_w = cache.pose_weight.to(device=device, dtype=verts_unposed.dtype)
+            else:
+                pose_w = self.pose_weight_net(self.canonical_xyz_template)
 
         verts_posed, _ = self.apply_weighted_pose(
             verts_unposed,
             R,
-            t_pose,
+            t_local,
+            t_global=t_global,
             scale=pose_scale,
             pose_weight_fixed=pose_weight_fixed,
             pose_w=pose_w,

@@ -38,8 +38,8 @@ class TrackerCorrectionMLP(nn.Module):
     """
     Two trunks (no shared hidden state):
 
-    - **expr**: MP [B, 52] → gather → gamma → ICT expression weights
-    - **pose**: MP rotation 6D (detector) + MLP Δ_rot; translation = MLP Δ_t only
+    - **expr**: MP [B, 52] → gather → gamma (pow or additive residual) → ICT expression weights
+    - **pose**: MP rotation 6D (detector) + MLP Δ_rot; local Δ_t (pose-weighted) + global Δ_t (full mesh)
 
     ``pose_residual`` = ``mp_rotation_6d`` + ``Δ_rot`` (Zhou 6D, MP base detached).
     ``mediapipe_to_ict`` length 53.
@@ -54,19 +54,30 @@ class TrackerCorrectionMLP(nn.Module):
         pose_dim=6,
         gamma_min=0.4,
         gamma_max=2.5,
+        gamma_symmetric_log=True,
         use_landmarks=True,
         canonicalize_landmarks_2d=True,
         mediapipe_to_ict=None,
+        additive_gamma_correction=False,
         **_,
     ):
         super().__init__()
         self.n_blendshapes = int(n_blendshapes)
         self.num_ict_expression = int(num_ict_expression)
         self.pose_dim = pose_dim
-        self.gamma_min = gamma_min
-        self.gamma_max = gamma_max
+        self.gamma_symmetric_log = bool(gamma_symmetric_log)
+        gmax = float(gamma_max)
+        if self.gamma_symmetric_log:
+            self.gamma_log_span = math.log(max(gmax, 1.0 + 1e-6))
+            self.gamma_min = 1.0 / math.exp(self.gamma_log_span)
+            self.gamma_max = math.exp(self.gamma_log_span)
+        else:
+            self.gamma_log_span = None
+            self.gamma_min = float(gamma_min)
+            self.gamma_max = gmax
         self.use_landmarks = use_landmarks
         self.canonicalize_landmarks_2d = canonicalize_landmarks_2d
+        self.additive_gamma_correction = bool(additive_gamma_correction)
 
         if mediapipe_to_ict is not None:
             self.register_buffer(
@@ -80,20 +91,28 @@ class TrackerCorrectionMLP(nn.Module):
 
         pose_in = pose_dim + len(POSE_LMK_MP) * 2
         self.pose_trunk = _mlp(pose_in, hidden_pose)
-        self.head_pose = nn.Linear(hidden_pose, 9)
+        self.head_pose = nn.Linear(hidden_pose, 12)
         self.register_buffer(
             "identity_6d",
             torch.tensor([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], dtype=torch.float32),
         )
         self.log_pose_scale = nn.Parameter(torch.zeros(1))
+        # Subject-global translation (no_gamma_and_pose only); not per-frame network output.
+        self.global_translation = nn.Parameter(torch.zeros(3))
 
         _init_head_zero(self.head_pose)
 
-        target_sigmoid = (1.0 - self.gamma_min) / (self.gamma_max - self.gamma_min)
-        target_sigmoid = max(1e-6, min(1.0 - 1e-6, target_sigmoid))
-        bias_gamma_val = math.log(target_sigmoid / (1.0 - target_sigmoid))
-        _init_linear_small(self.head_gamma, std=1e-3)
-        nn.init.constant_(self.head_gamma.bias, bias_gamma_val)
+        if self.additive_gamma_correction:
+            _init_head_zero(self.head_gamma)
+        else:
+            _init_linear_small(self.head_gamma, std=1e-3)
+            if self.gamma_log_span is None:
+                target_sigmoid = (1.0 - self.gamma_min) / (self.gamma_max - self.gamma_min)
+                target_sigmoid = max(1e-6, min(1.0 - 1e-6, target_sigmoid))
+                bias_gamma_val = math.log(target_sigmoid / (1.0 - target_sigmoid))
+                nn.init.constant_(self.head_gamma.bias, bias_gamma_val)
+            else:
+                nn.init.zeros_(self.head_gamma.bias)
 
     def _expr_landmarks(self, mp_landmarks_2d, mp_landmarks_3d, world_to_cam, device, dtype):
         if mp_landmarks_3d is not None and world_to_cam is not None:
@@ -151,6 +170,31 @@ class TrackerCorrectionMLP(nn.Module):
                 )
         return mp_r6.detach()
 
+    def _ict_expression_weights(
+        self,
+        ict_raw: torch.Tensor,
+        raw_gamma: torch.Tensor,
+        *,
+        force_gamma_one: bool,
+        additive_gamma_correction: bool,
+    ):
+        if additive_gamma_correction:
+            gamma_delta = raw_gamma
+            if force_gamma_one:
+                gamma_delta = torch.zeros_like(raw_gamma)
+            weights = ict_raw + gamma_delta
+            return weights, gamma_delta, True
+
+        if self.gamma_log_span is not None:
+            t = 2.0 * torch.sigmoid(raw_gamma) - 1.0
+            gamma = torch.exp(self.gamma_log_span * t)
+        else:
+            gamma = self.gamma_min + (self.gamma_max - self.gamma_min) * torch.sigmoid(raw_gamma)
+        if force_gamma_one:
+            gamma = torch.ones_like(gamma)
+        weights = ict_raw.pow(gamma)
+        return weights, gamma, False
+
     def forward(
         self,
         mp_blendshape,
@@ -161,6 +205,8 @@ class TrackerCorrectionMLP(nn.Module):
         mp_transform_matrix=None,
         force_gamma_one=False,
         camera_R=None,
+        use_global_translation_param=False,
+        additive_gamma_correction=None,
     ):
         B = mp_blendshape.shape[0]
         device = mp_blendshape.device
@@ -191,10 +237,17 @@ class TrackerCorrectionMLP(nn.Module):
             )
         h_expr = self.expr_trunk(torch.cat(expr_parts, dim=-1))
         raw_gamma = self.head_gamma(h_expr)
-        gamma = self.gamma_min + (self.gamma_max - self.gamma_min) * torch.sigmoid(raw_gamma)
-        if force_gamma_one:
-            gamma = torch.ones_like(gamma)
-        ict_expression_weights = ict_raw.pow(gamma)
+        use_additive = (
+            self.additive_gamma_correction
+            if additive_gamma_correction is None
+            else bool(additive_gamma_correction)
+        )
+        ict_expression_weights, gamma, is_additive = self._ict_expression_weights(
+            ict_raw,
+            raw_gamma,
+            force_gamma_one=force_gamma_one,
+            additive_gamma_correction=use_additive,
+        )
         coeffs_corr = ict_expression_weights
 
         mp_r6 = self._mp_rotation_6d(mp_pose_raw, mp_transform_matrix, B, device, dtype, camera_R=camera_R)
@@ -204,10 +257,17 @@ class TrackerCorrectionMLP(nn.Module):
         pose_delta = self.head_pose(h_pose)
         pose_residual = mp_r6 + pose_delta[:, :6]
         translation_residual = pose_delta[:, 6:9]
+        if use_global_translation_param:
+            translation_global = self.global_translation.to(device=device, dtype=dtype).unsqueeze(0).expand(
+                B, -1
+            )
+        else:
+            translation_global = pose_delta[:, 9:12]
         scale = torch.exp(self.log_pose_scale).to(device=device, dtype=dtype).expand(B)
 
         return {
             "gamma": gamma,
+            "additive_gamma": is_additive,
             "coeffs": coeffs_corr,
             "coeffs_raw": ict_raw,
             "ict_expression_weights": ict_expression_weights,
@@ -216,4 +276,5 @@ class TrackerCorrectionMLP(nn.Module):
             "mp_rotation_6d": mp_r6,
             "pose_rotation_delta": pose_delta[:, :6],
             "translation_residual": translation_residual,
+            "translation_global": translation_global,
         }

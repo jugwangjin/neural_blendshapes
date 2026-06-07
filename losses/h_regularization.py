@@ -1,50 +1,60 @@
 """
-Image-space h (distance) regularization — GT part masks + alpha-weighted h render.
+Image-space h regularization (FLARE semantic + legacy 8-ch segmentation).
 
-No Gaussian ``sem_prob`` or semantic rendering required for ``w_h``.
+Each surface Gaussian has scalar ``h`` (meters): world position is
+``xyz = barycentric_point(mesh) + h * vertex_normal``.  **h ≈ 0** → splat on mesh.
+
+Penalizes ``accum_h = Σ α_i h_i`` per pixel: tier weight × ``accum_h²`` (no σ).
+
+Sources:
+  - ``h_reg_label_eye_occlusion``: FLARE part ids 4/5 only (label path).
+  - ``h_reg_seg_face`` / ``h_reg_seg_mouth``: semantic8 ch1 / ch5 (mesh-stick).
+  - ``h_reg_seg_neck|hair|glasses|misc``: part ids for loose tiers.
+
+Cloth (part 16) is intentionally omitted — was never supervised (tight matting excluded it).
 """
 
 import torch
 
 
-def charbonnier(x, eps=1e-3):
-    return torch.sqrt(x * x + eps * eps)
-
-
 def loss_h_image_space(accum_h, alpha, batch, cfg, _get_w):
     """
-    Pixel loss on ED-style ``accum_h = Σ w_i h_i`` (surface Gaussians only).
+    Pixel loss on rendered ``accum_h`` (surface Gaussians only).
 
-    GT tiers (mutually exclusive part ids in ``flare_semantic``):
-      skin / eye (strong) > brow > mouth > misc (weakest)
+    Per tier: ``h_w_* * accum_h²`` (masked mean). Mesh-stick vs loose = weight only.
     """
     accum = accum_h[:, 0]
     a = alpha[:, 0]
+    r2 = accum * accum
 
-    m_skin = batch["h_reg_skin"][:, 0].float()
-    m_eye = batch["h_reg_eye"][:, 0].float()
-    m_brow = batch["h_reg_brow"][:, 0].float()
-    m_misc = batch["h_reg_misc"][:, 0].float()
-    m_mouth = batch["h_reg_mouth"][:, 0].float()
+    m_eye = batch["h_reg_label_eye_occlusion"][:, 0].float()
+    m_face = batch["h_reg_seg_face"][:, 0].float()
+    m_mouth = batch["h_reg_seg_mouth"][:, 0].float()
+    m_neck = batch["h_reg_seg_neck"][:, 0].float()
+    m_hair = batch["h_reg_seg_hair"][:, 0].float()
+    m_glasses = batch["h_reg_seg_glasses"][:, 0].float()
+    m_misc = batch["h_reg_seg_misc"][:, 0].float()
 
     w_skin = _get_w(cfg, "h_w_skin", 1.0)
+    w_nose = _get_w(cfg, "h_w_nose", 1.0)
     w_eye = _get_w(cfg, "h_w_eye", 1.0)
-    w_brow = _get_w(cfg, "h_w_brow", 0.45)
-    w_misc = _get_w(cfg, "h_w_misc", 0.12)
-    w_mouth = _get_w(cfg, "h_w_mouth", 0.28)
+    w_brow = _get_w(cfg, "h_w_brow", 1.0)
+    w_mouth = _get_w(cfg, "h_w_mouth", 1.0)
+    w_neck = _get_w(cfg, "h_w_neck", 1.0)
+    w_misc = _get_w(cfg, "h_w_misc", 1.0)
+    w_hair = _get_w(cfg, "h_w_hair", 0.015)
+    w_glasses = _get_w(cfg, "h_w_glasses", 0.006)
 
-    s_skin = _get_w(cfg, "h_skin_sigma", 0.002)
-    s_brow = _get_w(cfg, "h_sigma_brow", 0.004)
-    s_misc = _get_w(cfg, "h_sigma_misc", 0.010)
-    s_mouth = _get_w(cfg, "h_sigma_mouth", 0.008)
+    w_face_mesh = w_skin + w_nose + w_brow
 
-    r = accum.abs()
     per_pix = (
-        m_skin * w_skin * charbonnier(r / s_skin)
-        + m_eye * w_eye * charbonnier(r / s_skin)
-        + m_brow * w_brow * charbonnier(r / s_brow)
-        + m_misc * w_misc * charbonnier(r / s_misc)
-        + m_mouth * w_mouth * charbonnier(r / s_mouth)
+        m_face * w_face_mesh * r2
+        + m_eye * w_eye * r2
+        + m_mouth * w_mouth * r2
+        + m_neck * w_neck * r2
+        + m_misc * w_misc * r2
+        + m_hair * w_hair * r2
+        + m_glasses * w_glasses * r2
     )
 
     alpha_min = _get_w(cfg, "h_alpha_min", 0.08)
@@ -52,6 +62,14 @@ def loss_h_image_space(accum_h, alpha, batch, cfg, _get_w):
     if batch.get("mask") is not None:
         mask = mask * batch["mask"][:, 0].float()
 
-    region = (m_skin + m_eye + m_brow + m_misc + m_mouth).clamp(max=1.0)
+    region = (
+        m_face
+        + m_eye
+        + m_mouth
+        + m_neck
+        + m_misc
+        + m_hair
+        + m_glasses
+    ).clamp(max=1.0)
     w = mask * region
     return (per_pix * w).sum() / w.sum().clamp(min=1e-6)

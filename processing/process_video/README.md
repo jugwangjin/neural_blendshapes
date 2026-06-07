@@ -22,20 +22,24 @@ IMAvatar `preprocess/preprocess.sh`에서 **DECA / landmarks / iris / FLAME opti
 
 `Config.input_dir` / `ImageDataset` expects **`{subject_root}/{scene}/image/*.png`** with sibling `mask/`, `semantic/`, `semantic_color/` — same as FLARE.
 
-## Submodules (clone into `processing/process_video/submodules/`)
+## Submodules (git submodules under `processing/process_video/`)
 
-| Submodule | Repo | Weights |
-|-----------|------|---------|
-| **MODNet** | [ZHKKKe/MODNet](https://github.com/ZHKKKe/MODNet) | [modnet_webcam_portrait_matting.ckpt](https://drive.google.com/file/d/1Nf1ZxeJZJL8Qx9KadcYYyEmmlKhTADxX/view) → `MODNet/pretrained/` |
-| **face-parsing.PyTorch** | [zllrunning/face-parsing.PyTorch](https://github.com/zllrunning/face-parsing.PyTorch) | [79999_iter.pth](https://drive.google.com/open?id=154JgKpzCPW82qINcVieuPH3fZ2e0P812) → `face-parsing.PyTorch/res/cp/` |
+| Path | Repo | Weights |
+|------|------|---------|
+| `processing/process_video/MODNet/` | [ZHKKKe/MODNet](https://github.com/ZHKKKe/MODNet) | [modnet_webcam_portrait_matting.ckpt](https://drive.google.com/file/d/1Nf1ZxeJZJL8Qx9KadcYYyEmmlKhTADxX/view) → `MODNet/pretrained/` |
+| `processing/process_video/face-parsing.PyTorch/` | [zllrunning/face-parsing.PyTorch](https://github.com/zllrunning/face-parsing.PyTorch) | [79999_iter.pth](https://drive.google.com/open?id=154JgKpzCPW82qINcVieuPH3fZ2e0P812) → `face-parsing.PyTorch/res/cp/` |
 
-Suggested layout:
+```bash
+git submodule update --init processing/process_video/MODNet processing/process_video/face-parsing.PyTorch
+```
+
+Layout:
 
 ```
-processing/process_video/submodules/
+processing/process_video/
   MODNet/
     pretrained/modnet_webcam_portrait_matting.ckpt
-    demo/video_matting/custom/run.py   # IMAvatar uses this entrypoint
+    demo/video_matting/custom/run.py   # may need IMAvatar patch
   face-parsing.PyTorch/
     res/cp/79999_iter.pth
     model.py
@@ -60,6 +64,41 @@ sudo apt install ffmpeg
 ```
 
 Python: `torch`, `torchvision`, `opencv-python`, `imageio`, `Pillow` (training env is fine).
+
+## NeRFace / NeRFBlendShape → FLARE folders (no mp4)
+
+Full preprocess: **copy PNG → MODNet image matte → face parsing**. No video / H.264 round-trip.
+
+NeRFace:
+
+```bash
+python processing/process_video/process_nerface.py \
+  --input-dir /Bean/data/gwangjin/2024/nbshapes/nerface \
+  --output-dir /Bean/data/gwangjin/2024/nbshapes/flare_2
+```
+
+NeRFBlendShape (test = last 500 frames; overlap with train OK):
+
+```bash
+python processing/process_video/process_nerfblendshape.py \
+  --input-dir /path/to/nerfblendshape_root \
+  --output-dir /Bean/data/gwangjin/2024/nbshapes/flare_2 \
+  --test-tail 500
+```
+
+Output layout (training ``--input-dir`` = inner subject folder):
+
+```
+flare_2/nf_01/nf_01/train/image/*.png
+flare_2/nf_01/nf_01/train/mask/*.png
+flare_2/nf_01/nf_01/train/semantic/*.png
+flare_2/nbs_id1/nbs_id1/test/image/*.png
+...
+```
+
+Resume: ``--skip-copy`` / ``--skip-matte`` / ``--skip-parse``.
+
+Video-only subjects (e.g. FLARE ``justin/train.mp4``) still use ``process_video.py`` below.
 
 ## Usage
 

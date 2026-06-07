@@ -23,6 +23,7 @@ def loss_weight(loss_cfg, key: str) -> float:
         "rgb": "w_rgb",
         "mp_lmk": "w_mp_lmk",
         "pie68_jaw": "w_pie68_jaw",
+        "mesh_semantic": "w_mesh_seg",
         "h": "w_h",
         "geometry": "w_geometry",
         "scaling": "w_scaling",
@@ -32,7 +33,6 @@ def loss_weight(loss_cfg, key: str) -> float:
         "pose_prior": "w_pose_prior",
         "pose_tz": "w_pose_tz",
         "expr_deform_reg": "w_expr_deform_reg",
-        "sem_anchor": "w_sem_anchor",
         "seg": "w_seg",
     }
     wkey = mapping.get(key)
@@ -78,6 +78,8 @@ def probe_raster_loss_grads(losses, loss_cfg, tracker, deformer, avatar):
         probes.append(("tracker.head_pose.weight", tracker.head_pose.weight))
     if tracker.log_pose_scale.requires_grad:
         probes.append(("tracker.log_pose_scale", tracker.log_pose_scale))
+    if getattr(tracker, "global_translation", None) is not None and tracker.global_translation.requires_grad:
+        probes.append(("tracker.global_translation", tracker.global_translation))
     if deformer.log_max_template_delta.requires_grad:
         probes.append(("deformer.log_max_template_delta", deformer.log_max_template_delta))
     if deformer.template_mlp[-1].weight.requires_grad:

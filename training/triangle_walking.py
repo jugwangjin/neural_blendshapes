@@ -44,7 +44,7 @@ class TriangleWalker:
     @classmethod
     def from_ict(cls, ict, *, device=None, max_iterations=3):
         faces = ict.faces
-        vertices = ict.canonical[0]
+        vertices = ict.template_reference_verts()
         if device is not None:
             faces = faces.to(device)
             vertices = vertices.to(device)
@@ -270,7 +270,7 @@ def perform_triangle_walking(avatar, adj_faces, optimizer, max_iterations=3):
     """
     surface = avatar.surface
     faces = surface.ict.faces
-    vertices = surface.ict.canonical[0]
+    vertices = surface.ict.template_reference_verts()
     return walk_barycentric_surface(
         surface,
         faces,

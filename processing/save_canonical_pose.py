@@ -81,7 +81,12 @@ def main(args, device):
     ict_facekit = ICTFaceKitTorch(npy_dir=str(ICT_NPY), canonical=Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
-    ict_canonical_mesh = Mesh(ict_facekit.neutral_mesh_canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
+    ict_canonical_mesh = Mesh(
+        ict_facekit.expression_reference_verts().cpu().data,
+        ict_facekit.faces.cpu().data,
+        ict_facekit=ict_facekit,
+        device=device,
+    )
     ict_canonical_mesh.compute_connectivity()
 
     expression_weight = torch.zeros(1, ict_facekit.num_expression, device=device)

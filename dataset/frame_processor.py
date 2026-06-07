@@ -128,8 +128,9 @@ def build_split_cache(
         out_npz.parent.mkdir(parents=True, exist_ok=True)
 
         if out_npz.is_file() and not rebuild:
-            data = np.load(out_npz, allow_pickle=True)
-            if bool(data.get("valid", True)):
+            with np.load(out_npz, allow_pickle=True) as data:
+                is_valid = bool(data.get("valid", True))
+            if is_valid:
                 valid_images.append(img_path)
                 valid_caches.append(out_npz)
             else:

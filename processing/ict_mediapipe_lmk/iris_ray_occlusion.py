@@ -27,7 +27,7 @@ from utils.ict_regions import eye_occlusion_layout_face_indices
 
 
 def ict_vertices_for_iris_bake(ict_npy_dict):
-    """Neutral + jawOpen + npy FLAME map (train ``ict.canonical`` space)."""
+    """Neutral + jawOpen + npy FLAME map (``ict.expression_reference_verts()`` space)."""
     return apply_ict_to_flame_space(
         ict_npy_dict["neutral_mesh"],
         ict_npy_dict,

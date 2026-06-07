@@ -16,7 +16,33 @@ def weighted_delta_penalty(delta, deform_reg_weight):
 
 
 def template_smooth_loss(deformer):
-    return weighted_delta_penalty(deformer.template_delta(), deformer.deform_reg_weight)
+    # return deformer.template_delta().pow(2).mean()
+    delta = deformer.template_delta()
+    # amplify z axis delta
+    # delta[:, :, 2] = delta[:, :, 2] * 10.0
+    return weighted_delta_penalty(delta, deformer.deform_reg_weight)
+
+
+def template_laplacian_loss(deformer):
+    """Weak mesh Laplacian smoothing on template mesh (PyTorch3D uniform Laplacian)."""
+    from pytorch3d.loss import mesh_laplacian_smoothing
+    from pytorch3d.structures import Meshes
+
+    verts = (deformer.canonical_xyz_template + deformer.template_delta()).unsqueeze(0)
+    faces = deformer.ict.faces.long().to(device=verts.device).unsqueeze(0)
+    meshes = Meshes(verts=verts, faces=faces)
+    return mesh_laplacian_smoothing(meshes, method="uniform")
+
+
+def template_scale_prior(deformer):
+    """Legacy hook (hard-cap removed): keep zero for compatibility."""
+    ref = deformer.canonical_xyz_template
+    return ref.new_zeros(())
+
+
+def identity_prior_loss(deformer):
+    """L2 prior on ICT FaceKit identity PCA weights (``identity_shape_modes`` coeffs)."""
+    return deformer.identity_weights.pow(2).mean()
 
 
 def deformer_regularization_loss(deformer, c_eff, c_raw, expr_delta=None):

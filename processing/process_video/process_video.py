@@ -25,7 +25,7 @@ Run from repo root::
     python processing/process_video/process_video.py \\
         --dataset-dir /Bean/data/gwangjin/2024/nbshapes/flare_2/justin
 
-Requires: ffmpeg, MODNet + face-parsing.PyTorch under ``processing/process_video/submodules/``.
+Requires: ffmpeg, MODNet + face-parsing.PyTorch under ``processing/process_video/``.
 See ``processing/process_video/README.md``.
 """
 
@@ -41,8 +41,7 @@ PROC_VIDEO_ROOT = Path(__file__).resolve().parent
 if str(PROC_VIDEO_ROOT) not in sys.path:
     sys.path.insert(0, str(PROC_VIDEO_ROOT))
 REPO_ROOT = PROC_VIDEO_ROOT.parent.parent
-SUBMODULES = PROC_VIDEO_ROOT / "submodules"
-MODNET_ROOT = SUBMODULES / "MODNet"
+MODNET_ROOT = PROC_VIDEO_ROOT / "MODNet"
 DEFAULT_MODNET_CKPT = MODNET_ROOT / "pretrained" / "modnet_webcam_portrait_matting.ckpt"
 
 

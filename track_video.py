@@ -108,7 +108,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
-    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
+    ict_canonical_mesh = Mesh(
+        ict_facekit.expression_reference_verts().cpu().data,
+        ict_facekit.faces.cpu().data,
+        ict_facekit=ict_facekit,
+        device=device,
+    )
     ict_canonical_mesh.compute_connectivity()
 
 

@@ -342,10 +342,11 @@ def main():
         k_head=cfg.n_surface_gaussians_per_head,
         k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
         k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
+        k_teeth=cfg.n_surface_gaussians_per_teeth,
         k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
         k_eyeball_sclera=cfg.n_surface_gaussians_per_eyeball_sclera,
         k_eye_occlusion=cfg.n_surface_gaussians_per_eye_occlusion,
-        k_face_loose_factor=0.5,
+        k_face_loose_factor=1.0,
     )
     print(f"device={device}  image_size={image_size}")
     print(f"mp_embedding: {cfg.mp_embedding}")
@@ -360,11 +361,11 @@ def main():
         k_head=cfg.n_surface_gaussians_per_head,
         k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
         k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
+        k_teeth=cfg.n_surface_gaussians_per_teeth,
         k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
         k_eyeball_sclera=cfg.n_surface_gaussians_per_eyeball_sclera,
         k_eye_occlusion=cfg.n_surface_gaussians_per_eye_occlusion,
         n_semantic_classes=cfg.n_semantic_classes,
-        gum_h_sigma_scale=cfg.gum_h_sigma_scale,
     ).to(device)
 
     apply_align = not args.no_flame_align

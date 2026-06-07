@@ -26,7 +26,7 @@ def load_mediapipe_ict_embedding(path):
 
 def vertices2landmarks_barycentric(vertices, faces, face_idx, bary):
     """
-    vertices: [B, V, 3]
+    vertices: [B, V, 3 ]
     faces: [F, 3]
     face_idx: [N]
     bary: [N, 3]
@@ -37,19 +37,41 @@ def vertices2landmarks_barycentric(vertices, faces, face_idx, bary):
 
 MP_IRIS_INDEX_LO = 468  # MP 468–472 (L), 473–477 (R)
 
+# Lip ring only (outer + inner + commissure); no chin/jaw contour (those use w_pie68_jaw).
+MP_LIP_IDS = (
+    61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291,
+    308, 324, 318, 402, 317, 14, 87, 178, 88, 95,
+    78, 191, 80, 81, 82, 13, 312, 311, 310, 415,
+    269, 270, 267, 0, 37, 39, 40, 185, 409,
+)
+MP_MOUTH_CONTOUR_IDS = MP_LIP_IDS  # legacy alias
 
-def robust_l1(pred, target, valid=None, point_weight=None, eps=1e-3):
-    """Charbonnier / robust L1 on 2D points. pred/target: [B, N, 2]. valid: [B, N]."""
-    diff = torch.sqrt((pred - target).pow(2).sum(dim=-1) + eps * eps)
-    w = torch.ones_like(diff)
-    if point_weight is not None:
-        w = w * point_weight.view(1, -1).to(device=diff.device, dtype=diff.dtype)
-    if valid is not None:
-        w = w * valid.to(device=diff.device, dtype=diff.dtype)
-    finite = torch.isfinite(pred).all(dim=-1) & torch.isfinite(target).all(dim=-1)
-    w = w * finite.to(dtype=diff.dtype)
-    denom = w.sum().clamp(min=1.0)
-    return (diff * w).sum() / denom
+
+def robust_l1(
+    pred,
+    target,
+    valid=None,
+    point_weight=None,
+    eps=1e-4,
+    metric="smooth_l1",
+    wing_w_px=10.0,
+    wing_eps_px=2.0,
+    image_size=None,
+):
+    """UV landmark distance — see ``losses.landmark_distance`` (smooth_l1 / l2 / l1 / wing)."""
+    from losses.landmark_distance import weighted_landmark_loss
+
+    return weighted_landmark_loss(
+        pred,
+        target,
+        valid=valid,
+        point_weight=point_weight,
+        metric=metric,
+        eps=eps,
+        wing_w_px=wing_w_px,
+        wing_eps_px=wing_eps_px,
+        image_size=image_size,
+    )
 
 
 def build_mp_lmk_embedding(path, device):
@@ -76,12 +98,18 @@ def loss_mediapipe_landmarks_478(
     image_size,
     mp_valid=None,
     iris_weight=2.5,
+    mouth_weight=2.0,
+    lmk_metric="smooth_l1",
+    lmk_eps=1e-4,
+    lmk_wing_w_px=10.0,
+    lmk_wing_eps_px=2.0,
 ):
     """
     vertices: [B, V, 3] deformed ICT mesh (world)
     mp_landmarks_2d: [B, 478, 2] normalized UV in [0, 1]
     mp_lmk_emb: dict from ``build_mp_lmk_embedding`` (``mp_ids``, ``face_idx``, ``bary``)
     iris_weight: per-point multiplier for MP iris indices 468–477 (face/eyelid use 1.0)
+    mouth_weight: per-point multiplier for ``MP_LIP_IDS`` (1.0 = off)
     """
     # Since mp_lmk_emb and faces are already fully initialized on the target device
     # during build_mp_lmk_embedding and main training script, we avoid calling
@@ -122,4 +150,21 @@ def loss_mediapipe_landmarks_478(
             point_weight.new_tensor(float(iris_weight)),
             point_weight,
         )
-    return robust_l1(pred_uv, target_uv, valid=valid, point_weight=point_weight)
+    if mouth_weight != 1.0:
+        mouth_ids = torch.tensor(MP_LIP_IDS, device=vertices.device, dtype=torch.long)
+        point_weight = torch.where(
+            torch.isin(mp_ids, mouth_ids),
+            point_weight.new_tensor(float(mouth_weight)),
+            point_weight,
+        )
+    return robust_l1(
+        pred_uv,
+        target_uv,
+        valid=valid,
+        point_weight=point_weight,
+        metric=lmk_metric,
+        eps=lmk_eps,
+        wing_w_px=lmk_wing_w_px,
+        wing_eps_px=lmk_wing_eps_px,
+        image_size=image_size,
+    )

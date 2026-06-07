@@ -128,11 +128,11 @@ def main():
         k_head=cfg.n_surface_gaussians_per_head,
         k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
         k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
+        k_teeth=cfg.n_surface_gaussians_per_teeth,
         k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
         k_eyeball_sclera=cfg.n_surface_gaussians_per_eyeball_sclera,
         k_eye_occlusion=cfg.n_surface_gaussians_per_eye_occlusion,
         n_semantic_classes=cfg.n_semantic_classes,
-        gum_h_sigma_scale=cfg.gum_h_sigma_scale,
         gaussian_scale_knn_k=cfg.gaussian_scale_knn_k,
         gaussian_scale_knn_factor=cfg.gaussian_scale_knn_factor,
         face_center_init=cfg.gaussian_face_center_init,
@@ -142,7 +142,11 @@ def main():
 
     renderer = GaussianRenderer(cfg, image_size=cfg.image_size, sh_degree=None).to(device)
     camera = load_training_camera(
-        ict.canonical[0], path=cfg.camera_npz, width=cfg.image_size, height=cfg.image_size, device=device
+        ict.expression_reference_verts(),
+        path=cfg.camera_npz,
+        width=cfg.image_size,
+        height=cfg.image_size,
+        device=device,
     )
 
     mp_lmk_emb = build_mp_lmk_embedding(cfg.mp_embedding, device)

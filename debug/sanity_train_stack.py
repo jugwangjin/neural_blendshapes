@@ -78,7 +78,7 @@ def _surface_eye_pin():
         assert int(ict.n_texture_maps) == 12, f"expected 12 usemtl maps, got {ict.n_texture_maps}"
     avatar = GaussianAvatar.from_ict(ict, k_face=2, k_eyeball_sclera=4, k_eye_occlusion=4)
     assert avatar.is_h_pin.any()
-    assert (avatar.h_sigma_scale[avatar.is_h_pin] == 0).all()
+    assert not hasattr(avatar.surface, "h_sigma_scale")
     assert hasattr(avatar, "face_texture_map_id")
     print(f"OK: sclera+occlusion on surface, n_pin={int(avatar.is_h_pin.sum())}, texture_maps K={ict.n_texture_maps}")
 
@@ -128,7 +128,9 @@ def _render_forward(device):
     deformer = _make_deformer(cfg, ict, device)
     avatar = GaussianAvatar.from_ict(ict, deformer=deformer, k_face=4).to(device)
     renderer = GaussianRenderer(cfg, image_size=cfg.image_size).to(device)
-    camera = load_training_camera(ict.canonical[0], path=cfg.camera_npz, width=cfg.image_size, height=cfg.image_size)
+    camera = load_training_camera(
+        ict.expression_reference_verts(), path=cfg.camera_npz, width=cfg.image_size, height=cfg.image_size
+    )
     corr = TrackerCorrectionMLP(
         n_blendshapes=cfg.num_mp_blendshapes,
         num_ict_expression=ict.num_expression,
@@ -166,7 +168,7 @@ def _loss_backward(device):
     loss_cfg = stage_loss_cfg(spec)
     loss_cfg.image_size = cfg.image_size
     for k in ("w_seg", "w_gamma_prior", "w_pose_prior", "w_gaze_residual", "w_expr_deform_reg",
-              "w_expr_neutral", "w_expr_leak", "w_expr_amp", "w_sem_anchor", "w_template_smooth"):
+              "w_expr_neutral", "w_expr_leak", "w_expr_amp", "w_template_smooth"):
         if hasattr(loss_cfg, k):
             setattr(loss_cfg, k, 0.0)
 
@@ -183,7 +185,13 @@ def _loss_backward(device):
         mediapipe_to_ict=ict.mediapipe_to_ict,
     ).to(device)
     renderer = GaussianRenderer(cfg, image_size=cfg.image_size).to(device)
-    camera = load_training_camera(ict.canonical[0], path=cfg.camera_npz, width=cfg.image_size, height=cfg.image_size, device=device)
+    camera = load_training_camera(
+        ict.expression_reference_verts(),
+        path=cfg.camera_npz,
+        width=cfg.image_size,
+        height=cfg.image_size,
+        device=device,
+    )
     mp_lmk_emb = build_mp_lmk_embedding(cfg.mp_embedding, device)
 
     corr = tracker(

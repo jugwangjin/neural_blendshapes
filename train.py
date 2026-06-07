@@ -1,195 +1,279 @@
 """
 MediaPipe → tracker MLP → ICT deformer → surface/eye Gaussians → gsplat.
 
-Dataset: ``dataset.image_dataset.ImageDataset`` (image split layout under ``Config.input_dir``).
-
-Stages: 0 bootstrap pose → 1 coarse mesh (pose color) → 2 expression detail (pose+expr color)
-
 Run from repo root:
   python train.py
-  python train.py --input-dir /path/to/subject --train-split MVI_1814 MVI_1810 MVI_1811 --eval-split MVI_1812
-  python train.py --gaussian-grow-option gradrgb --output-root /path/to/log_dir
+  python train.py --input-dir /path/to/subject --train-split MVI_1814 MVI_1810 --eval-split MVI_1812
 
 CLI flags use hyphens (--output-root). See docs/guides/training.md.
 """
 
 import argparse
-import sys
 import os
+import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
 
-# Force UTF-8 encoding for standard I/O and JIT compiler subprocesses
 os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["PYTHONUTF8"] = "1"
 os.environ["LANG"] = "C.UTF-8"
 os.environ["LC_ALL"] = "C.UTF-8"
 
 import torch
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from config import Config
-from dataset import build_train_dataset, collate_batch, move_batch_to_device
-from rendering import GaussianRenderer
-from losses.train_losses import compute_losses
-from model.expr_regions import build_expr_region_weight
-from model.gaussian_avatar import GaussianAvatar
-from model.ict_deformer import ICTDeformer
-from model.ict_model import ICTFaceKitTorch
-from model.tracker_mlp import TrackerCorrectionMLP
-from training.apply import (
-    apply_stage_requires_grad,
-    build_optimizers,
-    init_training_state,
-    stage_loss_cfg,
-    stage_needs_rasterization,
-    stage_needs_surface_forward,
-    clip_optimizer_grads
-)
-from training.checkpoint_io import save_checkpoint
+from training.apply import apply_stage_requires_grad, build_optimizers, stage_loss_cfg
+from training.build_stack import build_training_stack
+from training.checkpoint_io import avatar_n_from_state_dict, save_checkpoint
+from training.cli import add_base_train_arguments, apply_base_train_cli
 from training.code_dump import dump_training_code
 from training.eval_render import render_eval_set
-from processing.ict_mediapipe_lmk.io_debug import write_mesh
-from training.stages import STAGE_SCHEDULE, iter_stages, total_training_steps
-from training.densify import BarycentricDensificationStrategy
-from training.triangle_walking import TriangleWalker
-from utils.camera import load_training_camera, training_camera_status
-from losses.mediapipe_landmark_478 import build_mp_lmk_embedding
-from losses.pie68_jaw_landmark import build_pie68_jaw_vertex_indices
-from utils.sampling import count_surface_gaussians
+from training.loss_cfg import hydrate_stage_loss_cfg, update_stage_local_loss_weights
+from training.loss_logger import LossAnalysisLogger, print_losses, tqdm_postfix
+from training.loss_overrides import (
+    apply_loss_overrides,
+    load_loss_overrides,
+    resolve_training_schedule,
+)
+from training.resume import resolve_existing_input_dir
+from training.stages import describe_stage_trainables, iter_stages, total_training_steps
+from training.dataloader_util import restart_loader_iter
+from training.train_step import TrainStepState, run_train_step
+from utils.seed import set_seed
 
 
 def _code_dump_dir(cfg: Config) -> Path:
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return cfg.codes_dir / stamp
-
-
-def _tqdm_postfix(losses, global_step: int, n_show: int = 6) -> dict:
-    items = [(k, losses[k].item()) for k in losses if k != "total"]
-    items.sort(key=lambda x: -abs(x[1]))
-    out = {"step": global_step, "loss": f"{losses['total'].item():.4f}"}
-    for k, v in items[:n_show]:
-        out[k] = f"{v:.4f}"
-    return out
-    
-
-
-@torch.no_grad()
-def save_landmark_debug_image(path, vertices, faces, mp_landmarks_2d, mp_lmk_emb, camera, image_size, gt_image):
-    import cv2
-    import numpy as np
-    from losses.mediapipe_landmark_478 import vertices2landmarks_barycentric
-
-    # 1. Get predicted and target UVs
-    mp_ids = mp_lmk_emb["mp_ids"]
-    face_idx = mp_lmk_emb["face_idx"]
-    bary = mp_lmk_emb["bary"]
-
-    lmk_xyz = vertices2landmarks_barycentric(vertices, faces, face_idx, bary)
-    proj = camera.project_world_points(lmk_xyz.reshape(-1, 3)).reshape(vertices.shape[0], -1, 2)
-    pred_uv = (proj / float(image_size))[0].detach().cpu().numpy() # [N, 2]
-
-    target_uv = mp_landmarks_2d[0, mp_ids].detach().cpu().numpy() # [N, 2]
-
-    # 2. Get GT image and convert to HWC BGR uint8
-    img = gt_image.detach().cpu().permute(1, 2, 0).numpy()
-    img = (img.clip(0, 1) * 255.0).round().astype(np.uint8)
-    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-
-    # 3. Draw dots
-    h, w = img_bgr.shape[:2]
-    for i in range(len(target_uv)):
-        tx, ty = int(target_uv[i, 0] * w), int(target_uv[i, 1] * h)
-        px, py = int(pred_uv[i, 0] * w), int(pred_uv[i, 1] * h)
-        cv2.circle(img_bgr, (tx, ty), 2, (0, 0, 255), -1) # Red for GT
-        cv2.circle(img_bgr, (px, py), 2, (0, 255, 0), -1) # Green for Rendered
-
-    cv2.imwrite(str(path), img_bgr)
-
-
-def _parse_split_cli(values):
-    """
-    argparse ``nargs='*'`` → ``SplitNames``.
-
-    - ``MVI_1814 MVI_1810`` → list
-    - ``MVI_1812`` → str
-    - ``MVI_1814,MVI_1810`` (one token) → list
-    """
-    if values is None:
-        return None
-    if len(values) == 0:
-        return None
-    if len(values) == 1 and "," in values[0]:
-        parts = [s.strip() for s in values[0].split(",") if s.strip()]
-        return parts[0] if len(parts) == 1 else parts
-    if len(values) == 1:
-        return values[0]
-    return list(values)
+    return cfg.codes_dir / datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 def parse_train_cli():
     p = argparse.ArgumentParser(description="Train MediaPipe → ICT → 3DGS avatar")
-    p.add_argument("--input-dir", type=Path, default=None, help="Subject root (scene folders underneath)")
-    p.add_argument("--output-root", type=Path, default=None)
-    p.add_argument(
-        "--train-split", "--flare-train-split",
-        dest="train_split",
-        nargs="*",
-        metavar="SCENE",
-        help="Train scene folder name(s), space-separated or comma in one arg",
-    )
-    p.add_argument(
-        "--eval-split", "--flare-eval-split",
-        dest="eval_split",
-        nargs="*",
-        metavar="SCENE",
-        help="Eval scene folder name(s), space-separated or comma in one arg",
-    )
-    p.add_argument("--rebuild-mp-cache", action="store_true")
-    p.add_argument(
-        "--gaussian-grow-option",
-        choices=("grad2d", "gradrgb"),
-        default=None,
-        help="Densify grow signal: grad2d (viewspace) or gradrgb (color param grad)",
-    )
+    add_base_train_arguments(p)
     return p.parse_args()
 
 
-def apply_train_cli(cfg: Config, args) -> Config:
-    if args.input_dir is not None:
-        cfg.input_dir = args.input_dir
-    if args.output_root is not None:
-        cfg.output_root = args.output_root
-    train_split = _parse_split_cli(args.train_split)
-    if train_split is not None:
-        cfg.train_split = train_split
-    eval_split = _parse_split_cli(args.eval_split)
-    if eval_split is not None:
-        cfg.eval_split = eval_split
-    if args.rebuild_mp_cache:
-        cfg.rebuild_mp_cache = True
-    if args.gaussian_grow_option is not None:
-        cfg.gaussian_grow_option = args.gaussian_grow_option
-    return cfg
+def _print_stage_trainables(spec, cfg):
+    for line in describe_stage_trainables(spec):
+        print(f"  trainable: {line}")
+    if spec.train_pose_weight:
+        lr_pw = float(getattr(cfg, "lr_pose_weight", spec.lr_pose_weight))
+        print(f"  pose_weight_net: trainable (lr={lr_pw}, pose_weight_one={spec.pose_weight_one})")
+    if getattr(spec, "train_ict_identity", False):
+        print(f"  ict identity_weights: trainable (lr={spec.lr_identity})")
+    if spec.train_template_deformer:
+        print(f"  template_mlp: trainable (lr={spec.lr_template})")
 
 
-def resolve_existing_input_dir(input_dir) -> Path:
-    p = Path(input_dir)
-    curr = p
-    while curr != curr.parent:
-        if curr.is_dir():
-            if curr != p:
-                print(f"Auto-resolved nonexistent input_dir '{p}' to existing path '{curr}'")
-            return curr
-        curr = curr.parent
-    return p
+def _run_stage(
+    *,
+    cfg,
+    spec,
+    stage_idx,
+    stage_start,
+    stack,
+    global_step,
+    loss_logger,
+    no_mid_eval,
+    no_stage_end_eval,
+):
+    device = stack.device
+    if spec.steps <= 0:
+        return global_step, None
+    stage_end = stage_start + spec.steps
+    if stage_end <= global_step:
+        print(f"\n=== Skip stage {stage_idx}: {spec.name} (checkpoint already past step {stage_end}) ===")
+        return global_step, None
+
+    print(f"\n=== Stage {stage_idx}: {spec.name} ({spec.steps} steps) ===")
+    print(spec.description)
+    n_avatar = stack.avatar.n_gaussians
+    print(f"  avatar n_gaussians={n_avatar} at stage start")
+    resume_meta = getattr(stack, "resume_meta", None)
+    stage_local = global_step - stage_start
+    if resume_meta is not None and stage_local == 0:
+        n_resume = int(resume_meta["n_gaussians"])
+        if n_avatar != n_resume:
+            raise RuntimeError(
+                f"avatar reset before stage {spec.name}: in-memory n={n_avatar} != "
+                f"resume ckpt n={n_resume} ({resume_meta['path'].name})"
+            )
+        print(
+            f"  resume ok: n={n_resume} matches {resume_meta['path'].name} "
+            f"(global_step={global_step}, ckpt stage={resume_meta['stage']})"
+        )
+    elif resume_meta is None and spec.name == "2_coarse_mesh":
+        s0 = sorted(cfg.checkpoint_dir.glob("stage_0_*_end_step_*.pt"))
+        if s0:
+            n0 = avatar_n_from_state_dict(
+                torch.load(s0[-1], map_location="cpu", weights_only=False)["avatar"]
+            )
+            print(f"  continuous run: n={n_avatar} (stage_0 ckpt n={n0}, delta {n_avatar - n0:+d})")
+    elif resume_meta is None and spec.name == "3_expression_detail":
+        s2 = sorted(cfg.checkpoint_dir.glob("stage_2_coarse_mesh_end_step_*.pt"))
+        if s2:
+            n2 = avatar_n_from_state_dict(
+                torch.load(s2[-1], map_location="cpu", weights_only=False)["avatar"]
+            )
+            print(
+                f"  continuous run: n={n_avatar} (stage_2 ckpt n={n2}, delta {n_avatar - n2:+d})"
+            )
+            if n_avatar != n2:
+                print(
+                    "  NOTE: n != stage_2 ckpt before any stage_3 step — avatar changed between "
+                    "stage_2 save and stage_3 start (not resume path; check separate train invocations)"
+                )
+
+    stack.renderer.set_sh_degree(spec.sh_degree)
+    cfg.sh_degree = spec.sh_degree
+
+    apply_stage_requires_grad(spec, stack.tracker, stack.deformer, stack.avatar)
+    mesh_optim, gaussian_optim = build_optimizers(spec, stack.tracker, stack.deformer, stack.avatar, cfg)
+    if getattr(spec, "geometry_lr_decay", False):
+        mult = float(getattr(spec, "geometry_lr_decay_final_mult", 0.01))
+        start_frac = float(getattr(spec, "geometry_lr_decay_start_frac", 0.0))
+        start_note = (
+            f", decay from {start_frac:.0%} of stage"
+            if start_frac > 0.0
+            else ", decay from stage start"
+        )
+        print(
+            f"  geometry LR decay: final_mult={mult}{start_note} "
+            f"(h, bary_uv, template_mlp, expr_mlp; color/opacity/scale/rot/tracker fixed LR)"
+        )
+    _print_stage_trainables(spec, cfg)
+    if spec.name in cfg.gaussian_densify_stages:
+        stack.densify_strategy.reset_state(len(stack.avatar.surface.h), stack.avatar.surface.h.device)
+
+    loss_cfg = hydrate_stage_loss_cfg(stage_loss_cfg(spec), spec, cfg)
+
+    pbar = tqdm(
+        total=spec.steps,
+        initial=stage_local,
+        desc=f"stage {stage_idx} {spec.name}",
+        unit="step",
+        dynamic_ncols=True,
+    )
+    loader_iter = iter(stack.loader)
+    for _ in range(stage_local, spec.steps):
+        if stage_local >= spec.steps:
+            break
+        try:
+            batch = next(loader_iter)
+        except StopIteration:
+            loader_iter = restart_loader_iter(stack.loader, loader_iter)
+            batch = next(loader_iter)
+        stage_local += 1
+        global_step += 1
+        update_stage_local_loss_weights(loss_cfg, spec, stage_local)
+
+        losses, _, _, _ = run_train_step(
+            TrainStepState(
+                cfg=cfg,
+                spec=spec,
+                stack=stack,
+                batch=batch,
+                loss_cfg=loss_cfg,
+                mesh_optim=mesh_optim,
+                gaussian_optim=gaussian_optim,
+                stage_local=stage_local,
+                global_step=global_step,
+            )
+        )
+
+        if (
+            stack.loader.dataset is not None
+            and losses.get("rgb_l1") is not None
+            and batch.get("dataset_frame_idx") is not None
+        ):
+            fi = batch["dataset_frame_idx"]
+            frame_j = int(fi[0] if isinstance(fi, (list, tuple)) else fi)
+            stack.loader.dataset.update_rgb_loss_ema(frame_j, losses["rgb_l1"].item())
+
+        pbar.update(1)
+        if global_step % cfg.log_every == 0 or stage_local >= spec.steps:
+            pbar.set_postfix(tqdm_postfix(losses, global_step), refresh=False)
+            if global_step % cfg.log_every == 0:
+                print_losses(losses, global_step, spec.name)
+                densify_stats = {}
+                if spec.name in cfg.gaussian_densify_stages:
+                    densify_stats = stack.densify_strategy.analysis_snapshot(
+                        global_step,
+                        stage_name=spec.name,
+                        stage_local=stage_local,
+                        surf=stack.avatar.surface,
+                    )
+                loss_logger.log(
+                    global_step=global_step,
+                    stage_name=spec.name,
+                    stage_local=stage_local,
+                    losses=losses,
+                    mesh_optim=mesh_optim,
+                    gaussian_optim=gaussian_optim,
+                    densify_stats=densify_stats,
+                )
+
+        if not no_mid_eval and global_step % int(cfg.eval_render_interval) == 0:
+            render_eval_set(
+                cfg,
+                spec,
+                stack.tracker,
+                stack.avatar,
+                stack.renderer,
+                stack.camera,
+                device,
+                out_dir=cfg.eval_render_dir,
+                global_step=global_step,
+                max_frames=cfg.eval_max_frames,
+                eval_loader=stack.eval_loader,
+                deformer=stack.deformer,
+                **stack.eval_render_viz,
+            )
+
+    pbar.close()
+    if hasattr(stack.loader.dataset, "save_rgb_loss_ema"):
+        stack.loader.dataset.save_rgb_loss_ema()
+    n_before_save = stack.avatar.n_gaussians
+    print(f"  stage end: avatar n_gaussians={n_before_save} (before save)")
+    stage_ckpt = cfg.checkpoint_dir / f"stage_{spec.name}_end_step_{global_step:06d}.pt"
+    save_checkpoint(
+        stage_ckpt,
+        global_step=global_step,
+        stage_name=spec.name,
+        tracker=stack.tracker,
+        deformer=stack.deformer,
+        avatar=stack.avatar,
+        cfg=cfg,
+        spec=spec,
+        extra={"stage_end": True, "stage_steps": spec.steps},
+    )
+    if not no_stage_end_eval:
+        render_eval_set(
+            cfg,
+            spec,
+            stack.tracker,
+            stack.avatar,
+            stack.renderer,
+            stack.camera,
+            device,
+            out_dir=cfg.eval_render_dir,
+            global_step=global_step,
+            max_frames=cfg.eval_max_frames,
+            eval_loader=stack.eval_loader,
+            deformer=stack.deformer,
+            **stack.eval_render_viz,
+        )
+    return global_step, spec
 
 
 def main():
-    cfg = apply_train_cli(Config(), parse_train_cli())
+    args = parse_train_cli()
+    cfg = apply_base_train_cli(Config(), args)
+    set_seed(cfg.seed, deterministic=cfg.deterministic)
     cfg.input_dir = resolve_existing_input_dir(cfg.input_dir)
     from processing.ict_mediapipe_lmk.embedding_io import resolve_embedding_path
 
@@ -200,360 +284,58 @@ def main():
     cfg.checkpoint_dir.mkdir(parents=True, exist_ok=True)
     cfg.eval_render_dir.mkdir(parents=True, exist_ok=True)
 
-    schedule = STAGE_SCHEDULE
+    loss_overrides = load_loss_overrides(args.loss_overrides)
+    base_schedule = resolve_training_schedule(loss_overrides)
+    schedule = apply_loss_overrides(cfg, base_schedule, loss_overrides)
     cfg.iterations = total_training_steps(schedule)
+    no_mid_eval = args.no_mid_eval_render or args.final_eval_only
+    no_stage_end_eval = args.no_stage_end_eval or args.final_eval_only
 
-    dump_training_code(ROOT, _code_dump_dir(cfg), cfg, schedule)
+    print(f"seed={cfg.seed} deterministic={cfg.deterministic}")
+    code_dir = dump_training_code(ROOT, _code_dump_dir(cfg), cfg, schedule)
+    if args.loss_overrides is not None:
+        shutil.copy2(args.loss_overrides, code_dir / "loss_overrides.json")
+        print(f"loss overrides: copied to {code_dir / 'loss_overrides.json'}")
 
-    dataset = build_train_dataset(cfg, train=True)
-    from dataset.dataset_util import format_splits_label
-
-    split_label = format_splits_label(cfg.train_split)
-    n_frames = len(dataset)
-    print(
-        f"dataset: ImageDataset ({cfg.dataset_type}) "
-        f"{cfg.input_dir}/{{{split_label}}}/image — {n_frames} frames, image_size={cfg.image_size}"
-    )
-
-    loader = DataLoader(
-        dataset,
-        batch_size=cfg.batch_size,
-        shuffle=True,
-        collate_fn=collate_batch,
-        num_workers=cfg.num_workers,
-        pin_memory=cfg.pin_memory,
-    )
-
-    ict = ICTFaceKitTorch(npy_dir=str(cfg.ict_npy)).to(device)
-
-    tracker = TrackerCorrectionMLP(
-        mediapipe_to_ict=ict.mediapipe_to_ict,
-        num_ict_expression=ict.num_expression,
-        n_blendshapes=cfg.num_mp_blendshapes,
-        gamma_min=cfg.gamma_min,
-        gamma_max=cfg.gamma_max,
-        use_landmarks=True,
-    ).to(device)
-
-    expr_region_weight = build_expr_region_weight(ict).to(device)
-    deformer = ICTDeformer(
-        ict,
-        expr_region_weight,
-        mediapipe_name_to_ict=str(cfg.mediapipe_name_to_ict),
-        n_coeffs=cfg.num_ict_expressions,
-    ).to(device)
-
-    avatar = GaussianAvatar.from_ict(
-        ict,
-        deformer=deformer,
-        k_face=cfg.n_surface_gaussians_per_face,
-        k_head=cfg.n_surface_gaussians_per_head,
-        k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
-        k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
-        k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
-        k_eyeball_sclera=cfg.n_surface_gaussians_per_eyeball_sclera,
-        k_eye_occlusion=cfg.n_surface_gaussians_per_eye_occlusion,
-        n_semantic_classes=cfg.n_semantic_classes,
-        gum_h_sigma_scale=cfg.gum_h_sigma_scale,
-        gaussian_scale_knn_k=cfg.gaussian_scale_knn_k,
-        gaussian_scale_knn_factor=cfg.gaussian_scale_knn_factor,
-        face_center_init=cfg.gaussian_face_center_init,
-        max_scale=cfg.geometry_max_scale,
-    ).to(device)
-
-    n_surface = count_surface_gaussians(
-        ict,
-        ict.faces,
-        k_face=cfg.n_surface_gaussians_per_face,
-        k_head=cfg.n_surface_gaussians_per_head,
-        k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
-        k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
-        k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
-        k_eyeball_sclera=cfg.n_surface_gaussians_per_eyeball_sclera,
-        k_eye_occlusion=cfg.n_surface_gaussians_per_eye_occlusion,
-        # Tight-face keeps k_face; loose face uses half (see utils/sampling.py).
-        k_face_loose_factor=0.5,
-        face_center_init=cfg.gaussian_face_center_init,
-    )
-    print(
-        f"surface Gaussians: {n_surface} "
-        f"(face/head={cfg.n_surface_gaussians_per_face}/{cfg.n_surface_gaussians_per_head} "
-        f"mouth_socket={cfg.n_surface_gaussians_per_mouth_socket} "
-        f"mouth_interior={cfg.n_surface_gaussians_mouth_interior} "
-        f"eye_socket={cfg.n_surface_gaussians_per_eye_socket} "
-        f"sclera/occlusion={cfg.n_surface_gaussians_per_eyeball_sclera}/"
-        f"{cfg.n_surface_gaussians_per_eye_occlusion} per face; "
-        f"gum h_sigma×{cfg.gum_h_sigma_scale}; eye sclera h=0)"
-    )
-
-    init_training_state(avatar)
-
-    # Initialize layout colors for Gaussians from region_colors.py
-    try:
-        from debug.sanity.region_colors import surface_gaussian_rgb, rgb_to_logit
-        colors = surface_gaussian_rgb(avatar, ict, ict.canonical[0], device, mp_embedding_path=cfg.mp_embedding)
-        avatar.color.data.copy_(rgb_to_logit(colors))
-        print("Initialized Gaussian surface colors with layout region colors.")
-    except Exception as e:
-        print(f"Warning: Could not initialize surface layout colors ({e})")
-
-    renderer = GaussianRenderer(cfg, image_size=cfg.image_size, sh_degree=None).to(device)
-    camera = load_training_camera(
-        ict.canonical[0],
-        path=cfg.camera_npz,
-        width=cfg.image_size,
-        height=cfg.image_size,
-        device=device,
-    )
-    print(f"camera: {training_camera_status(cfg.camera_npz)}")
-    if not cfg.camera_npz.is_file():
-        print(
-            "  bake metrical crop: python processing/compute_camera_for_metrical_crop.py "
-            "--apply-train-view --write-npz"
-        )
-
-    mp_lmk_emb = build_mp_lmk_embedding(cfg.mp_embedding, device)
-    print(f"MP→ICT landmark embedding: {cfg.mp_embedding} ({mp_lmk_emb['mp_ids'].numel()} landmarks)")
-    pie68_jaw_vertex_idx = build_pie68_jaw_vertex_indices(ict, device)
-    print(
-        f"PIE-68 jawline: {pie68_jaw_vertex_idx.numel()} ICT verts "
-        f"(protocol 0:{ict.landmark_start}, FA batch['landmark'][:, :{ict.landmark_start}])"
-    )
-    ict_faces = ict.faces.to(device)
-    triangle_walker = TriangleWalker(ict_faces, ict.canonical[0], max_iterations=3)
-
-    densify_strategy = BarycentricDensificationStrategy(cfg)
-    global_step = 0
-    mesh_optim = None
-    gaussian_optim = None
+    stack, global_step = build_training_stack(cfg, device, resume_path=args.resume)
+    loss_logger = LossAnalysisLogger(cfg.output_root / "analysis" / "loss_log.jsonl")
     current_spec = None
 
-    eval_ds = build_train_dataset(cfg, train=False)
-    eval_loader = DataLoader(
-        eval_ds,
-        batch_size=1,
-        shuffle=False,
-        collate_fn=collate_batch,
-        num_workers=0,
-    ) if len(eval_ds) > 0 else None
-
-    for stage_idx, spec, stage_start, stage_end in iter_stages(schedule):
-        if spec.steps <= 0:
-            continue
-
-        if False and (stage_idx == 1 and global_step == 0) or (stage_idx==2 and global_step==5005): # We're debugging
-            
-            render_eval_set(
-                cfg,
-                spec,
-                tracker,
-                avatar,
-                renderer,
-                camera,
-                device,
-                out_dir=cfg.eval_render_dir,
-                global_step=global_step,
-                max_frames=cfg.eval_max_frames,
-                eval_loader=eval_loader,
-            )
-
-        print(f"\n=== Stage {stage_idx}: {spec.name} ({spec.steps} steps) ===")
-        print(spec.description)
-
-        renderer.set_sh_degree(spec.sh_degree)
-        cfg.sh_degree = spec.sh_degree
-
-        apply_stage_requires_grad(spec, tracker, deformer, avatar)
-        mesh_optim, gaussian_optim = build_optimizers(spec, tracker, deformer, avatar)
-        if spec.name in cfg.gaussian_densify_stages:
-            densify_strategy.reset_state(
-                len(avatar.surface.h), avatar.surface.h.device
-            )
-        loss_cfg = stage_loss_cfg(spec)
-        loss_cfg.image_size = cfg.image_size
-        loss_cfg.mp_lmk_iris_weight = cfg.mp_lmk_iris_weight
-        loss_cfg.silhouette_use_edt = cfg.silhouette_use_edt
-        loss_cfg.silhouette_edt_w_ext = cfg.silhouette_edt_w_ext
-        loss_cfg.silhouette_edt_w_int = cfg.silhouette_edt_w_int
-        loss_cfg.silhouette_edt_max_dist_px = cfg.silhouette_edt_max_dist_px
-        stage_local = 0
-
-        pbar = tqdm(
-            total=spec.steps,
-            desc=f"stage {stage_idx} {spec.name}",
-            unit="step",
-            dynamic_ncols=True,
-        )
-        loader_iter = iter(loader)
-        for _ in range(spec.steps):
-
-
-            if stage_local >= spec.steps:
-                break
-            try:
-                batch = next(loader_iter)
-            except StopIteration:
-                loader_iter = iter(loader)
-                batch = next(loader_iter)
-            stage_local += 1
-            global_step += 1
-
-            batch = move_batch_to_device(batch, device)
-
-            corr = tracker(
-                mp_blendshape=batch["mp_blendshape"],
-                mp_landmarks_2d=batch.get("mp_landmarks_2d"),
-                mp_landmarks_3d=batch.get("mp_landmarks_3d"),
-                world_to_cam=batch.get("world_to_cam"),
-                mp_pose_raw=batch.get("mp_pose_raw"),
-                mp_transform_matrix=batch.get("mp_transform_matrix"),
-                force_gamma_one=spec.fix_gamma_at_one,
-            )
-
-            pose_weight_fixed = 1.0 if spec.pose_weight_one else None
-            need_render = stage_needs_rasterization(loss_cfg)
-            need_surface = stage_needs_surface_forward(loss_cfg)
-            avatar_out = avatar(
-                tracker_out=corr,
-                apply_expression_deform=spec.train_expression_deform,
-                use_pose_scale=spec.apply_pose_scale,
-                pose_weight_fixed=pose_weight_fixed,
-                rotate_about_centroid=spec.pose_rotate_about_centroid,
-                pose_zero_tz=spec.pose_zero_tz,
-                skip_surface=not need_surface,
-                enable_color_pose=getattr(spec, "train_color_pose", False),
-                enable_color_expression=getattr(spec, "train_color_expression", False),
-            )
-            expr_delta = avatar_out.get("expr_delta")
-
-            render = None
-            if need_render:
-                render_semantic = loss_cfg.w_seg > 0
-                render = renderer(
-                    avatar_out,
-                    camera,
-                    render_semantic=render_semantic,
-                )
-            losses = compute_losses(
-                loss_cfg,
-                batch,
-                render,
-                avatar_out,
-                camera,
-                mp_lmk_emb,
-                ict_faces,
-                pie68_jaw_vertex_idx=pie68_jaw_vertex_idx,
-                corr=corr,
-                deformer=deformer,
-                expr_delta=expr_delta,
-                avatar=avatar,
-                renderer=renderer,
-            )
-
-            if mesh_optim is not None:
-                mesh_optim.zero_grad(set_to_none=True)
-            if gaussian_optim is not None:
-                gaussian_optim.zero_grad(set_to_none=True)
-
-            if spec.name in cfg.gaussian_densify_stages and render is not None:
-                densify_strategy.pre_backward(global_step, render, avatar=avatar)
-
-            losses["total"].backward()
-
-            clip_optimizer_grads(mesh_optim, gaussian_optim, max_norm=cfg.grad_clip_max_norm)
-
-            if (
-                spec.name in cfg.gaussian_densify_stages
-                and gaussian_optim is not None
-                and render is not None
-            ):
-                densify_strategy.post_backward(global_step, avatar, render)
-
-            if spec.name == "1_bootstrap_pose" and global_step % 100 == 0:
-                dbg_dir = cfg.eval_render_dir / "bootstrap_debug"
-                dbg_dir.mkdir(parents=True, exist_ok=True)
-                dbg_path = dbg_dir / f"step_{global_step:06d}.png"
-                save_landmark_debug_image(
-                    dbg_path,
-                    avatar_out["mesh_xyz"],
-                    ict_faces,
-                    batch["mp_landmarks_2d"],
-                    mp_lmk_emb,
-                    camera,
-                    cfg.image_size,
-                    batch["image"][0],
-                )
-                mesh_verts = avatar_out["mesh_xyz"][0].detach().float().cpu().numpy()
-                mesh_faces = ict_faces.detach().cpu().numpy()
-                write_mesh(
-                    dbg_dir / f"step_{global_step:06d}_mesh.obj",
-                    mesh_verts,
-                    mesh_faces,
-                )
-
-            if mesh_optim is not None:
-                mesh_optim.step()
-            if gaussian_optim is not None:
-                gaussian_optim.step()
-                if (
-                    spec.train_gaussian_geometry
-                    and global_step % max(1, cfg.gaussian_triangle_walk_every) == 0
-                ):
-                    triangle_walker.step(avatar.surface, gaussian_optim)
-                if spec.name in cfg.gaussian_densify_stages:
-                    densify_strategy.post_optimizer_step(
-                        global_step, avatar, gaussian_optim, ict_faces, ict
-                    )
-
-            pbar.update(1)
-            if global_step % cfg.log_every == 0 or stage_local >= spec.steps:
-                pbar.set_postfix(_tqdm_postfix(losses, global_step), refresh=False)
-
-            
-
-            if global_step % 5000 == 0: # We're debugging
-                
-                render_eval_set(
-                    cfg,
-                    spec,
-                    tracker,
-                    avatar,
-                    renderer,
-                    camera,
-                    device,
-                    out_dir=cfg.eval_render_dir,
-                    global_step=global_step,
-                    max_frames=cfg.eval_max_frames,
-                    eval_loader=eval_loader,
-                )
-
-        pbar.close()
-        current_spec = spec
-        stage_ckpt = cfg.checkpoint_dir / f"stage_{spec.name}_end_step_{global_step:06d}.pt"
-        save_checkpoint(
-            stage_ckpt,
-            global_step=global_step,
-            stage_name=spec.name,
-            tracker=tracker,
-            deformer=deformer,
-            avatar=avatar,
+    for stage_idx, spec, stage_start, _stage_end in iter_stages(schedule):
+        global_step, ended_spec = _run_stage(
             cfg=cfg,
-            extra={"stage_end": True, "stage_steps": spec.steps},
+            spec=spec,
+            stage_idx=stage_idx,
+            stage_start=stage_start,
+            stack=stack,
+            global_step=global_step,
+            loss_logger=loss_logger,
+            no_mid_eval=no_mid_eval,
+            no_stage_end_eval=no_stage_end_eval,
         )
-        
-        # continue # We're debugging
+        if ended_spec is not None:
+            current_spec = ended_spec
+
+    if args.final_eval_only and current_spec is not None and stack.eval_loader is not None:
+        from dataclasses import replace
+
+        final_spec = replace(current_spec, name="final_eval")
+        print(f"\n=== Final eval render (step {global_step}) ===")
         render_eval_set(
             cfg,
-            spec,
-            tracker,
-            avatar,
-            renderer,
-            camera,
+            final_spec,
+            stack.tracker,
+            stack.avatar,
+            stack.renderer,
+            stack.camera,
             device,
             out_dir=cfg.eval_render_dir,
             global_step=global_step,
             max_frames=cfg.eval_max_frames,
-            eval_loader=eval_loader,
+            eval_loader=stack.eval_loader,
+            deformer=stack.deformer,
+            save_checkpoint_pt=False,
+            **stack.eval_render_viz,
         )
 
     print(f"\nDone. Total steps: {global_step}. Last stage: {current_spec.name if current_spec else 'n/a'}")

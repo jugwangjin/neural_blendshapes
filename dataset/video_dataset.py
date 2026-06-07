@@ -13,6 +13,8 @@ class VideoDataset(Dataset):
     def __init__(self, cfg, train=True, synthetic_if_empty=True, au_active_boost=False):
         self.cfg = cfg
         self.image_size = cfg.image_size
+        self.train = train
+        self.seed = int(getattr(cfg, "seed", 0)) + (0 if train else 1)
         self.au_active_boost = au_active_boost and train
         self.au_active_ratio = getattr(cfg, "au_active_sample_ratio", 0.3)
         self.au_active_thresh = getattr(cfg, "au_active_thresh", 0.12)
@@ -53,10 +55,18 @@ class VideoDataset(Dataset):
         if (
             self.au_active_boost
             and len(self.high_au_indices) > 0
-            and np.random.rand() < self.au_active_ratio
         ):
-            return int(np.random.choice(self.high_au_indices))
+            rng = self._sample_rng(idx)
+            if rng.random() < self.au_active_ratio:
+                return int(rng.choice(self.high_au_indices))
         return idx % len(self.frames)
+
+    def _sample_rng(self, idx):
+        worker_id = 0
+        info = torch.utils.data.get_worker_info()
+        if info is not None:
+            worker_id = info.id
+        return np.random.default_rng(int(self.seed) + worker_id * 1_000_003 + int(idx))
 
     def __len__(self):
         if self.frames is None:

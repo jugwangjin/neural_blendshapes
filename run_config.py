@@ -6,14 +6,23 @@ Usage:
 Example:
     python run_config.py 001
     python run_config.py configs_tmp/justin.txt --rebuild-mp-cache
+    python run_config.py nbs_id1 --force   # re-run even if complete
 """
 
-import sys
 import os
-import re
+import sys
+
+os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["PYTHONUTF8"] = "1"
+os.environ["LANG"] = "C.UTF-8"
+os.environ["LC_ALL"] = "C.UTF-8"
+
 import ast
+import argparse
 import subprocess
 from pathlib import Path
+
+from run_status import ABLATION_DEFAULT, is_run_complete, output_root_for_run
 
 
 def parse_config_txt(file_path: Path) -> dict:
@@ -51,13 +60,26 @@ def parse_config_txt(file_path: Path) -> dict:
 
 
 def main():
-    if len(sys.argv) < 2:
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument(
+        "--force",
+        action="store_true",
+        help="Run even if final stage checkpoint already exists",
+    )
+    pre.add_argument(
+        "--ablation",
+        default=ABLATION_DEFAULT,
+        help=f"Log root key (default {ABLATION_DEFAULT} -> neural_blendshapes_10)",
+    )
+    pre_args, remaining = pre.parse_known_args()
+
+    if len(remaining) < 1:
         print("Error: Please specify a config name or path.")
-        print("Usage: python run_config.py <config_name_or_path> [extra_train_args...]")
+        print("Usage: python run_config.py <config_name_or_path> [--force] [extra_train_args...]")
         sys.exit(1)
 
-    config_arg = sys.argv[1]
-    extra_args = sys.argv[2:]
+    config_arg = remaining[0]
+    extra_args = remaining[1:]
 
     # Resolve config file path
     config_path = Path(config_arg)
@@ -87,8 +109,17 @@ def main():
         print("Error: 'run_name' not found in config.")
         sys.exit(1)
 
-    # Construct output_root path
-    output_root = f"/Bean/log/gwangjin/2026/neural_blendshapes/{run_name}"
+    output_root = output_root_for_run(run_name, ablation=pre_args.ablation)
+
+    if is_run_complete(output_root) and not pre_args.force:
+        ckpt_dir = output_root / "checkpoints"
+        done = sorted(ckpt_dir.glob("stage_*_end_step_*.pt"))
+        last = done[-1].name if done else "n/a"
+        print(f"Skip: training already complete for run_name={run_name}")
+        print(f"  output_root: {output_root}")
+        print(f"  latest checkpoint: {last}")
+        print("  (use --force to re-run)")
+        return
 
     print("\n--- Extracted Settings ---")
     print(f"run_name:    {run_name}")
@@ -104,7 +135,7 @@ def main():
     if input_dir:
         cmd.extend(["--input-dir", str(input_dir)])
     
-    cmd.extend(["--output-root", output_root])
+    cmd.extend(["--output-root", str(output_root)])
 
     if train_dir:
         cmd.append("--train-split")
@@ -127,6 +158,7 @@ def main():
     # Force UTF-8 encoding in standard I/O and subprocesses
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     env["LANG"] = "C.UTF-8"
     env["LC_ALL"] = "C.UTF-8"
 

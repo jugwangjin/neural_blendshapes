@@ -15,16 +15,31 @@ Usage:
 
     # Filter specific configs
     python sweep_configs.py --gpus 0 1 --pattern "ablation_*.txt"
+
+    # Reverse filename order (newest / Z-first configs first)
+    python sweep_configs.py --gpus 0 --reverse
+
+    # Random order (optional --shuffle-seed for reproducibility)
+    python sweep_configs.py --gpus 0 --shuffle
 """
 
 import sys
 import os
 import ast
+import random
 import argparse
 import subprocess
 import queue
 from pathlib import Path
 from threading import Thread
+
+from run_status import (
+    ABLATION_DEFAULT,
+    ABLATION_LOG_ROOTS,
+    is_run_complete,
+    log_root_for_ablation,
+    output_root_for_run,
+)
 
 
 def parse_config_txt(file_path: Path) -> dict:
@@ -60,7 +75,15 @@ def parse_config_txt(file_path: Path) -> dict:
     return config
 
 
-def worker_gpu(gpu_id: str, task_queue: queue.Queue, dry_run: bool, extra_args: list):
+def worker_gpu(
+    gpu_id: str,
+    task_queue: queue.Queue,
+    dry_run: bool,
+    extra_args: list,
+    *,
+    skip_complete: bool,
+    log_root: Path,
+):
     """Worker thread that pulls config tasks and runs them on a specific GPU."""
     while True:
         try:
@@ -75,13 +98,20 @@ def worker_gpu(gpu_id: str, task_queue: queue.Queue, dry_run: bool, extra_args: 
         train_dir = config.get("train_dir")
         eval_dir = config.get("eval_dir")
 
-        output_root = f"/Bean/log/gwangjin/2026/neural_blendshapes/{run_name}"
+        output_root = output_root_for_run(run_name, log_root=log_root)
+
+        if skip_complete and is_run_complete(output_root):
+            print(f"\n[GPU {gpu_id}] Skip (complete): {config_path.name}")
+            print(f"  run_name:    {run_name}")
+            print(f"  output_root: {output_root}")
+            task_queue.task_done()
+            continue
 
         # Construct python command
         cmd = ["python", "train.py"]
         if input_dir:
             cmd.extend(["--input-dir", str(input_dir)])
-        cmd.extend(["--output-root", output_root])
+        cmd.extend(["--output-root", str(output_root)])
 
         if train_dir:
             cmd.append("--train-split")
@@ -111,6 +141,7 @@ def worker_gpu(gpu_id: str, task_queue: queue.Queue, dry_run: bool, extra_args: 
             env = os.environ.copy()
             env["CUDA_VISIBLE_DEVICES"] = gpu_id
             env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUTF8"] = "1"
             env["LANG"] = "C.UTF-8"
             env["LC_ALL"] = "C.UTF-8"
             try:
@@ -132,7 +163,41 @@ def main():
     parser.add_argument("--pattern", default="*.txt", help="Glob pattern to select configs (e.g. '00*.txt' or 'ablation_*.txt')")
     parser.add_argument("--exclude", nargs="+", default=["*copy*", "*debug*", "*local*"], help="Glob patterns of files to exclude")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing them")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Run configs even if final stage checkpoint already exists",
+    )
+    parser.add_argument(
+        "--ablation",
+        default=ABLATION_DEFAULT,
+        help=f"Log root key: {sorted(ABLATION_LOG_ROOTS)} (default: {ABLATION_DEFAULT})",
+    )
+    parser.add_argument(
+        "--log-root",
+        type=Path,
+        default=None,
+        help="Override full log parent dir (default: ablation-specific sibling under LOG_DIR_2026)",
+    )
+    parser.add_argument(
+        "--reverse",
+        action="store_true",
+        help="Run pending configs in reverse filename order (after sort by config basename)",
+    )
+    parser.add_argument(
+        "--shuffle",
+        action="store_true",
+        help="Run pending configs in random order (after sort; overrides --reverse)",
+    )
+    parser.add_argument(
+        "--shuffle-seed",
+        type=int,
+        default=None,
+        help="RNG seed for --shuffle (default: nondeterministic)",
+    )
     args, extra_args = parser.parse_known_args()
+    log_root = args.log_root if args.log_root is not None else log_root_for_ablation(args.ablation)
+    skip_complete = not args.force
 
     configs_dir = Path("configs_tmp")
     if not configs_dir.is_dir():
@@ -164,23 +229,62 @@ def main():
         print(f"No valid configs containing 'run_name' and 'input_dir' found in '{configs_dir}' matching patterns.")
         sys.exit(0)
 
+    valid_tasks.sort(key=lambda item: item[0].name)
+    if args.shuffle:
+        if args.shuffle_seed is not None:
+            random.seed(args.shuffle_seed)
+        random.shuffle(valid_tasks)
+    elif args.reverse:
+        valid_tasks.reverse()
+
+    pending_tasks = []
+    skipped_complete = []
+    if skip_complete and not args.dry_run:
+        for path, cfg in valid_tasks:
+            out = output_root_for_run(cfg["run_name"], log_root=log_root)
+            if is_run_complete(out):
+                skipped_complete.append((path, cfg))
+            else:
+                pending_tasks.append((path, cfg))
+    else:
+        pending_tasks = valid_tasks
+
     print(f"\nFound {len(valid_tasks)} configuration task(s) to sweep:")
     for path, cfg in valid_tasks:
-        print(f" - {path.name} (run_name: {cfg['run_name']})")
+        mark = ""
+        if skip_complete and is_run_complete(output_root_for_run(cfg["run_name"], log_root=log_root)):
+            mark = " [complete, skip]"
+        print(f" - {path.name} (run_name: {cfg['run_name']}){mark}")
+    if skipped_complete:
+        print(f"Skipping {len(skipped_complete)} already-complete run(s).")
+    if len(pending_tasks) == 0:
+        print("Nothing to run.")
+        sys.exit(0)
+    print(f"Log root:    {log_root}/<run_name>")
     print(f"Configured GPUs: {', '.join(args.gpus)}")
+    if args.reverse:
+        print("Task order:  reverse (filename Z→A)")
+    elif args.shuffle:
+        seed_note = f", seed={args.shuffle_seed}" if args.shuffle_seed is not None else ""
+        print(f"Task order:  shuffle (random{seed_note})")
     if args.dry_run:
         print("!!! DRY-RUN MODE: No commands will actually be executed !!!")
     print("==================================================\n")
 
     # Load tasks into thread-safe Queue
     task_queue = queue.Queue()
-    for task in valid_tasks:
+    for task in pending_tasks:
         task_queue.put(task)
 
     # Spawn worker threads (one per specified GPU)
     threads = []
     for gpu in args.gpus:
-        t = Thread(target=worker_gpu, args=(gpu, task_queue, args.dry_run, extra_args), daemon=True)
+        t = Thread(
+            target=worker_gpu,
+            args=(gpu, task_queue, args.dry_run, extra_args),
+            kwargs={"skip_complete": skip_complete, "log_root": log_root},
+            daemon=True,
+        )
         t.start()
         threads.append(t)
 

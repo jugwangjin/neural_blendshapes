@@ -1,0 +1,6 @@
+{
+  "schedule": "additive_gamma",
+  "config": {
+    "additive_gamma_correction": true
+  }
+}

@@ -1,11 +1,13 @@
 """Per-vertex pose weight w(x) in [0, 1] for ICT mesh."""
 
+import math
+
 import torch
 import torch.nn as nn
 
 
 class PoseWeightMLP(nn.Module):
-    def __init__(self, hidden=64):
+    def __init__(self, hidden=16):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(3, hidden),
@@ -15,7 +17,8 @@ class PoseWeightMLP(nn.Module):
             nn.Linear(hidden, 1),
         )
         nn.init.zeros_(self.mlp[-1].weight)
-        nn.init.zeros_(self.mlp[-1].bias)
+        # Initialize sigmoid output near 0.9 for stable early rigid alignment.
+        nn.init.constant_(self.mlp[-1].bias, math.log(0.9 / 0.1))
 
     def forward(self, canonical_xyz):
         """

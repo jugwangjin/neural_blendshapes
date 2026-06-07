@@ -30,7 +30,7 @@ def main():
 
     cfg = Config()
     ict = ICTFaceKitTorch(npy_dir=str(cfg.ict_npy))
-    verts = ict.canonical[0]
+    verts = ict.expression_reference_verts()
     cam = FixedCamera.from_mesh_bounds(
         verts, width=args.image_size, height=args.image_size, fov_deg=args.fov_deg
     )

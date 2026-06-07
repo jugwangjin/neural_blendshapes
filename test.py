@@ -297,7 +297,12 @@ if __name__ == '__main__':
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
-    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
+    ict_canonical_mesh = Mesh(
+        ict_facekit.expression_reference_verts().cpu().data,
+        ict_facekit.faces.cpu().data,
+        ict_facekit=ict_facekit,
+        device=device,
+    )
     ict_canonical_mesh.compute_connectivity()
 
     mesh = ict_canonical_mesh
@@ -324,7 +329,7 @@ if __name__ == '__main__':
     model_path = os.path.join(args.output_dir, args.run_name, 'stage_1', 'network_weights', 'neural_blendshapes_latest.pt')
     print("=="*50)
     print("Training Deformer")
-    face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.neutral_mesh_canonical[0])[0]
+    face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.expression_reference_verts())[0]
     neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, face_normals=face_normals, fix_bshapes=args.fix_bshapes, additive=args.additive, disable_pose=args.disable_pose, device=device) 
     
 

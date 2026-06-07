@@ -29,6 +29,7 @@ class ICTFaceKitTorch(torch.nn.Module):
         npy_dir='./assets/ict_facekit_torch.npy',
         canonical=None,
         mediapipe_name_to_ict='./assets/mediapipe_name_to_indices.pkl',
+        mouth_interior_jaw_only_expression=False,
     ):
         super().__init__()
         if canonical is not None:
@@ -168,6 +169,14 @@ class ICTFaceKitTorch(torch.nn.Module):
 
         jaw_index = self.expression_names.tolist().index('jawOpen')
         self.jaw_index = jaw_index
+        self.mouth_interior_jaw_only_expression = bool(mouth_interior_jaw_only_expression)
+
+        from model.mouth_interior_expr_mask import register_mouth_interior_jaw_masks
+
+        n_interior = register_mouth_interior_jaw_masks(
+            self, enabled=self.mouth_interior_jaw_only_expression
+        )
+        self.n_mouth_interior_jaw_mask_verts = n_interior
 
         self.register_buffer('identity', torch.zeros(1, self.num_identity))
         self.register_buffer('expression', torch.zeros(1, self.num_expression))
@@ -178,17 +187,27 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.register_buffer("flame_R", torch.tensor(flame_R, dtype=torch.float32).reshape(1, 3, 3))
         self.register_buffer("flame_T", torch.tensor(flame_T, dtype=torch.float32).reshape(1, 3))
 
-        # Reference mesh: jawOpen + ``flame_alignment_s,R,T`` (or coarse ``flame_similarity_s,T``)
-        # from ``ict_facekit_to_npy_full_head.py`` — same space as bake / metrical NICP.
-        canonical = self.forward(
+        # FLAME-aligned reference meshes (never NICP verts).
+        # expression_canonical: bake jawOpen — GS layout, expr MLP support, legacy ``canonical`` alias.
+        # template_canonical: jawOpen=0 — template MLP + pose_weight MLP input coords.
+        expression_canonical = self.forward(
             expression_weights=self.expression,
             identity_weights=self.identity,
             apply_flame_similarity=True,
             apply_eyeball_rotation=False,
         )
-        # Template / deformer reference: jawOpen + rigid FLAME map only (never NICP verts).
-        self.register_buffer("canonical", canonical)
-        self.register_buffer("neutral_mesh_canonical", canonical.clone().detach())
+        exp_closed = self.expression.clone()
+        exp_closed[0, jaw_index] = 0.0
+        template_canonical = self.forward(
+            expression_weights=exp_closed,
+            identity_weights=self.identity,
+            apply_flame_similarity=True,
+            apply_eyeball_rotation=False,
+        )
+        self.register_buffer("expression_canonical", expression_canonical)
+        self.register_buffer("template_canonical", template_canonical)
+        self.register_buffer("canonical", expression_canonical)
+        self.register_buffer("neutral_mesh_canonical", expression_canonical.clone().detach())
         nicp_mesh = model_dict.get("nicp_canonical_mesh")
         if nicp_mesh is not None:
             nicp_t = torch.tensor(
@@ -199,6 +218,18 @@ class ICTFaceKitTorch(torch.nn.Module):
             self.has_nicp_bake_mesh = True
         else:
             self.has_nicp_bake_mesh = False
+
+    def template_reference_verts(self):
+        """[V, 3] jaw-closed + FLAME align — GS layout, template/pose MLP coords."""
+        if hasattr(self, "template_canonical"):
+            return self.template_canonical[0]
+        return self.canonical[0]
+
+    def expression_reference_verts(self):
+        """[V, 3] bake jawOpen + FLAME align — camera NPZ, MP/FLAME landmark space."""
+        if hasattr(self, "expression_canonical"):
+            return self.expression_canonical[0]
+        return self.canonical[0]
 
     def _register_texture_map_assets(self, model_dict):
         """``usemtl`` index arrays from ``ict_facekit_to_npy_full_head.py`` (K texture maps)."""
@@ -344,10 +375,11 @@ class ICTFaceKitTorch(torch.nn.Module):
         assert len(expression_weights.size()) == 2 and len(identity_weights.size()) == 2
 
         bsize = identity_weights.size(0)
-        # print(self.neutral_mesh.shape, self.expression_shape_modes.shape, self.identity_shape_modes.shape)
-        # Compute the deformed mesh by applying expression and identity shape modes to the neutral mesh
+        expr_modes = self.expression_shape_modes.repeat(bsize, 1, 1, 1)
+        if hasattr(self, "ict_expression_vertex_allow_mask"):
+            expr_modes = expr_modes * self.ict_expression_vertex_allow_mask.unsqueeze(0).unsqueeze(-1)
         deformed_mesh = self.neutral_mesh + \
-                        torch.einsum('bn, bnmd -> bmd', expression_weights, self.expression_shape_modes.repeat(bsize, 1, 1, 1)) + \
+                        torch.einsum('bn, bnmd -> bmd', expression_weights, expr_modes) + \
                         torch.einsum('bn, bnmd -> bmd', identity_weights, self.identity_shape_modes.repeat(bsize, 1, 1, 1))
 
         if apply_flame_similarity:
@@ -435,12 +467,16 @@ class ICTFaceKitTorch(torch.nn.Module):
         self.neutral_mesh = self.neutral_mesh[:, self.v_mapping]
         self.expression_shape_modes = self.expression_shape_modes[:, :, self.v_mapping]
         self.identity_shape_modes = self.identity_shape_modes[:, :, self.v_mapping]
+        self.expression_canonical = self.expression_canonical[:, self.v_mapping]
+        self.template_canonical = self.template_canonical[:, self.v_mapping]
         self.canonical = self.canonical[:, self.v_mapping]
+        self.neutral_mesh_canonical = self.neutral_mesh_canonical[:, self.v_mapping]
 
         print('neutral_mesh: ', self.neutral_mesh.size())
         print('expression_shape_modes: ', self.expression_shape_modes.size())
         print('identity_shape_modes: ', self.identity_shape_modes.size())
-        print('canonical: ', self.canonical.size())
+        print('expression_canonical: ', self.expression_canonical.size())
+        print('template_canonical: ', self.template_canonical.size())
 
         # Update the landmark indices based on the new vertex mapping
         vmapping_dict = {v: i for i, v in enumerate(vmapping)}

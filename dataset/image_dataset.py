@@ -23,12 +23,14 @@ from dataset.dataset_util import (
     apply_mp_blendshape_calibration_np,
     compute_bshapes_mode,
     compute_distribution_weights,
+    merge_distribution_with_rgb_ema,
     compute_eye_au_calibration,
     eye_au_stats_note,
     format_splits_label,
     list_split_images,
     matrix_to_pose_feat,
     normalize_split_names,
+    load_gt_normal,
     paths_for_image,
 )
 from utils.mediapipe_blendshapes import MP_EYE_BLINK_L, MP_EYE_BLINK_R, MP_EYE_WIDE_L, MP_EYE_WIDE_R
@@ -101,6 +103,7 @@ class ImageDataset(Dataset):
         self.cfg = cfg
         self.image_size = cfg.image_size
         self.train = train
+        self.seed = int(getattr(cfg, "seed", 0)) + (0 if train else 1)
         self.distribution_boost = distribution_boost and train
         self.distribution_ratio = getattr(cfg, "distribution_sample_ratio", 0.35)
         self.synthetic_if_empty = synthetic_if_empty
@@ -185,6 +188,15 @@ class ImageDataset(Dataset):
 
         if stack is None:
             stack = self._load_blendshape_stack()
+        n = len(self.image_paths)
+        self.rgb_loss_ema = np.zeros(n, dtype=np.float32)
+        self._rgb_ema_path = _bshapes_mode_path(cfg, subject_root).parent / "rgb_loss_ema.pt"
+        if getattr(cfg, "distribution_rgb_ema_enabled", False) and self._rgb_ema_path.is_file():
+            blob = torch.load(self._rgb_ema_path, map_location="cpu", weights_only=False)
+            if isinstance(blob, dict) and "ema" in blob:
+                ema = np.asarray(blob["ema"], dtype=np.float32)
+                if ema.shape[0] == n:
+                    self.rgb_loss_ema = ema
         self._build_distribution_weights(stack)
 
         self._ram_cache = {}
@@ -212,7 +224,7 @@ class ImageDataset(Dataset):
             axis=0,
         )
         pose_stack = np.stack(pose_rows, axis=0)
-        self.sample_weights = compute_distribution_weights(
+        self.pca_sample_weights = compute_distribution_weights(
             cal_stack,
             pose_stack,
             coeffs_are_calibrated=True,
@@ -220,15 +232,60 @@ class ImageDataset(Dataset):
             low_weight=getattr(self.cfg, "distribution_low_weight", 0.05),
             high_cap=getattr(self.cfg, "distribution_high_cap", 1.0),
         )
+        self._rebuild_sample_weights()
+
+    def _rebuild_sample_weights(self):
+        low = float(getattr(self.cfg, "distribution_low_weight", 0.05))
+        high = float(getattr(self.cfg, "distribution_high_cap", 1.0))
+        if getattr(self.cfg, "distribution_rgb_ema_enabled", False):
+            scale = float(getattr(self.cfg, "distribution_rgb_ema_scale", 1.0))
+            max_lift = float(getattr(self.cfg, "distribution_rgb_ema_max_lift", 0.5))
+            self.sample_weights = merge_distribution_with_rgb_ema(
+                self.pca_sample_weights,
+                self.rgb_loss_ema,
+                ema_scale=scale,
+                ema_max_lift=max_lift,
+                low_weight=low,
+                high_cap=high,
+            )
+        else:
+            self.sample_weights = self.pca_sample_weights.copy()
+
+    def update_rgb_loss_ema(self, dataset_frame_idx: int, rgb_l1: float):
+        if not getattr(self.cfg, "distribution_rgb_ema_enabled", False):
+            return
+        j = int(dataset_frame_idx)
+        v = float(rgb_l1)
+        beta = float(getattr(self.cfg, "distribution_rgb_ema_beta", 0.995))
+        prev = float(self.rgb_loss_ema[j])
+        self.rgb_loss_ema[j] = v if prev <= 0.0 else beta * prev + (1.0 - beta) * v
+        self._rebuild_sample_weights()
+
+    def save_rgb_loss_ema(self):
+        if not getattr(self.cfg, "distribution_rgb_ema_enabled", False):
+            return
+        self._rgb_ema_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {"ema": self.rgb_loss_ema, "image_paths": [str(p) for p in self.image_paths]},
+            self._rgb_ema_path,
+        )
 
     def _sample_index(self, idx):
         n = len(self.image_paths)
         if not self.distribution_boost or self.sample_weights is None:
             return idx % n
-        if np.random.rand() < self.distribution_ratio:
+        rng = self._sample_rng(idx)
+        if rng.random() < self.distribution_ratio:
             p = self.sample_weights / self.sample_weights.sum()
-            return int(np.random.choice(n, p=p))
+            return int(rng.choice(n, p=p))
         return idx % n
+
+    def _sample_rng(self, idx):
+        worker_id = 0
+        info = torch.utils.data.get_worker_info()
+        if info is not None:
+            worker_id = info.id
+        return np.random.default_rng(int(self.seed) + worker_id * 1_000_003 + int(idx))
 
     def __len__(self):
         if self.image_paths is None:
@@ -238,6 +295,7 @@ class ImageDataset(Dataset):
     def _load_frame_assets(self, img_path: Path):
         paths = paths_for_image(img_path)
         img = _load_img(paths["image"])
+        semantic_path = paths["semantic"] if paths["semantic"].is_file() else None
         if img.shape[-1] == 4:
             mask = img[..., 3:4]
             img = img[..., :3]
@@ -246,10 +304,13 @@ class ImageDataset(Dataset):
         else:
             mask = torch.ones_like(img[..., :1])
         mask = mask.clamp(0, 1)
+        from dataset.insta_tight_mask import apply_insta_tight_matting_mask
+
+        mask = apply_insta_tight_matting_mask(mask, paths, self.cfg)
         img = img * mask
 
-        semantic_path = paths["semantic"] if paths["semantic"].is_file() else None
-        return img, mask, semantic_path
+        normal_path = paths["normal"] if paths["normal"].is_file() else None
+        return img, mask, semantic_path, normal_path
 
     def __getitem__(self, idx):
         if self.image_paths is None:
@@ -263,6 +324,7 @@ class ImageDataset(Dataset):
         # Shallow copy to update dynamically requested frame_idx safely
         out = dict(cached_out)
         out["frame_idx"] = idx
+        out["dataset_frame_idx"] = j
         return out
 
     def _get_frame_dict(self, j):
@@ -273,7 +335,7 @@ class ImageDataset(Dataset):
         cache_path = self.cache_paths[j]
         mp = load_frame_npz(cache_path)
 
-        img, mask, semantic_path = self._load_frame_assets(img_path)
+        img, mask, semantic_path, normal_path = self._load_frame_assets(img_path)
         h0, w0 = int(img.shape[0]), int(img.shape[1])
         image = _resize_chw(img, self.image_size)
         mask = _resize_mask(mask, self.image_size)
@@ -317,16 +379,31 @@ class ImageDataset(Dataset):
             out["mask_dist_out"] = mask_dist_out
             out["mask_dist_in"] = mask_dist_in
 
-        if semantic_path is not None:
+        out["gt_normal_valid"] = False
+        if getattr(self.cfg, "load_gt_normals", True) and normal_path is not None:
+            gt_normal = load_gt_normal(normal_path, self.image_size, mask=mask)
+            if gt_normal is not None:
+                out["gt_normal"] = gt_normal
+                out["gt_normal_valid"] = True
+
+        if getattr(self.cfg, "load_dataset_semantic", False) and semantic_path is not None:
             sem = _semantic_to_train_tensors(semantic_path, self.image_size)
+            if getattr(self.cfg, "tight_mask_from_semantic", False):
+                from dataset.flare_semantic import mask_gt_semantic_by_matting
+
+                sem = mask_gt_semantic_by_matting(sem, mask)
             out["part_label"] = sem["part_label"]
             out["seg_label"] = sem["seg_label"]
             out["skin_mask"] = sem["skin_mask"]
-            out["h_reg_skin"] = sem["h_reg_skin"]
-            out["h_reg_eye"] = sem["h_reg_eye"]
-            out["h_reg_brow"] = sem["h_reg_brow"]
-            out["h_reg_misc"] = sem["h_reg_misc"]
-            out["h_reg_mouth"] = sem["h_reg_mouth"]
+            out["skin_tight"] = sem["skin_mask"]
+            out["full_face_region_mask"] = sem["full_face_region_mask"]
+            out["h_reg_label_eye_occlusion"] = sem["h_reg_label_eye_occlusion"]
+            out["h_reg_seg_face"] = sem["h_reg_seg_face"]
+            out["h_reg_seg_mouth"] = sem["h_reg_seg_mouth"]
+            out["h_reg_seg_neck"] = sem["h_reg_seg_neck"]
+            out["h_reg_seg_hair"] = sem["h_reg_seg_hair"]
+            out["h_reg_seg_glasses"] = sem["h_reg_seg_glasses"]
+            out["h_reg_seg_misc"] = sem["h_reg_seg_misc"]
             out["semantic_fg"] = sem["fg"]
             out["part_onehot"] = sem["part_onehot"]
             k = int(sem["seg_label"].max().item()) + 1

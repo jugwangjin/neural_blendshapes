@@ -34,15 +34,20 @@ Two independent transforms:
 Init:
 
 - `self.expression[0, jaw_index] = flame_similarity_ict_jaw_open`
-- `self.canonical` = `forward(default expression, to_canonical=True)` → jaw-open + FLAME map (+ legacy canonical pose if provided)
-- `neutral_mesh_canonical` = same as `canonical` (jaw-open reference for normals / MLP coords)
+- `expression_canonical` = `forward(self.expression, apply_flame_similarity=True)` (jaw-open + FLAME map)
+- `template_canonical` = same with `jawOpen=0`
+- `canonical` = alias of `expression_canonical` (GS / scripts)
+- `neutral_mesh_canonical` = copy of `expression_canonical`
+
+See `docs/implementation/2026-05-29-dual-canonical.md`.
 
 ## `ICTDeformer`
 
-- **`canonical_xyz`**: `ict.canonical[0]` (jaw-open, same space as `forward(..., apply_flame_similarity=True)`).
-- **Output mesh**: `ict.forward(..., to_canonical=False, apply_flame_similarity=True)` on template + MP expression — FLAME-aligned ICT space, not NICP.
+- **`canonical_xyz_template`**: `ict.template_canonical[0]` — `template_mlp`, `pose_weight_net`.
+- **`canonical_xyz_expression`**: `ict.expression_canonical[0]` — `expr_mlp` only.
+- **Output mesh**: `ict.forward(..., apply_flame_similarity=True)` + deltas — FLAME-aligned ICT space, not NICP.
 
-Do not use closed-mouth `neutral_mesh` alone as MLP input; lips collapse.
+Do not use raw closed-mouth `neutral_mesh` for **expression** MLP input; lips collapse. Template MLP intentionally uses jaw-closed `template_canonical`.
 
 ## No double application of `s, R, T`
 
@@ -68,8 +73,7 @@ Expression weights are dimensionless; they are **not** multiplied by `flame_alig
 
 ## `ICTDeformer` template / expr offsets
 
-- `canonical_xyz` = `ict.canonical[0]` (jaw-open + aligned).
-- `forward` → aligned mesh; `template_delta` and `expression_delta` are added **in that same space** (not via raw `neutral_mesh` swap).
+- MLP **input coords** split (template closed, expression jaw-open); added deltas still live in per-frame `forward` FLAME space.
 
 ## Sanity script
 

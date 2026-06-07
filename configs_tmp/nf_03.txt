@@ -1,6 +1,6 @@
 run_name = nf_03
 
-input_dir = /Bean/data/gwangjin/2024/nbshapes/flare/nf_03/nf_03
+input_dir = /Bean/data/gwangjin/2024/nbshapes/flare_2/nf_03/nf_03
 train_dir = ["train"]
 eval_dir = ["test"]
 working_dir = .

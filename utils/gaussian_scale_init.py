@@ -52,10 +52,7 @@ def log_scale_from_knn(xyz, k=3, scale_factor=1.0):
 def surface_gaussian_xyz(ict, face_idx, bary, h=None, h_sigma_scale=None):
     """World positions of surface Gaussians at init (canonical / neutral)."""
     device = face_idx.device
-    if hasattr(ict, "canonical") and ict.canonical is not None:
-        verts = ict.canonical[0].to(device=device)
-    else:
-        verts = ict.neutral_mesh[0].to(device=device)
+    verts = ict.template_reference_verts().to(device=device)
     faces = ict.faces.to(device=device)
     xyz_base = sample_surface(verts, faces, face_idx, bary)
     if h is None:

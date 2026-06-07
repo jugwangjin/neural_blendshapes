@@ -2,6 +2,7 @@
 
 | Module | Role |
 |--------|------|
+| `build.py` | Factory: `build_ict` / `build_tracker` / `build_deformer` / `build_avatar` from `Config` |
 | `ict_model.py` | ICT-FaceKit + npy texture maps (`material_names`, `triangle_uv_local`) |
 | `ict_deformer.py` | MP coeffs → ICT verts (template 5×128, expr channel-wise 5×128 Softplus MLP; `docs/implementation/ict_deformer_mlps.md`) |
 | `tracker_mlp.py` | MP correction, gamma, pose |

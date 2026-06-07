@@ -29,6 +29,7 @@ from config import Config
 from dataset import build_train_dataset, collate_batch, move_batch_to_device
 from rendering import GaussianRenderer
 from losses.train_losses import compute_losses
+from model.build import avatar_checkpoint_layout_kwargs
 from model.expr_regions import build_expr_region_weight
 from model.gaussian_avatar import GaussianAvatar
 from model.ict_deformer import ICTDeformer
@@ -42,7 +43,7 @@ from training.apply import (
     stage_needs_rasterization,
     stage_needs_surface_forward,
 )
-from training.checkpoint_io import load_checkpoint
+from training.checkpoint_io import load_checkpoint, load_tracker_state_dict
 from training.stages import STAGE_SCHEDULE
 from utils.camera import load_training_camera, training_camera_status
 from losses.mediapipe_landmark_478 import build_mp_lmk_embedding
@@ -114,19 +115,10 @@ def _describe(name: str, xs):
 
 
 def _grad2d_norm_per_entry(means2d_grad: torch.Tensor, width: int, height: int) -> torch.Tensor:
-    g = means2d_grad.float()
-    if g.ndim == 2:
-        s = g.clone()
-        s[..., 0] *= width / 2.0
-        s[..., 1] *= height / 2.0
-        return s.norm(dim=-1)
-    if g.ndim == 3:
-        n_cam = g.shape[0]
-        s = g.clone()
-        s[..., 0] *= width / 2.0 * n_cam
-        s[..., 1] *= height / 2.0 * n_cam
-        return s.norm(dim=-1).sum(dim=0)
-    return torch.zeros(0, device=g.device, dtype=g.dtype)
+    from training.densify import _viewspace_grad_norm_gb
+
+    del width, height
+    return _viewspace_grad_norm_gb(means2d_grad)
 
 
 def _find_stage(name: str):
@@ -263,14 +255,14 @@ def main():
                     break
         payload = load_checkpoint(ckpt_path, map_location=device)
         if "tracker" in payload:
-            tracker.load_state_dict(payload["tracker"])
+            load_tracker_state_dict(tracker, payload["tracker"])
         if "deformer" in payload:
             deformer.load_state_dict(payload["deformer"])
         avatar = GaussianAvatar.from_checkpoint_state(
             ict,
             deformer,
             payload["avatar"],
-            max_scale=cfg.geometry_max_scale,
+            **avatar_checkpoint_layout_kwargs(cfg),
         ).to(device)
         print(
             f"loaded checkpoint: {ckpt_path} "
@@ -285,11 +277,11 @@ def main():
             k_head=cfg.n_surface_gaussians_per_head,
             k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
             k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
+            k_teeth=cfg.n_surface_gaussians_per_teeth,
             k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
             k_eyeball_sclera=cfg.n_surface_gaussians_per_eyeball_sclera,
             k_eye_occlusion=cfg.n_surface_gaussians_per_eye_occlusion,
             n_semantic_classes=cfg.n_semantic_classes,
-            gum_h_sigma_scale=cfg.gum_h_sigma_scale,
             gaussian_scale_knn_k=cfg.gaussian_scale_knn_k,
             gaussian_scale_knn_factor=cfg.gaussian_scale_knn_factor,
             face_center_init=cfg.gaussian_face_center_init,
@@ -302,6 +294,7 @@ def main():
             k_head=cfg.n_surface_gaussians_per_head,
             k_mouth_socket=cfg.n_surface_gaussians_per_mouth_socket,
             k_mouth_interior=cfg.n_surface_gaussians_mouth_interior,
+            k_teeth=cfg.n_surface_gaussians_per_teeth,
             k_eye_socket=cfg.n_surface_gaussians_per_eye_socket,
             k_eyeball_sclera=cfg.n_surface_gaussians_per_eyeball_sclera,
             k_eye_occlusion=cfg.n_surface_gaussians_per_eye_occlusion,
@@ -311,7 +304,9 @@ def main():
         init_training_state(avatar)
         try:
             from debug.sanity.region_colors import surface_gaussian_rgb, rgb_to_logit
-            colors = surface_gaussian_rgb(avatar, ict, ict.canonical[0], device, mp_embedding_path=cfg.mp_embedding)
+            colors = surface_gaussian_rgb(
+                avatar, ict, ict.template_reference_verts(), device, mp_embedding_path=cfg.mp_embedding
+            )
             avatar.color.data.copy_(rgb_to_logit(colors))
             print("initialized surface colors from layout (no checkpoint)")
         except Exception as e:
@@ -319,7 +314,7 @@ def main():
 
     renderer = GaussianRenderer(cfg, image_size=cfg.image_size, sh_degree=None).to(device)
     camera = load_training_camera(
-        ict.canonical[0],
+        ict.expression_reference_verts(),
         path=cfg.camera_npz,
         width=cfg.image_size,
         height=cfg.image_size,
@@ -373,6 +368,7 @@ def main():
             mp_pose_raw=batch.get("mp_pose_raw"),
             mp_transform_matrix=batch.get("mp_transform_matrix"),
             force_gamma_one=spec.fix_gamma_at_one,
+            additive_gamma_correction=getattr(spec, "additive_gamma_correction", False),
         )
 
         pose_weight_fixed = 1.0 if spec.pose_weight_one else None

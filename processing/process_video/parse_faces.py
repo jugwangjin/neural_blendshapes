@@ -5,7 +5,7 @@ Writes FLARE-compatible outputs per frame:
   - ``semantic/<stem>.png``      uint8 part id (0–18), training loader uses ``imageio`` mode ``F``
   - ``semantic_color/<stem>.png``  RGB overlay visualization
 
-Expects submodule at ``processing/process_video/submodules/face-parsing.PyTorch``
+Expects submodule at ``processing/process_video/face-parsing.PyTorch``
 with checkpoint ``res/cp/79999_iter.pth``.
 """
 
@@ -23,7 +23,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 
 PROC_VIDEO_ROOT = Path(__file__).resolve().parent
-PARSER_ROOT = PROC_VIDEO_ROOT / "submodules" / "face-parsing.PyTorch"
+PARSER_ROOT = PROC_VIDEO_ROOT / "face-parsing.PyTorch"
 DEFAULT_CKPT = PARSER_ROOT / "res" / "cp" / "79999_iter.pth"
 
 PART_COLORS = [

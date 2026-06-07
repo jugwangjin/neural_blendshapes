@@ -247,7 +247,12 @@ def main(args, device, dataset_train, dataloader_train):
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
-    ict_canonical_mesh = Mesh(ict_facekit.canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
+    ict_canonical_mesh = Mesh(
+        ict_facekit.expression_reference_verts().cpu().data,
+        ict_facekit.faces.cpu().data,
+        ict_facekit=ict_facekit,
+        device=device,
+    )
     ict_canonical_mesh.compute_connectivity()
 
     ## ============== renderer ==============================
@@ -270,7 +275,7 @@ def main(args, device, dataset_train, dataloader_train):
     # neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, vertex_parts=ict_facekit.vertex_parts, ict_facekit=ict_facekit, exp_dir = None, lambda_=args.lambda_, aabb = ict_mesh_aabb, device=device) 
     print(ict_canonical_mesh.vertices.shape, ict_canonical_mesh.vertices.device)
 
-    face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.neutral_mesh_canonical[0])[0]
+    face_normals = ict_canonical_mesh.get_vertices_face_normals(ict_facekit.expression_reference_verts())[0]
 
     neural_blendshapes = get_neural_blendshapes(model_path=model_path, train=args.train_deformer, ict_facekit=ict_facekit, aabb = ict_mesh_aabb, face_normals=face_normals,zero_init=True, device=device) 
     neural_blendshapes = neural_blendshapes.to(device)

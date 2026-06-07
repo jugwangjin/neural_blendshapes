@@ -4,7 +4,7 @@ import torch
 
 EXPR_WEIGHT_BY_PART_ID = {
     0: 1.0,   # face skin
-    1: 0.2,   # head/neck
+    1: 0.15,  # head/neck — low gate; mesh/template carries outer silhouette
     2: 1.0,   # mouth socket
     3: 1.0,   # eye socket L (same MLP field; socket reg limits delta)
     4: 1.0,   # eye socket R
@@ -24,23 +24,23 @@ EXPR_WEIGHT_BY_PART_ID = {
 
 # L2 penalty weight on template / expression deltas (not a forward gate).
 DEFORM_REG_BY_PART_ID = {
-    0: 0.05,
-    1: 0.08,
-    2: 0.05,
-    3: 1.0,   # eye socket — penalize large deltas (orbit behind eye)
-    4: 1.0,
-    5: 0.01,  # gums — allow template/expr field to bulge over teeth volume
-    6: 2.0,   # teeth (masked in forward; unused)
-    7: 0.02,  # eyeball — light reg, field moves with lids
-    8: 0.02,
-    9: 2.0,
-    10: 2.0,
-    11: 2.0,
-    12: 2.0,
-    13: 0.05,  # eye occlusion — allow lid motion
-    14: 0.05,
-    15: 2.0,
-    16: 2.0,
+    0: 0.5,
+    1: 2.0,   # head/neck — strong L2 on deltas (anti shrink / collapse)
+    2: 0.5,
+    3: 0.5,   # eye socket — penalize large deltas (orbit behind eye)
+    4: 0.5,
+    5: 0.5,  # gums — allow template/expr field to bulge over teeth volume
+    6: 0.5,   # teeth (masked in forward; unused)
+    7: 0.1,  # eyeball — light reg, field moves with lids   # unused
+    8: 0.1,
+    9: 0.1,
+    10: 0.1,
+    11: 0.1,
+    12: 0.1,
+    13: 0.1,  # eye occlusion — allow lid motion
+    14: 0.1,
+    15: 0.1,
+    16: 0.1,
 }
 
 
@@ -60,7 +60,7 @@ def build_expr_region_weight(ict_facekit) -> torch.Tensor:
         w[ict_facekit.eye_socket_right_indices] = 1.0
     if hasattr(ict_facekit, "not_face_indices"):
         w[ict_facekit.not_face_indices] = torch.minimum(
-            w[ict_facekit.not_face_indices], torch.tensor(0.2)
+            w[ict_facekit.not_face_indices], torch.tensor(0.15)
         )
     if hasattr(ict_facekit, "skin_face_indices"):
         w[ict_facekit.skin_face_indices] = 1.0
@@ -90,12 +90,16 @@ def build_deform_reg_weight(ict_facekit) -> torch.Tensor:
     for i, pid in enumerate(parts):
         w[i] = DEFORM_REG_BY_PART_ID.get(int(pid), 0.05)
 
+    if hasattr(ict_facekit, "not_face_indices"):
+        w[ict_facekit.not_face_indices] = torch.maximum(
+            w[ict_facekit.not_face_indices], torch.tensor(2.5)
+        )
     if hasattr(ict_facekit, "eye_socket_left_indices"):
-        w[ict_facekit.eye_socket_left_indices] = 1.0
+        w[ict_facekit.eye_socket_left_indices] = DEFORM_REG_BY_PART_ID.get(3, 0.1)
     if hasattr(ict_facekit, "eye_socket_right_indices"):
-        w[ict_facekit.eye_socket_right_indices] = 1.0
+        w[ict_facekit.eye_socket_right_indices] = DEFORM_REG_BY_PART_ID.get(4, 0.1)
     if hasattr(ict_facekit, "eyeball_indices"):
-        w[ict_facekit.eyeball_indices] = 0.02
+        w[ict_facekit.eyeball_indices] = DEFORM_REG_BY_PART_ID.get(7, 0.1)
     for key in (
         "lacrimal_indices",
         "eye_blend_indices",
@@ -109,5 +113,5 @@ def build_deform_reg_weight(ict_facekit) -> torch.Tensor:
     for key in ("left_eye_occlusion_indices", "right_eye_occlusion_indices"):
         ids = getattr(ict_facekit, key, None)
         if ids is not None and len(ids) > 0:
-            w[ids] = 0.05
+            w[ids] = DEFORM_REG_BY_PART_ID.get(13, 0.1)
     return w

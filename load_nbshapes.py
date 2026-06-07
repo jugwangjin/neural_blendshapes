@@ -160,7 +160,12 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     ict_facekit = ICTFaceKitTorch(npy_dir = './assets/ict_facekit_torch.npy', canonical = Path(args.input_dir) / 'ict_identity.npy')
     ict_facekit = ict_facekit.to(device)
 
-    ict_canonical_mesh = Mesh(ict_facekit.neutral_mesh_canonical[0].cpu().data, ict_facekit.faces.cpu().data, ict_facekit=ict_facekit, device=device)
+    ict_canonical_mesh = Mesh(
+        ict_facekit.expression_reference_verts().cpu().data,
+        ict_facekit.faces.cpu().data,
+        ict_facekit=ict_facekit,
+        device=device,
+    )
     ict_canonical_mesh.compute_connectivity()
 
     write_mesh(Path(meshes_save_path / "init_ict_canonical.obj"), ict_canonical_mesh.to('cpu'))
@@ -174,7 +179,7 @@ def main(args, device, dataset_train, dataloader_train, debug_views):
     head_index=11248
 
     # filter vertices by head_index
-    filtered_vertices = ict_facekit.neutral_mesh_canonical[0].cpu().data[:socket_index]
+    filtered_vertices = ict_facekit.expression_reference_verts().cpu().data[:socket_index]
     filtered_faces = ict_facekit.faces.cpu().data
     # filter: 
     filtered_faces = filtered_faces[filtered_faces[:, 0] < socket_index]

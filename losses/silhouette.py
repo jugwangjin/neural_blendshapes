@@ -21,10 +21,8 @@ def _resize_to_pred(field, pred_shape):
     )
 
 
-def loss_silhouette(render_alpha, target_mask):
-    """
-    L2 on composited alpha vs binary/soft foreground mask ``[1,H,W]`` or ``[B,1,H,W]``.
-    """
+def loss_silhouette(render_alpha, target_mask, *, use_l1: bool = False):
+    """Alpha vs tight matting mask. L2 (GB) or L1 (sharper α at boundaries, smaller grad when far)."""
     pred = _alpha_nchw(render_alpha)
     tgt = target_mask
     if tgt.ndim == 3:
@@ -33,7 +31,31 @@ def loss_silhouette(render_alpha, target_mask):
         tgt = tgt[:, :1]
     if pred.shape[-2:] != tgt.shape[-2:]:
         tgt = _resize_to_pred(tgt, pred.shape)
-    return (pred - tgt).pow(2).mean()
+    diff = pred - tgt
+    if use_l1:
+        return diff.abs().mean()
+    return diff.pow(2).mean()
+
+
+def silhouette_edt_distance_fields(batch, cfg, render_alpha):
+    """``(dist_out, dist_in)`` at the same resolution as ``render_alpha`` (dataset cache)."""
+    alpha = _alpha_nchw(render_alpha)
+    h, w = int(alpha.shape[-2]), int(alpha.shape[-1])
+    ds = int(getattr(cfg, "mask_edt_downsample", 4))
+    normalize = bool(getattr(cfg, "mask_edt_normalize", False))
+
+    d_out = batch.get("mask_dist_out")
+    d_in = batch.get("mask_dist_in")
+    if d_out is None or d_in is None:
+        return None, None
+    if d_out.ndim == 3:
+        d_out = d_out.unsqueeze(0)
+    if d_in.ndim == 3:
+        d_in = d_in.unsqueeze(0)
+    if d_out.shape[-2:] != (h, w):
+        d_out = _resize_to_pred(d_out.to(device=alpha.device, dtype=alpha.dtype), alpha.shape)
+        d_in = _resize_to_pred(d_in.to(device=alpha.device, dtype=alpha.dtype), alpha.shape)
+    return d_out, d_in
 
 
 def loss_silhouette_edt(
@@ -47,9 +69,6 @@ def loss_silhouette_edt(
 ):
     """
     Truncated GT distance fields × rendered alpha (no EDT on ``render_alpha``).
-
-    External: ``mean(alpha * d_out_norm)`` — false positives pulled inward.
-    Internal: ``mean((1 - alpha)^2 * d_in_norm)`` — hole filling without foggy partial alpha.
 
     ``mask_dist_*``: ``[B,1,H,W]`` pixel EDT from ``dataset.mask_distance_cache``.
     """

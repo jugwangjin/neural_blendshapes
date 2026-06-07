@@ -178,6 +178,35 @@ def _cache_channel_names(name_to_idx):
     return names
 
 
+def mp_blendshape_name_aliases(name: str) -> tuple[str, ...]:
+    """
+    ARKit-style ``*Left`` / ``*Right`` → ICT pkl keys (``*_L`` / ``*_R`` or merged stem).
+
+    ``mediapipe_name_to_indices.pkl`` follows ICT gather names (e.g. ``browInnerUp`` twice),
+    not always split ``browInnerUpLeft``.
+    """
+    if name in ICT_GATHER_MP_NAMES:
+        return ()
+    if name.endswith("Left"):
+        stem = name[:-4]
+        return (f"{stem}_L", stem)
+    if name.endswith("Right"):
+        stem = name[:-5]
+        return (f"{stem}_R", stem)
+    return ()
+
+
+def resolve_mp_blendshape_index(name: str, name_to_idx: dict[str, int]) -> int:
+    """Map control-sequence / ARKit name → column in ``mp_blendshape`` cache."""
+    if name in name_to_idx:
+        return int(name_to_idx[name])
+    for alt in mp_blendshape_name_aliases(name):
+        if alt in name_to_idx:
+            return int(name_to_idx[alt])
+    tried = (name, *mp_blendshape_name_aliases(name))
+    raise KeyError(f"unknown MediaPipe blendshape {name!r} (tried {list(tried)})")
+
+
 def mp_to_ict_expression_weights(mp_coeffs, mediapipe_to_ict, num_expression=None):
     if mp_coeffs.shape[-1] != NUM_MP_BLENDSHAPE_CHANNELS:
         raise ValueError(

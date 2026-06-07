@@ -14,9 +14,14 @@ from scipy.ndimage import distance_transform_edt
 
 
 def _fg_mask_hw(mask) -> np.ndarray:
-    m = mask.numpy() if isinstance(mask, torch.Tensor) else np.asarray(mask)
-    if m.ndim == 3:
-        m = m[..., 0]
+    if isinstance(mask, torch.Tensor):
+        m = mask.detach().cpu().numpy()
+    else:
+        m = np.asarray(mask)
+    if m.ndim == 4:
+        m = m[0, 0]
+    elif m.ndim == 3:
+        m = m[0] if m.shape[0] == 1 else m[..., 0]
     return (m >= 0.5).astype(np.uint8)
 
 
@@ -39,18 +44,24 @@ def _edt_pair(fg: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 def compute_mask_distance_fields(
     mask,
-    image_size: int,
+    image_size: int = None,
     *,
+    height: int = None,
+    width: int = None,
     downsample: int = 4,
     normalize: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Build ``[1, H, W]`` distance maps at ``image_size``.
+    Build ``[1, H, W]`` distance maps at ``image_size`` or ``(height, width)``.
 
-    ``downsample``: EDT on ``image_size // downsample``, then bilinear upsample (1 = full res).
+    ``downsample``: EDT on reduced resolution, then bilinear upsample (1 = full res).
     """
+    dev = mask.device if isinstance(mask, torch.Tensor) else None
     fg = _fg_mask_hw(mask)
-    h = w = int(image_size)
+    if height is not None and width is not None:
+        h, w = int(height), int(width)
+    else:
+        h = w = int(image_size)
     ds = max(1, int(downsample))
 
     if ds > 1:
@@ -74,6 +85,6 @@ def compute_mask_distance_fields(
         dist_in = dist_in / scale
 
     return (
-        torch.tensor(dist_out, dtype=torch.float32).unsqueeze(0),
-        torch.tensor(dist_in, dtype=torch.float32).unsqueeze(0),
+        torch.tensor(dist_out, dtype=torch.float32, device=dev).unsqueeze(0),
+        torch.tensor(dist_in, dtype=torch.float32, device=dev).unsqueeze(0),
     )

@@ -15,6 +15,7 @@ MediaPipe → tracker MLP → ICT deformation → **surface Gaussians** → **gs
 | Bake | `processing/ict_facekit_to_npy_full_head.py`, `processing/ict_mediapipe_lmk/bake_mediapipe_to_ict.py` |
 | Camera | `processing/compute_camera_for_metrical_crop.py` → `assets/default_camera.npz` |
 | Debug | `debug/sanity_train_stack.py`, `debug/verify_mp_onehot_ict_render.py` |
+| Densify thresholds | `analyze_grad.py` (from `analysis/loss_log.jsonl`) |
 | Eval PNGs | `training/eval_render.py` — see `docs/guides/stage_eval_renders.md` |
 
 ## Setup

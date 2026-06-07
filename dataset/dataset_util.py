@@ -23,6 +23,7 @@ from tqdm import tqdm
 
 import mediapipe as mp
 
+from utils.frame_sort import sort_frame_paths
 from utils.mediapipe_blendshapes import MP_EYE_BLINK_L, MP_EYE_BLINK_R, MP_EYE_WIDE_L, MP_EYE_WIDE_R
 
 def parse_mediapipe_output(face_landmarker_result):
@@ -204,27 +205,56 @@ def scene_tag_from_image(subject_root: Path, img_path: Path) -> str:
 
 
 def list_split_images(subject_root: Path, split):
-    """Sorted ``.png`` merged from ``subject_root / {scene} / image`` for each scene in ``split``."""
+    """Numeric-sort ``.png`` merged from ``subject_root / {scene} / image`` for each scene in ``split``."""
     subject_root = Path(subject_root)
     out = []
     for scene in normalize_split_names(split):
         img_dir = subject_root / scene / "image"
         if img_dir.is_dir():
-            out.extend(sorted(img_dir.glob("*.png")))
+            out.extend(sort_frame_paths(list(img_dir.glob("*.png"))))
     return out
 
 
 def paths_for_image(img_path: Path):
-    """``.../split/image/<stem>.png`` → mask / semantic siblings."""
+    """``.../split/image/<stem>.png`` → mask / semantic / seg_mask / normal siblings."""
     img_path = Path(img_path)
     split_root = img_path.parent.parent
     stem = img_path.stem
     return {
         "image": img_path,
         "mask": split_root / "mask" / f"{stem}.png",
+        "seg_mask": split_root / "seg_mask" / f"{stem}.png",
+        "normal": split_root / "normal" / f"{stem}.png",
         "semantic": split_root / "semantic" / f"{stem}.png",
         "semantic_color": split_root / "semantic_color" / f"{stem}.png",
     }
+
+
+def load_gt_normal(path: Path, image_size: int, mask=None):
+    """
+    Face normal PNG from ``prepare_normals`` → ``[3,H,W]`` unit vectors in [-1, 1].
+
+    Background (outside mask if given) is zero.
+    """
+    import cv2
+
+    path = Path(path)
+    arr = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if arr is None:
+        return None
+    arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
+    if arr.shape[0] != image_size or arr.shape[1] != image_size:
+        arr = cv2.resize(arr, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
+    chw = torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1) / 255.0
+    chw = chw * 2.0 - 1.0
+    nrm = torch.linalg.norm(chw, dim=0, keepdim=True).clamp(min=1e-8)
+    chw = chw / nrm
+    if mask is not None:
+        m = mask
+        if m.ndim == 3:
+            m = m[0]
+        chw = chw * m
+    return chw
 
 
 # -----------------------------------------------------------------------------
@@ -262,17 +292,51 @@ def compute_distribution_weights(
     low_weight: float = 0.05,
     high_cap: float = 1.0,
 ) -> np.ndarray:
-    """Near mean → low weight; AU+pose outliers → high (FLARE importance-style)."""
+    """Near mean → low weight; outliers → high (FLARE importance-style).
+
+    Feature = MP coeffs (52, calibrated or mode-centered) + pose rotation 6D.
+    Per-dimension variance on the train split (diagonal Mahalanobis):
+    ``sqrt(sum_j (feat_c_j^2 / (var_j + var_eps)))``.
+    """
+    pose_rot = pose_feats[:, :6]
     if coeffs_are_calibrated:
-        feat = np.concatenate([blendshapes, pose_feats], axis=1).astype(np.float64)
+        bs_feat = blendshapes.astype(np.float64)
     else:
-        bs = blendshapes - bshapes_mode.cpu().numpy()[None, :]
-        feat = np.concatenate([bs, pose_feats], axis=1).astype(np.float64)
-    mean = feat.mean(axis=0, keepdims=True)
-    var = feat.var(axis=0, keepdims=True) + var_eps
-    score = np.sum((feat - mean) ** 2 / var, axis=1)
+        bs_feat = (blendshapes - bshapes_mode.cpu().numpy()[None, :]).astype(np.float64)
+    feat = np.concatenate([bs_feat, pose_rot.astype(np.float64)], axis=1)
+    feat_c = feat - feat.mean(axis=0, keepdims=True)
+    n = max(feat_c.shape[0] - 1, 1)
+    var = np.sum(feat_c ** 2, axis=0) / n + float(var_eps)
+    score = np.sqrt(np.sum(feat_c ** 2 / var[None, :], axis=1))
     score = score / (np.amax(score) / 2.0 + 1e-8)
     return np.clip(score, low_weight, high_cap).astype(np.float32)
+
+
+def merge_distribution_with_rgb_ema(
+    pca_weights: np.ndarray,
+    rgb_ema: np.ndarray,
+    *,
+    ema_scale: float = 1.0,
+    ema_max_lift: float = 0.5,
+    low_weight: float = 0.05,
+    high_cap: float = 1.0,
+) -> np.ndarray:
+    """
+    Lift sample weight toward the MP+pose distribution maximum, never above it.
+
+    MP+pose variance weights stay the baseline; RGB EMA only closes part of the
+    gap to ``max(dist)``. No global re-normalization (EMA must not reshape the whole distribution).
+    """
+    pca = np.asarray(pca_weights, dtype=np.float64)
+    ema = np.asarray(rgb_ema, dtype=np.float64)
+    if ema_scale <= 0.0 or ema_max_lift <= 0.0 or ema.max() <= 1e-8:
+        return pca.astype(np.float32)
+    pca_max = float(np.max(pca))
+    ema_n = ema / (ema.max() + 1e-8)
+    lift = np.clip(float(ema_scale) * ema_n, 0.0, float(ema_max_lift))
+    merged = pca + lift * (pca_max - pca)
+    merged = np.minimum(merged, pca_max)
+    return np.clip(merged, low_weight, high_cap).astype(np.float32)
 
 
 def compute_eye_au_calibration(

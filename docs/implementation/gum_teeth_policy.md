@@ -1,9 +1,16 @@
 # Teeth vs gum Gaussians
 
-## Policy
+## Teeth surface Gaussians
 
-- **Teeth mesh**: no surface Gaussians, no template/expression deformer (`teeth_mask`).
-- **Gums** (`mouth_interior` triangles): sparse surface Gaussians substitute teeth in RGB; learn larger `h` and color.
+- Triangles on ``teeth_indices`` → ``face_region_code=7``, ``is_teeth=True``.
+- Initial ``h ~ Uniform(-teeth_h_radius, teeth_h_radius)`` along tooth mesh normal
+  (``model/gaussian_h_init.init_teeth_h``; default **0.01 m ≈ 1 cm**).
+- ``apply_h_constraint(train_h=False)`` keeps mouth socket + teeth ``h`` (others pinned to 0).
+- Bad samples culled by semantic / opacity prune during early training.
+
+Config: ``teeth_h_radius``, ``n_surface_gaussians_per_teeth``.
+
+## Policy (legacy gum note)
 
 ## Sampling
 

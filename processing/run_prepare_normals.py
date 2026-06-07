@@ -1,35 +1,9 @@
-import os
-import argparse
-import signal
+"""Legacy entry — use ``python -m processing.face_normals.run_prepare_normals``."""
 
-def main(args):
-    subdirectories = os.listdir(args.input_dir)
+import runpy
+import sys
+from pathlib import Path
 
-    try:
-        for subdirectory in subdirectories:
-            dataset_path = os.path.join(args.input_dir, subdirectory, subdirectory)
-            if not os.path.isdir(dataset_path):
-                continue
-            # if subdirectory != 'subject_3':
-                # print(f"Skipping {subdirectory}")
-                # continue
-            print(subdirectory)
-            
-            try:
-                # run prepare_normals.py --input_dir {dataset_path}
-                os.system(f"python prepare_normals.py --input {dataset_path}")
-            except KeyboardInterrupt:
-                print("Keyboard interrupt received, terminating the process.")
-                exit()
-    except KeyboardInterrupt:
-        print("Keyboard interrupt received, terminating the process.")
-        exit()
-
-
-if __name__=="__main__":
-    parser = argparse.ArgumentParser(description='Prepare normals for face images')
-    parser.add_argument('--input_dir', type=str, help='Input image path')
-
-    args = parser.parse_args()
-
-    main(args)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+runpy.run_module("processing.face_normals.run_prepare_normals", run_name="__main__")

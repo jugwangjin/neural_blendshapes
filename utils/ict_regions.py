@@ -25,6 +25,10 @@ SURFACE_EXCLUDED_MATERIALS = frozenset(
 SCLERA_MATERIALS = frozenset({"M_ScleraLeft", "M_ScleraRight"})
 EYE_OCCLUSION_MATERIAL = "M_EyeOcclusion"
 
+# ``render_full_face_region`` channel-0: skin-face + eye-occlusion only (codes 4, 6).
+# Excludes mouth interior/socket/gum (0, 1) so open-mouth seg pixels are not credited by mouth GS.
+FULL_FACE_ATTRIBUTION_CODES = frozenset({4, 6})
+
 
 def _as_long_tensor(ids, device):
     if torch.is_tensor(ids):
@@ -121,6 +125,23 @@ def eye_gaussian_layout_face_indices(ict):
     return np.unique(np.concatenate(parts)).astype(np.int64)
 
 
+def teeth_layout_face_indices(ict, faces, device=None):
+    """Triangles touching ``teeth_indices`` (excluded from skin ``surface_allowed_vertices``)."""
+    ids = getattr(ict, "teeth_indices", None)
+    if ids is None or len(ids) == 0:
+        return np.zeros(0, dtype=np.int64)
+    device = device or (faces.device if torch.is_tensor(faces) else "cpu")
+    faces = faces.long().to(device)
+    n_verts = int(faces.max().item()) + 1
+    on_teeth = _vertex_mask(n_verts, ids, device)[faces].any(dim=1)
+    eye = getattr(ict, "eyeball_indices", None)
+    if eye is not None and len(eye) > 0:
+        on_eye = _vertex_mask(n_verts, eye, device)[faces].any(dim=1)
+        on_teeth = on_teeth & ~on_eye
+    fi = torch.where(on_teeth)[0]
+    return fi.detach().cpu().numpy().astype(np.int64)
+
+
 def _face_material_names_np(ict):
     if hasattr(ict, "face_material_name"):
         names = ict.face_material_name
@@ -177,12 +198,18 @@ def surface_layout_triangle_ids(ict, faces, device=None):
         tri_skin = tri_ids
 
     eye_fi = eye_gaussian_layout_face_indices(ict)
-    if eye_fi.size == 0:
+    teeth_fi = teeth_layout_face_indices(ict, faces, device=device)
+    extra = []
+    if eye_fi.size > 0:
+        extra.append(torch.tensor(eye_fi, dtype=torch.long, device=device))
+    if teeth_fi.size > 0:
+        extra.append(torch.tensor(teeth_fi, dtype=torch.long, device=device))
+    if not extra:
         return tri_skin
-    tri_eye = torch.tensor(eye_fi, dtype=torch.long, device=device)
+    tri_extra = torch.unique(torch.cat(extra, dim=0))
     if tri_skin.numel() == 0:
-        return tri_eye
-    return torch.unique(torch.cat([tri_skin, tri_eye], dim=0))
+        return tri_extra
+    return torch.unique(torch.cat([tri_skin, tri_extra], dim=0))
 
 
 def surface_allowed_vertices(ict):
@@ -207,12 +234,31 @@ def surface_allowed_vertices(ict):
     return [i for i in base if i not in exclude]
 
 
+# GB ``face_gs_model``: densify_grad_threshold × 5; ``mouth_gs_model``: base threshold only.
+GB_FACE_SURFACE_REGION_CODE = 4
+
+
+def grow_grad2d_threshold_per_gaussian(face_region_code, base_threshold, face_scale):
+    """
+    [N] grad2d clone/split threshold.
+
+    Face skin (code 4): ``base * face_scale`` (GB 0.0002 × 5 = 0.001).
+    Mouth interior / socket / teeth / eye / head: ``base`` only.
+    """
+    base = float(base_threshold)
+    face_thr = base * float(face_scale)
+    codes = face_region_code.long().reshape(-1)
+    thr = torch.full(codes.shape, base, device=codes.device, dtype=torch.float32)
+    thr[codes == GB_FACE_SURFACE_REGION_CODE] = face_thr
+    return thr
+
+
 def classify_surface_triangles_batch(tri_ids, faces, ict, device):
     """
     Vectorized region tags for mesh triangle indices.
 
-    Returns int64 codes: 0 mouth_interior, 1 mouth_socket, 2 eye_socket,
-    3 head, 4 face, 5 eyeball_sclera, 6 eye_occlusion, -1 skip.
+    Returns int64 codes: 0 mouth_interior (gums/tongue), 1 mouth_socket, 2 eye_socket,
+    3 head, 4 face, 5 eyeball_sclera, 6 eye_occlusion, 7 teeth, -1 skip.
     """
     code_by_face = surface_triangle_code_table(faces, ict, device)
     return code_by_face[tri_ids.long()]
@@ -256,8 +302,8 @@ def _build_surface_triangle_code_table(faces, ict, device):
     if on_occ is None:
         on_occ = torch.zeros(n_faces, dtype=torch.bool, device=device)
 
-    skip = any_vertex_in(getattr(ict, "teeth_indices", []))
-    skip = skip | (any_vertex_in(ict.eyeball_indices) & ~(on_sclera | on_occ))
+    on_teeth = any_vertex_in(getattr(ict, "teeth_indices", []))
+    skip = any_vertex_in(ict.eyeball_indices) & ~(on_sclera | on_occ)
     mat_mask = surface_excluded_material_mask_torch(ict, device)
     if mat_mask is not None:
         skip = skip | (mat_mask & ~(on_sclera | on_occ))
@@ -278,6 +324,7 @@ def _build_surface_triangle_code_table(faces, ict, device):
     code[gums] = 0
     code[on_sclera] = 5
     code[on_occ] = 6
+    code[on_teeth] = 7
     code[skip] = -1
     return code
 
@@ -312,7 +359,7 @@ def classify_surface_triangle(fi, faces, ict, device):
     if any(v in eye for v in tri):
         return "skip"
     if any(v in teeth for v in tri):
-        return "skip"
+        return "mouth_interior"
     if any(v in gums for v in tri):
         return "mouth_interior"
     if any(v in mouth_sock for v in tri):

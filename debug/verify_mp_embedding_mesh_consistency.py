@@ -24,14 +24,9 @@ from processing.ict_mediapipe_lmk.landmarks import sample_bary
 from utils.barycentric import vertices2landmarks
 
 
-def mesh_canonical_jaw(ict, device):
-    exp = torch.zeros(1, ict.num_expression, device=device)
-    exp[0, ict.jaw_index] = float(ict.expression[0, ict.jaw_index].item())
-    return ict.forward(
-        expression_weights=exp,
-        apply_flame_similarity=True,
-        apply_eyeball_rotation=False,
-    )[0]
+def mesh_expression_reference(ict, device):
+    """Runtime mesh matching ``ict.expression_reference_verts()`` (bake jawOpen + FLAME)."""
+    return ict.expression_reference_verts().to(device=device)
 
 
 def sample_mp_points(verts, faces, emb):
@@ -77,9 +72,9 @@ def main():
         return
     print("  corner vertices: OK")
 
-    v_canon = mesh_canonical_jaw(ict, device)
+    v_canon = mesh_expression_reference(ict, device)
     pts_canon = sample_mp_points(v_canon, faces, emb)
-    print(f"\n=== Sample on runtime template (jawOpen + rigid flame_alignment) ===")
+    print(f"\n=== Sample on expression reference (jawOpen + rigid flame_alignment) ===")
     print(f"  points: {pts_canon.shape[0]}  bbox extent {np.ptp(pts_canon, axis=0).max():.4f}")
 
     if args.aux is not None and args.aux.is_file():

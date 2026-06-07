@@ -1,7 +1,7 @@
 """
 Compute camera translation so frontal ICT Multi-PIE-68 landmarks match metrical-tracker crop.
 
-``ICTFaceKitTorch.canonical`` = jawOpen + npy ``flame_alignment_s,R,T`` (same as bake).
+``ICTFaceKitTorch.expression_reference_verts()`` = jawOpen + npy ``flame_alignment_s,R,T`` (same as bake).
 Keeps ``R_mean`` / ``K_mean`` from ``assets/default_camera.npz``; solves ``t_mean`` only.
 
 Run from repo root:
@@ -52,9 +52,9 @@ def _scale_K(K: np.ndarray, src_hw: tuple[int, int], dst_hw: tuple[int, int]) ->
 
 
 def load_pie68_3d(ict_npy: Path) -> tuple[np.ndarray, dict]:
-    """Multi-PIE 68 on ``ict.canonical`` (FLAME space from npy flame alignment)."""
+    """Multi-PIE 68 on ``ict.expression_reference_verts()`` (FLAME space from npy flame alignment)."""
     ict = ICTFaceKitTorch(npy_dir=str(ict_npy))
-    mesh = ict.canonical[0]
+    mesh = ict.expression_reference_verts()
     lmk = ict.landmark_vertices(mesh, region="all").detach().cpu().numpy()
     return lmk.astype(np.float64), ict.alignment_info()
 

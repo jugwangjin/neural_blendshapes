@@ -1,0 +1,7 @@
+{
+  "schedule": "default",
+  "config": {
+    "gaussian_opacity_subtract_after_densify": 0.001,
+    "gaussian_opacity_decay_min": 0.0001
+  }
+}

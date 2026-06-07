@@ -11,6 +11,7 @@ Data-prep and alignment scripts. Run from **repo root**.
 | `large-steps-pytorch/` | Large Steps (NICP) |
 | `ict_mediapipe_lmk/` | Bake MP landmarks onto ICT |
 | `paths.py` | Shared `REPO_ROOT`, asset paths, `setup_import_paths()` |
+| `process_video/` | Video → crop/matte/frames/semantic (see `process_video/README.md`) |
 
 ## Imports
 

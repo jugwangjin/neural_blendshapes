@@ -1,27 +1,23 @@
-"""Semantic class ids and per-class h priors for avatar Gaussians."""
+"""Semantic class ids for mesh-embedded Gaussian seg render (3-class + ignore)."""
 
 import torch
 
+# ICT surface + FLARE seg: only classes both can assign reliably.
+# ``others`` = face/head/lips/ears/…; mouth/eye sockets are in mouth_interior / eye_occlusion.
 SEMANTIC_CLASSES = (
-    "skin",
-    "lip",
-    "eye",
-    "iris",
-    "hair",
-    "accessory",
-    "bg",
+    "others",
+    "mouth_interior",
+    "eye_occlusion",
 )
 
 SEMANTIC_CLASS_INDEX = {name: i for i, name in enumerate(SEMANTIC_CLASSES)}
 
+SEMANTIC_IGNORE_INDEX = -1
+
 H_PRIOR = {
-    "skin": {"sigma": 0.002, "weight": 1.0},
-    "lip": {"sigma": 0.003, "weight": 0.8},
-    "eye": {"sigma": 0.002, "weight": 1.0},
-    "iris": {"sigma": 0.002, "weight": 1.0},
-    "hair": {"sigma": 0.030, "weight": 0.1},
-    "accessory": {"sigma": 0.100, "weight": 0.0},
-    "bg": {"sigma": 0.100, "weight": 0.0},
+    "others": {"sigma": 0.002, "weight": 1.0},
+    "mouth_interior": {"sigma": 0.002, "weight": 1.0},
+    "eye_occlusion": {"sigma": 0.002, "weight": 1.0},
 }
 
 

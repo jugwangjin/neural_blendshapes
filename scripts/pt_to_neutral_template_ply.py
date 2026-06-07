@@ -6,7 +6,7 @@ What we export:
   - **Ignore tracker + expression + pose**
 
 How we build the template mesh:
-  - verts = ict.canonical[0] + deformer.template_delta()
+  - verts = ict.template_reference_verts() + deformer.template_delta()
 
 Output:
   - Standard 3DGS binary PLY (``x``, ``scale_*``, ``rot_*``, ``f_dc_*``, ``opacity``).
@@ -33,7 +33,7 @@ import torch
 from gsplat import export_splats
 
 from rendering.pack import pack_gaussians
-from model.expr_regions import build_expr_region_weight
+from model.build import avatar_checkpoint_layout_kwargs
 from model.gaussian_avatar import GaussianAvatar
 from model.ict_deformer import ICTDeformer
 from model.ict_model import ICTFaceKitTorch
@@ -84,15 +84,16 @@ def main_export(
         ict,
         deformer,
         avatar_sd,
-        max_scale=cfg.geometry_max_scale,
+        **avatar_checkpoint_layout_kwargs(cfg),
     ).to(device)
 
     # ---- neutral template verts (no pose / expression) ----
     template_delta = deformer.template_delta()  # [V,3]
-    verts_template = ict.canonical[0] + template_delta  # [V,3]
+    verts_template = ict.template_reference_verts() + template_delta  # [V,3]
 
     avatar_out = avatar(verts=verts_template, faces=ict.faces)
-    packed = pack_gaussians(avatar_out)  # rgb_activation=sigmoid by default
+    # PLY f_dc: use SH DC band only (viewer has no view-dependent SH here).
+    packed = pack_gaussians(avatar_out, sh_degree=None)
 
     means = packed["means"]
     scales = packed["scales"].clamp(min=1e-8)

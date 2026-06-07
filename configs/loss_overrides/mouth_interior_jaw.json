@@ -1,0 +1,6 @@
+{
+  "config": {
+    "mouth_interior_jaw_only_expression": true,
+    "color_expression_exclude_mouth_eye": true
+  }
+}
